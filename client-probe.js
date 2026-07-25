@@ -73,6 +73,7 @@ M.setTransport(async (url) => {
     "market strip present (index / cash ratio / players)");
   ok(/VS BITCOIN/.test(stripTxt), "BTC correlation tile present (measuring until 10 paired days)");
   ok(/CN \/ US ACTIVITY/.test(stripTxt), "CN/US activity tile present (regional demand mix)");
+  ok(/LIQUIDS INDEX/.test(stripTxt) && /ART INDEX/.test(stripTxt), "liquids + art index tiles present");
   await page.screenshot({ path: "/tmp/skin_lab_home.png", fullPage: true });
   console.log("  📸 /tmp/skin_lab_home.png");
 

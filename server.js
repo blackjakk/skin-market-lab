@@ -150,8 +150,11 @@ function startServer(opts) {
     } catch (e) { out.error = String(e.message || e); }
     try {
       const sales = await salesFor(name, true);
-      if (sales && sales.last24h && sales.last24h.median != null) {
-        appendSnap(name, { t: Date.now(), src: "skinport", price: sales.last24h.median, vol: sales.last24h.volume });
+      const m24 = sales && sales.last24h ? sales.last24h.median : null;
+      const m30 = sales && sales.last30d ? sales.last30d.median : null;
+      if (m24 != null || m30 != null) {
+        appendSnap(name, { t: Date.now(), src: "skinport", price: m24 != null ? m24 : m30,
+          vol: sales.last24h ? sales.last24h.volume : null, sp30: m30 });
       }
       out.skinport = sales || null;
     } catch (e) { /* skinport optional */ }
@@ -200,10 +203,16 @@ function startServer(opts) {
     };
   }
 
+  const artSet = new Set(readJson(path.join(ROOT, "watchlist.json"), {}).art || []);
   function catOf(name) {
+    if (/^Sticker \|/.test(name)) return "sticker";
     const s = seed.find((x) => x.name === name);
     if (s && s.cat) return s.cat;
     return /\b(Case|Package)$/.test(name) ? "case" : name.startsWith("★") ? "knife" : "skin";
+  }
+  function artDailyFor(name) {
+    return A.toDaily(snaps(name).filter((l) => l.src === "skinport" && l.sp30 != null)
+      .map((l) => ({ t: l.t, price: l.sp30 })), { volMode: "max" });
   }
   function watchSummary() {
     return watchlist.map((name) => {
@@ -213,6 +222,7 @@ function startServer(opts) {
       return {
         name,
         cat: catOf(name),
+        tier: artSet.has(name) ? "art" : null,
         latest: last ? last.price : an.latest,
         vol24h: last ? last.vol : null,
         t: last ? last.t : null,
@@ -230,7 +240,9 @@ function startServer(opts) {
     const items = watchlist.map((name) => {
       const imported = readJson(importFile(name), null);
       const s = A.assembleSeries(imported && imported.rows, snaps(name));
-      return { name, cat: catOf(name), daily: s.daily, skinportDaily: s.skinportDaily };
+      const tier = artSet.has(name) ? "art" : null;
+      return { name, cat: catOf(name), tier, daily: s.daily, skinportDaily: s.skinportDaily,
+        artDaily: tier ? artDailyFor(name) : [] };
     });
     const mkt = A.marketOverview(items);
     const pf = path.join(DATA, "cache", "macro.json");

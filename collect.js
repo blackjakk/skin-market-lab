@@ -41,6 +41,7 @@ const CAT_BY_NAME = (() => {
   return m;
 })();
 function catOf(name) {
+  if (/^Sticker \|/.test(name)) return "sticker";
   return CAT_BY_NAME.get(name) || (/\b(Case|Package)$/.test(name) ? "case" : name.startsWith("★") ? "knife" : "skin");
 }
 
@@ -48,7 +49,9 @@ async function collect(opts) {
   opts = opts || {};
   const root = opts.root || __dirname;
   const dataDir = path.join(root, "data");
-  const names = opts.names || (readJson(path.join(root, "watchlist.json"), { items: [] }).items || []);
+  const wl = readJson(path.join(root, "watchlist.json"), { items: [] });
+  const names = opts.names || (wl.items || []);
+  const artSet = new Set(opts.art || wl.art || []);
   fs.mkdirSync(path.join(dataDir, "history"), { recursive: true });
   const manifest = { generatedAt: Date.now(), items: [], errors: [] };
   const marketItems = [];
@@ -66,20 +69,28 @@ async function collect(opts) {
       return true;
     };
 
-    let quote = null, sales = null;
+    const tier = artSet.has(name) ? "art" : null;
+    let quote = null, sales = null, noQuote = false;
     try {
       const po = await M.steamPriceOverview(name, A);
       if (po) {
         quote = { t: po.t, price: po.price, lowest: po.lowest, vol: po.vol };
         appendIfNew({ t: po.t, src: "steam", price: po.price, lowest: po.lowest, vol: po.vol });
         steamOk++;
-      } else manifest.errors.push(name + ": no steam quote (unknown item, or too rare for a median)");
+      } else noQuote = true;
     } catch (e) { manifest.errors.push(name + ": " + String(e.message || e)); }
     try {
       sales = await M.skinportSalesHistory(name);
-      if (sales && sales.last24h && sales.last24h.median != null)
-        appendIfNew({ t: Date.now(), src: "skinport", price: sales.last24h.median, vol: sales.last24h.volume });
+      const m24 = sales && sales.last24h ? sales.last24h.median : null;
+      const m30 = sales && sales.last30d ? sales.last30d.median : null;
+      if (m24 != null || m30 != null)
+        appendIfNew({ t: Date.now(), src: "skinport", price: m24 != null ? m24 : m30,
+          vol: sales.last24h ? sales.last24h.volume : null, sp30: m30 });
     } catch (e) { /* skinport is optional garnish */ }
+    // art grails routinely have NO steam quote (thin, above the listing
+    // cap) — that's expected, not an error, as long as sales data exists
+    if (noQuote && !(tier === "art" && sales))
+      manifest.errors.push(name + ": no steam quote (unknown item, or too rare for a median)");
 
     if (!quote) { // serve the last stored quote so one bad run never blanks the site
       const last = [...lines].reverse().find((l) => l.src === "steam");
@@ -89,11 +100,14 @@ async function collect(opts) {
     const series = A.assembleSeries(imported && imported.rows, lines);
     const an = A.analyze(series.daily);
     const cat = catOf(name);
-    marketItems.push({ name, cat, daily: series.daily, skinportDaily: series.skinportDaily });
+    const artDaily = tier ? A.toDaily(lines.filter((l) => l.src === "skinport" && l.sp30 != null)
+      .map((l) => ({ t: l.t, price: l.sp30 })), { volMode: "max" }) : [];
+    const m30latest = sales && sales.last30d ? sales.last30d.median : null;
+    marketItems.push({ name, cat, tier, daily: series.daily, skinportDaily: series.skinportDaily, artDaily });
     manifest.items.push({
-      name, slug: s, cat,
+      name, slug: s, cat, tier,
       quote, skinport: sales, imported: !!imported,
-      days: an.days, latest: an.latest,
+      days: an.days, latest: an.latest != null ? an.latest : m30latest,
       mom1: A.momentum(series.daily, 1), mom7: an.mom7, mom30: an.mom30,
       vol24h: quote ? quote.vol : null,
       spark: series.daily.slice(-14).map((d) => d.price),

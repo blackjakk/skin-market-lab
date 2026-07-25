@@ -96,7 +96,7 @@
   async function loadWatch() {
     if (state.mode === "static") {
       state.watch = state.manifest.items.map((m) => ({
-        name: m.name, cat: m.cat || null,
+        name: m.name, cat: m.cat || null, tier: m.tier || null,
         latest: m.quote ? m.quote.price : m.latest,
         vol24h: m.vol24h != null ? m.vol24h : (m.quote ? m.quote.vol : null),
         t: m.quote ? m.quote.t : null,
@@ -157,6 +157,8 @@
       tile2("LAB CASE INDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
         t && t.idx1 != null ? fmtPct(t.idx1) + " 24h" + (t.idx7 != null ? " · " + fmtPct(t.idx7) + " 7d" : "") : "base 100 at first collection",
         t && t.idx1 != null ? cls(t.idx1) : "") +
+      tile2("LIQUIDS INDEX", t && t.liqIdx != null ? t.liqIdx.toFixed(1) : "—", "commodity skins & knives, steam marks", "") +
+      tile2("ART INDEX", t && t.artIdx != null ? t.artIdx.toFixed(1) : "—", "grails, marked to 30d realized sales", "") +
       tile2("CASH RATIO", t && t.cashRatio != null ? Math.round(t.cashRatio * 100) + "%" : "—",
         "cash sale vs steam price", "") +
       tile2("UNITS SOLD / DAY", t ? fmtCompact(t.volTotal) : "—", "across tracked items", "") +
@@ -191,7 +193,7 @@
       rows.map((w, i) =>
         '<tr class="mrow" data-i="' + i + '" tabindex="0" aria-label="' + esc(w.name) + '">' +
         "<td>" + (i + 1) + "</td>" +
-        '<td class="nm">' + esc(w.name) + (w.cat ? ' <span class="catChip">' + esc(w.cat) + "</span>" : "") + "</td>" +
+        '<td class="nm">' + esc(w.name) + ((w.tier || w.cat) ? ' <span class="catChip">' + esc(w.tier === "art" ? "art" : w.cat) + "</span>" : "") + "</td>" +
         '<td class="r">' + fmt$(w.latest) + "</td>" +
         '<td class="r chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</td>" +
         '<td class="r chg ' + cls(w.mom7) + '">' + fmtPct(w.mom7) + "</td>" +

@@ -52,6 +52,13 @@ dashboard from the collector's committed files), or the setup panel
   disturb it. Buff-spread integration is PARKED: needs a user-registered
   key (steamwebapi.com free tier serves Buff163 prices) added as an
   Actions secret before wiring.
+- THREE INDEX FAMILIES (marketOverview buckets): case (cat "case", steam
+  marks), liq (non-case with ≥5 median sold/day — self-gating: "liquids"
+  must BE liquid), art (watchlist.json art[] tags, marked to artDaily =
+  skinport 30d-median sp30 fields carried on skinport snap lines, because
+  grails sit above the ~$1,800 steam listing cap → no steam quote is
+  EXPECTED for art, not an error). Art items' manifest latest falls back
+  to the 30d sale median.
 - HOME-FIRST UI: boot lands on renderHome (strip + movers + ranked sortable
   table + sparklines); item detail is one click deep with a ← Market back
   button. The watchlist is ~all cases (the index basket) + a few blue-chip
@@ -65,10 +72,10 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 77 checks: analytics units, full API flow, snapshot
+- `node probe.js` — 80 checks: analytics units, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
-- `node client-probe.js` — 31 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node client-probe.js` — 32 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback

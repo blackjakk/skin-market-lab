@@ -307,30 +307,46 @@
   //               items with both legs that day. ~0.7–0.85 is normal; rising
   //               toward 1 = strong real-money demand.
   //   volTotal  — total steam units sold/day across the tracked set.
+  // Items are bucketed into three index families:
+  //   case — cat "case" (the commodity layer; live Steam marks)
+  //   liq  — everything else with real Steam liquidity (median ≥5 sold/day;
+  //          "liquids" is the trading community's own word for these)
+  //   art  — tier:"art" grails, marked to it.artDaily (Skinport 30d-median
+  //          marks with per-item carry-forward) because they trade rarely
+  //          and mostly sit ABOVE Steam's listing cap (no live Steam price)
   function marketOverview(items) {
     const days = new Map();
     const rec = (d) => {
       let r = days.get(d.day);
-      if (!r) { r = { day: d.day, t: d.t, rels: [], ratios: [], vol: 0, sawVol: false }; days.set(d.day, r); }
+      if (!r) { r = { day: d.day, t: d.t, rels: { case: [], liq: [], art: [] }, ratios: [], vol: 0, sawVol: false }; days.set(d.day, r); }
       r.t = Math.max(r.t, d.t);
       return r;
     };
     for (const it of items || []) {
       const daily = it.daily || [];
-      const isCase = it.cat === "case";
-      const base = isCase && daily.length && daily[0].price > 0 ? daily[0].price : null;
+      const isArt = it.tier === "art";
+      const key = isArt ? null : it.cat === "case" ? "case" : liquidity(daily, 30) >= 5 ? "liq" : null;
+      const base = key && daily.length && daily[0].price > 0 ? daily[0].price : null;
       const spBy = new Map((it.skinportDaily || []).map((d) => [d.day, d.price]));
       for (const d of daily) {
         const r = rec(d);
         if (d.vol != null) { r.vol += d.vol; r.sawVol = true; }
-        if (base && d.price > 0) r.rels.push(Math.log(d.price / base));
+        if (base && d.price > 0) r.rels[key].push(Math.log(d.price / base));
         const sp = spBy.get(d.day);
         if (sp != null && d.price > 0) r.ratios.push(sp / d.price);
       }
+      if (isArt) {
+        const ad = it.artDaily || [];
+        const abase = ad.length && ad[0].price > 0 ? ad[0].price : null;
+        if (abase) for (const d of ad) if (d.price > 0) rec(d).rels.art.push(Math.log(d.price / abase));
+      }
     }
+    const gm = (rels) => rels.length ? round2(100 * Math.exp(rels.reduce((a, b) => a + b, 0) / rels.length)) : null;
     const series = Array.from(days.values()).sort((a, b) => (a.day < b.day ? -1 : 1)).map((r) => ({
       day: r.day, t: r.t,
-      caseIdx: r.rels.length ? round2(100 * Math.exp(r.rels.reduce((a, b) => a + b, 0) / r.rels.length)) : null,
+      caseIdx: gm(r.rels.case),
+      liqIdx: gm(r.rels.liq),
+      artIdx: gm(r.rels.art),
       cashRatio: r.ratios.length ? Math.round(median(r.ratios) * 1000) / 1000 : null,
       volTotal: r.sawVol ? r.vol : null,
     }));
@@ -348,6 +364,7 @@
       caseIdx: last ? last.caseIdx : null,
       idx1: last && prev ? last.caseIdx / prev.caseIdx - 1 : null,
       idx7: last && back7 && back7 !== last ? last.caseIdx / back7.caseIdx - 1 : null,
+      liqIdx: lastNonNull("liqIdx"), artIdx: lastNonNull("artIdx"),
       cashRatio: lastNonNull("cashRatio"), volTotal: lastNonNull("volTotal"),
     } : null;
     return { series: series, today: today };

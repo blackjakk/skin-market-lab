@@ -1,5 +1,5 @@
 {
-  "note": "The tracked universe for the hosted collector (collect.yml snapshots these every 6h and commits the data — the dashboard link reads it). Add or remove exact Steam market_hash_name strings; the next collector run picks the change up. The local tracker (npm start) seeds its private watchlist from this file on first boot.",
+  "note": "The tracked universe for the hosted collector (collect.yml snapshots these every 6h and commits the data — the dashboard link reads it). Add or remove exact Steam market_hash_name strings; the next collector run picks the change up. The local tracker (npm start) seeds its private watchlist from this file on first boot. The art[] list marks those items to Skinport 30-day realized-sale medians (grails are too thin and too far above the Steam listing cap for live Steam marks).",
   "items": [
     "Operation Bravo Case",
     "CS:GO Weapon Case",
@@ -46,6 +46,33 @@
     "AK-47 | Redline (Field-Tested)",
     "AWP | Asiimov (Field-Tested)",
     "M4A1-S | Printstream (Field-Tested)",
-    "Desert Eagle | Printstream (Field-Tested)"
+    "Desert Eagle | Printstream (Field-Tested)",
+    "AK-47 | Asiimov (Field-Tested)",
+    "AK-47 | Vulcan (Field-Tested)",
+    "AK-47 | Slate (Factory New)",
+    "AWP | Wildfire (Field-Tested)",
+    "M4A1-S | Hyper Beast (Field-Tested)",
+    "USP-S | Kill Confirmed (Field-Tested)",
+    "★ Karambit | Doppler (Factory New)",
+    "★ M9 Bayonet | Doppler (Factory New)",
+    "★ Butterfly Knife | Fade (Factory New)",
+    "★ Bayonet | Tiger Tooth (Factory New)",
+    "★ Sport Gloves | Pandora's Box (Field-Tested)",
+    "AWP | Dragon Lore (Field-Tested)",
+    "M4A4 | Howl (Field-Tested)",
+    "AWP | Gungnir (Factory New)",
+    "AWP | Medusa (Field-Tested)",
+    "AK-47 | Wild Lotus (Field-Tested)",
+    "Sticker | iBUYPOWER (Holo) | Katowice 2014",
+    "Sticker | Titan (Holo) | Katowice 2014"
+  ],
+  "art": [
+    "AWP | Dragon Lore (Field-Tested)",
+    "M4A4 | Howl (Field-Tested)",
+    "AWP | Gungnir (Factory New)",
+    "AWP | Medusa (Field-Tested)",
+    "AK-47 | Wild Lotus (Field-Tested)",
+    "Sticker | iBUYPOWER (Holo) | Katowice 2014",
+    "Sticker | Titan (Holo) | Katowice 2014"
   ]
 }

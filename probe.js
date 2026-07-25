@@ -78,6 +78,14 @@ ok(near(mo.today.idx1, 0.1537, 0.001) && mo.today.idx7 === null,
   "marketOverview: 24h index change; 7d withheld while series is shallow");
 ok(near(mo.today.cashRatio, 0.8, 1e-9) && mo.today.volTotal === 139,
   "marketOverview: cash ratio median + summed daily volume");
+ok(near(mo.today.liqIdx, 80, 0.01),
+  "liquids index: liquid non-case items bucket separately (S 50→40 → 80)");
+const moArt = A.marketOverview([
+  { name: "Grail", cat: "skin", tier: "art", daily: [], skinportDaily: [],
+    artDaily: [{ day: A.dayKey(T0), t: T0, price: 100 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 110 }] },
+]);
+ok(moArt.today.artIdx === 110 && moArt.today.caseIdx === null && moArt.today.liqIdx === null,
+  "art index marks to skinport 30d-median artDaily, never steam");
 const moSkins = A.marketOverview([
   { name: "S", cat: "skin", daily: [{ day: A.dayKey(T0), t: T0, price: 50, vol: 7 }], skinportDaily: [{ day: A.dayKey(T0), t: T0, price: 40, vol: 2 }] },
 ]);
@@ -120,6 +128,8 @@ function steamDateStr(t) {
 const fixture = { steamPrice: "$23.00", steamLow: "$22.10", steamVol: "57" };
 async function fixtureTransport(url, headers) {
   if (url.includes("/market/priceoverview/")) {
+    if (url.includes("Howl")) // art grail: steam success with NO price fields (above the cap)
+      return { status: 200, body: JSON.stringify({ success: true }) };
     return { status: 200, body: JSON.stringify({ success: true, lowest_price: fixture.steamLow, volume: fixture.steamVol, median_price: fixture.steamPrice }) };
   }
   if (url.includes("/market/pricehistory/")) {
@@ -281,7 +291,9 @@ async function fixtureTransport(url, headers) {
   const { collect } = require("./collect.js");
   const CROOT = path.join(os.tmpdir(), "hh-skin-collect-" + Date.now());
   fs.mkdirSync(path.join(CROOT, "data", "import"), { recursive: true });
-  fs.writeFileSync(path.join(CROOT, "watchlist.json"), JSON.stringify({ items: [NAME, KNIFE, "Fracture Case"] }));
+  fs.writeFileSync(path.join(CROOT, "watchlist.json"), JSON.stringify({
+    items: [NAME, KNIFE, "Fracture Case", "M4A4 | Howl (Field-Tested)"],
+    art: ["M4A4 | Howl (Field-Tested)"] }));
   const impRows = Array.from({ length: 40 }, (_, i) => ({ t: Date.now() - (40 - i) * D, price: 4 + i * 0.1, vol: 50 + i }));
   fs.writeFileSync(path.join(CROOT, "data", "import", slug(KNIFE) + ".json"), JSON.stringify({ t: Date.now(), source: "probe", rows: impRows }));
   // pre-write CN-evening (11:17 UTC) and US-evening (23:17 UTC) player
@@ -293,7 +305,11 @@ async function fixtureTransport(url, headers) {
     JSON.stringify({ t: mkT(11, 17), players: 5000000 }) + "\n" +
     JSON.stringify({ t: mkT(23, 17), players: 4000000 }) + "\n");
   const c1 = await collect({ root: CROOT });
-  ok(c1.steamOk === 3 && c1.manifest.items.length === 3 && c1.manifest.errors.length === 0, "collect snapshots every watchlist item");
+  ok(c1.steamOk === 3 && c1.manifest.items.length === 4 && c1.manifest.errors.length === 0,
+    "collect: art item with no steam quote is NOT an error (marks to sales)");
+  const howl = c1.manifest.items.find((i) => /Howl/.test(i.name));
+  ok(howl && howl.tier === "art" && howl.latest === 20 && c1.manifest.market.today.artIdx === 100,
+    "art item: tier tagged, latest = 30d sale median, art index at base");
   ok(c1.manifest.market && c1.manifest.market.today && c1.manifest.market.today.caseIdx === 100
     && c1.manifest.market.today.players === 1534000,
     "collector publishes the market block (index base + players)");
@@ -315,7 +331,7 @@ async function fixtureTransport(url, headers) {
     "collector history jsonl gets steam + skinport lines");
   const c2 = await collect({ root: CROOT });
   const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
-  ok(hl2.length === hl1.length && c2.manifest.items.length === 3, "immediate re-run dedupes snapshots, still refreshes the manifest");
+  ok(hl2.length === hl1.length && c2.manifest.items.length === 4, "immediate re-run dedupes snapshots, still refreshes the manifest");
   fs.rmSync(CROOT, { recursive: true, force: true });
 
   M.setTransport(null);
