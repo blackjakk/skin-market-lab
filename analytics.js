@@ -86,6 +86,22 @@
       .sort((a, b) => (a.day < b.day ? -1 : 1));
   }
 
+  // One canonical assembly from raw stored records → chartable series.
+  // Used IDENTICALLY by the tracker server, the Actions collector, and the
+  // browser's static mode — so every surface derives the same numbers.
+  //   importRows: [{t,price,vol}] from a Steam pricehistory import (per-
+  //               interval volumes → summed per day)
+  //   snapLines:  [{t,src:"steam"|"skinport",price,vol,...}] snapshot log
+  //               (trailing-24h volumes → max per day)
+  // Import wins day collisions (richer, official medians).
+  function assembleSeries(importRows, snapLines) {
+    const importDaily = toDaily(importRows || [], { volMode: "sum" });
+    const snaps = (snapLines || []).filter((s) => s && isFinite(s.t));
+    const steamDaily = toDaily(snaps.filter((s) => s.src === "steam"), { volMode: "max" });
+    const skinportDaily = toDaily(snaps.filter((s) => s.src === "skinport"), { volMode: "max" });
+    return { daily: mergeDaily(importDaily, steamDaily), skinportDaily: skinportDaily };
+  }
+
   // Merge daily series; on a day collision the EARLIER argument wins
   // (call as mergeDaily(richSource, fallbackSource)).
   function mergeDaily(primary, secondary) {
@@ -281,7 +297,7 @@
 
   return {
     parseMoney: parseMoney, parseCount: parseCount, dayKey: dayKey, median: median, toDaily: toDaily,
-    mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
+    assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,
     maxDrawdown: maxDrawdown, currentDrawdown: currentDrawdown,
     trendSlope: trendSlope, momentum: momentum, liquidity: liquidity,

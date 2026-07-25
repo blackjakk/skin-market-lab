@@ -61,6 +61,12 @@ const merged = A.mergeDaily([{ day: "2026-01-01", t: T0, price: 1, vol: 1 }], [{
 ok(merged.length === 2 && merged[0].price === 1 && merged[1].price === 2, "mergeDaily: primary wins collisions, gaps filled");
 ok(A.netProceeds(11.5, "steam") === 10 && A.netProceeds(100, "skinport") === 88, "fee math (steam /1.15, skinport -12%)");
 ok(M.parseSteamDate("Dec 06 2013 01: +0") === Date.UTC(2013, 11, 6, 1), "steam history date parse");
+const asm = A.assembleSeries(
+  [{ t: T0, price: 5, vol: 10 }],
+  [{ t: T0, src: "steam", price: 9, vol: 3 }, { t: T0 + D, src: "steam", price: 6, vol: 2 }, { t: T0, src: "skinport", price: 4, vol: 1 }]);
+ok(asm.daily.length === 2 && asm.daily[0].price === 5 && asm.daily[1].price === 6
+  && asm.skinportDaily.length === 1 && asm.skinportDaily[0].price === 4,
+  "assembleSeries: import wins collisions, skinport split out");
 
 const up = A.signal({ mom7: 0.05, mom30: 0.25, slope30: 0.008, rsi14: 60, curDD: 0.1, vol30: 0.4, liq30: 50 });
 ok(up.score > 12 && /BUY/.test(up.verdict), "signal: sustained uptrend → BUY (" + up.score + ")");
@@ -106,6 +112,11 @@ async function fixtureTransport(url, headers) {
   console.log("— server —");
   M.setTransport(fixtureTransport);
   const DATA = path.join(os.tmpdir(), "hh-skin-probe-" + Date.now());
+  // pre-write an EMPTY watchlist so the first-boot auto-seed (from the
+  // repo's committed watchlist.json) doesn't inject items under this test;
+  // the seeding behavior itself gets its own check at the end.
+  fs.mkdirSync(DATA, { recursive: true });
+  fs.writeFileSync(path.join(DATA, "watchlist.json"), "[]");
   const PORT = 5391;
   let inst = startServer({ port: PORT, dataDir: DATA, snapHours: 0, steamCookie: "steamLoginSecure=probe" });
   const api = async (p, body) => {
@@ -199,6 +210,41 @@ async function fixtureTransport(url, headers) {
   ok(bs2.status === 400, "bootstrap without STEAM_COOKIE fails with guidance");
 
   await inst.close();
+
+  // first boot on a VIRGIN data dir seeds the private watchlist from the
+  // repo's committed watchlist.json — the dashboard opens populated
+  const FRESH = path.join(os.tmpdir(), "hh-skin-fresh-" + Date.now());
+  const committed = JSON.parse(fs.readFileSync(path.join(__dirname, "watchlist.json"), "utf8")).items;
+  const inst3 = startServer({ port: PORT + 1, dataDir: FRESH, snapHours: 0, steamCookie: "" });
+  await new Promise((r) => inst3.server.once("listening", r));
+  const h3 = await (await fetch("http://localhost:" + (PORT + 1) + "/api/skins/health", { headers: { Connection: "close" } })).json();
+  ok(h3.watch === committed.length && committed.length > 0, "virgin boot seeds watchlist from the committed starter set (" + committed.length + ")");
+  await inst3.close();
+  fs.rmSync(FRESH, { recursive: true, force: true });
+
+  // ── collector (the hosted always-on tracker) ─────────────────────────────
+  console.log("— collector —");
+  const { collect } = require("./collect.js");
+  const CROOT = path.join(os.tmpdir(), "hh-skin-collect-" + Date.now());
+  fs.mkdirSync(path.join(CROOT, "data", "import"), { recursive: true });
+  fs.writeFileSync(path.join(CROOT, "watchlist.json"), JSON.stringify({ items: [NAME, KNIFE] }));
+  const impRows = Array.from({ length: 40 }, (_, i) => ({ t: Date.now() - (40 - i) * D, price: 4 + i * 0.1, vol: 50 + i }));
+  fs.writeFileSync(path.join(CROOT, "data", "import", slug(KNIFE) + ".json"), JSON.stringify({ t: Date.now(), source: "probe", rows: impRows }));
+  const c1 = await collect({ root: CROOT });
+  ok(c1.steamOk === 2 && c1.manifest.items.length === 2 && c1.manifest.errors.length === 0, "collect snapshots every watchlist item");
+  const idx = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "index.json"), "utf8"));
+  const rd = idx.items.find((i) => i.name === NAME), kn = idx.items.find((i) => i.name === KNIFE);
+  ok(rd && rd.quote && rd.quote.price === 23 && typeof rd.score === "number" && rd.verdict && rd.slug === slug(NAME),
+    "manifest rows carry quote + analytics summary (one fetch paints the site)");
+  ok(kn && kn.imported === true && kn.days >= 41, "committed import files merge into collector analytics");
+  const hl1 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
+  ok(hl1.some((l) => JSON.parse(l).src === "steam") && hl1.some((l) => JSON.parse(l).src === "skinport"),
+    "collector history jsonl gets steam + skinport lines");
+  const c2 = await collect({ root: CROOT });
+  const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
+  ok(hl2.length === hl1.length && c2.manifest.items.length === 2, "immediate re-run dedupes snapshots, still refreshes the manifest");
+  fs.rmSync(CROOT, { recursive: true, force: true });
+
   M.setTransport(null);
   fs.rmSync(DATA, { recursive: true, force: true });
 

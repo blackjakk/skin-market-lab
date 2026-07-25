@@ -9,6 +9,8 @@ name: Gates
 on:
   push:
     branches: [main, "claude/**"]
+    paths-ignore:
+      - "data/**"   # collector commits are data-only — no code to gate
   pull_request:
   workflow_dispatch:
 
@@ -31,7 +33,7 @@ jobs:
         run: |
           npm install --no-save playwright
           npx playwright install --with-deps chromium
-      - name: Tracker probe (analytics math + API, 55 checks)
+      - name: Tracker probe (analytics math + API + collector, 62 checks)
         run: node probe.js
-      - name: Dashboard probe (real Chromium, 17 checks)
+      - name: Dashboard probe (real Chromium, live + static modes, 25 checks)
         run: node client-probe.js

@@ -1,6 +1,7 @@
-# Tracker runtime data — price snapshots, caches, watchlist, portfolio.
-# Personal market data stays on your machine; never commit it.
-data/
+# Tracker PRIVATE runtime data — your snapshots, caches, watchlist, portfolio.
+# (data/ — without the local- prefix — is the hosted collector's PUBLIC output
+# and IS committed.)
+local-data/
 
 node_modules/
 *.log

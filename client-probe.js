@@ -115,15 +115,26 @@ M.setTransport(async (url) => {
   // DISCOVER the tracker cross-origin (saved address → CORS) and, with no
   // tracker anywhere, render the setup panel instead of a broken page.
   const http = require("http");
-  const MIME2 = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript" };
-  const stat = http.createServer((req, res) => {
-    const f = path.join(__dirname, req.url === "/" ? "index.html" : path.normalize(req.url).replace(/^([.][.][/\\])+/, ""));
+  const MIME2 = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".jsonl": "text/plain" };
+  // Serves the repo's dashboard files; /data/* comes from dataDir when given,
+  // 404 otherwise — so each scenario controls whether collected data "exists"
+  // regardless of what's sitting in the working tree.
+  const makeStatic = (port, dataDir) => http.createServer((req, res) => {
+    const url = req.url.split("?")[0];
+    let f;
+    if (url.startsWith("/data/")) {
+      if (!dataDir) { res.writeHead(404); return res.end(); }
+      f = path.join(dataDir, path.normalize(url.slice("/data/".length)).replace(/^([.][.][/\\])+/, ""));
+    } else {
+      f = path.join(__dirname, url === "/" ? "index.html" : path.normalize(url).replace(/^([.][.][/\\])+/, ""));
+    }
     fs.readFile(f, (err, buf) => {
       if (err) { res.writeHead(404); return res.end(); }
       res.writeHead(200, { "Content-Type": MIME2[path.extname(f)] || "application/octet-stream" });
       res.end(buf);
     });
-  }).listen(5393);
+  }).listen(port);
+  const stat = makeStatic(5393, null);
   const ctxB = await browser.newContext({ viewport: { width: 1360, height: 900 } });
   await ctxB.addInitScript(() => localStorage.setItem("skinlab_api", "http://localhost:" + 5392));
   const pageB = await ctxB.newPage();
@@ -146,10 +157,64 @@ M.setTransport(async (url) => {
     const pageC = await ctxC.newPage();
     await pageC.goto("http://localhost:5393/", { waitUntil: "networkidle" });
     await pageC.waitForSelector("#retryBtn", { timeout: 10000 });
-    ok((await pageC.textContent("#itemView")).includes("npm start"), "no tracker → setup panel with run instructions");
+    ok((await pageC.textContent("#itemView")).includes("npm start"), "no tracker + no data → setup panel with run instructions");
     await ctxC.close();
+
+    // ── static DATA mode (the real Pages experience) ───────────────────────
+    // No tracker anywhere, but the collector's committed files exist → the
+    // page must boot read-only from them: movers list, charts, fallback
+    // tiles, GitHub actions links, localStorage portfolio.
+    const { collect } = require("./collect.js");
+    const SROOT = path.join(os.tmpdir(), "hh-skin-staticdata-" + Date.now());
+    fs.mkdirSync(path.join(SROOT, "data", "import"), { recursive: true });
+    fs.writeFileSync(path.join(SROOT, "watchlist.json"), JSON.stringify({ items: [NAME, "Fracture Case"] }));
+    const { slug } = require(path.join(__dirname, "server.js"));
+    const impRows = Array.from({ length: 120 }, (_, i) =>
+      ({ t: Date.now() - (120 - i) * D, price: 30 * Math.exp(0.003 * i) * (1 + 0.05 * Math.sin(i / 6)), vol: 40 + (i % 20) }));
+    fs.writeFileSync(path.join(SROOT, "data", "import", slug(NAME) + ".json"), JSON.stringify({ t: Date.now(), source: "probe", rows: impRows }));
+    await collect({ root: SROOT });
+    const statD = makeStatic(5394, path.join(SROOT, "data"));
+    const ctxD = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+    const pageD = await ctxD.newPage();
+    const errorsD = [];
+    pageD.on("pageerror", (e) => errorsD.push(String(e)));
+    await pageD.goto("http://localhost:5394/", { waitUntil: "networkidle" });
+    await pageD.waitForSelector(".wrow", { timeout: 10000 });
+    const rows = await pageD.$$eval(".wrow .nm", (els) => els.map((e) => e.textContent));
+    ok(rows.length === 2 && /Redline/.test(rows[0]), "static data mode boots read-only; movers sort puts the uptrend first");
+    ok(/read-only/.test(await pageD.textContent("#netStatus")), "netStatus says read-only + data via GitHub");
+    await pageD.waitForSelector("#chart");
+    const paintedD = await pageD.evaluate(() => {
+      const cv = document.getElementById("chart");
+      const img = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+      let lit = 0;
+      for (let i = 3; i < img.length; i += 40) if (img[i] > 0) lit++;
+      return lit;
+    });
+    ok(paintedD > 500, "chart painted from committed jsonl + import (" + paintedD + " px)");
+    ok((await pageD.$$eval("a.btn", (els) => els.map((a) => a.href).join(" "))).includes("watchlist.json"),
+      "read-only actions link to editing watchlist.json on GitHub");
+    // the 1-day item leans on skinport aggregates + warm-up honesty
+    await pageD.click('.wrow:has-text("Fracture Case")');
+    await pageD.waitForSelector(".warmup", { timeout: 6000 });
+    ok((await pageD.textContent("#itemView")).includes("SOLD*"), "day-0 momentum tiles fall back to skinport sale medians");
+    ok(/day 1 of 30/.test(await pageD.textContent(".warmup")), "warm-up chip is honest about short history");
+    // localStorage portfolio
+    await pageD.click('.wrow:has-text("Redline")');
+    await pageD.waitForSelector(".tiles");
+    await pageD.fill("#lotQty", "2");
+    await pageD.fill("#lotCost", "30");
+    await pageD.click("#lotForm button[type=submit]");
+    await pageD.waitForSelector("table.pf td", { timeout: 4000 });
+    ok(/\$60\.00/.test(await pageD.textContent("#pfTotals")), "portfolio works serverless (localStorage lots, fee-adjusted)");
+    ok(errorsD.length === 0, "static mode: zero uncaught page errors" + (errorsD.length ? " — " + errorsD[0] : ""));
+    await pageD.screenshot({ path: "/tmp/skin_lab_static.png", fullPage: true });
+    console.log("  📸 /tmp/skin_lab_static.png");
+    await ctxD.close();
+    statD.close();
+    fs.rmSync(SROOT, { recursive: true, force: true });
     dummy.close();
-  } else { console.log("  ~ setup-panel check skipped (a real tracker owns :8790)"); }
+  } else { console.log("  ~ static-mode checks skipped (a real tracker owns :8790)"); }
   stat.close();
 
   await browser.close();

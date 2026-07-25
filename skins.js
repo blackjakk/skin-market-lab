@@ -18,8 +18,22 @@
     grid: "#23252d", text: "#7c7f88", cross: "#5a5e6a",
   };
 
-  const state = { watch: [], selected: null, item: null, portfolio: null, range: "3M", hover: -1 };
+  // mode: "live"   — a tracker server answers (full read/write)
+  //       "static" — no tracker; reading the collector's committed data
+  //                  files from this same static host (GitHub Pages)
+  const state = { mode: "live", manifest: null, watch: [], selected: null, item: null, portfolio: null, range: "3M", hover: -1 };
   const RANGES = { "1M": 31, "3M": 92, "1Y": 366, "ALL": Infinity };
+
+  // Where "edit the watchlist" and "run the collector" live on GitHub.
+  // Derived from the Pages host (owner.github.io/repo) with a fallback.
+  function ghRepo() {
+    const m = /^([^.]+)\.github\.io$/.exec(location.hostname);
+    const seg = location.pathname.split("/").filter(Boolean)[0];
+    if (m && seg) return { owner: m[1], repo: seg };
+    return { owner: "blackjakk", repo: "skin-market-lab" };
+  }
+  const ghEditWatchlistUrl = () => { const g = ghRepo(); return "https://github.com/" + g.owner + "/" + g.repo + "/edit/main/watchlist.json"; };
+  const ghRunCollectorUrl = () => { const g = ghRepo(); return "https://github.com/" + g.owner + "/" + g.repo + "/actions/workflows/collect.yml"; };
 
   // ── api ──────────────────────────────────────────────────────────────────
   // The dashboard also ships on a static host (GitHub Pages) where there is
@@ -78,8 +92,24 @@
   };
 
   // ── watchlist ────────────────────────────────────────────────────────────
+  // Sorted best-score-first in both modes: the sidebar doubles as a movers
+  // board — buy candidates float up, sell candidates sink.
+  function sortWatch(items) {
+    return items.slice().sort((a, b) => (b.score == null ? -999 : b.score) - (a.score == null ? -999 : a.score));
+  }
   async function loadWatch() {
-    state.watch = (await api("/api/skins/watchlist")).items;
+    if (state.mode === "static") {
+      state.watch = sortWatch(state.manifest.items.map((m) => ({
+        name: m.name,
+        latest: m.quote ? m.quote.price : m.latest,
+        vol24h: m.quote ? m.quote.vol : null,
+        t: m.quote ? m.quote.t : null,
+        days: m.days, mom7: m.mom7, mom30: m.mom30,
+        verdict: m.verdict, score: m.score,
+      })));
+    } else {
+      state.watch = sortWatch((await api("/api/skins/watchlist")).items);
+    }
     renderWatch();
   }
   function renderWatch() {
@@ -112,11 +142,27 @@
     if (e.key === "Enter" && searchResults.length) { e.preventDefault(); pickResult(0); }
   });
   document.addEventListener("click", (e) => { if (!e.target.closest(".searchWrap")) closeSearch(); });
+  let seedCache = null; // static-mode search universe (seed.json + manifest)
+  async function staticSearch(q) {
+    if (!seedCache) {
+      try { seedCache = ((await (await fetch("seed.json", { cache: "no-store" })).json()).items || []).map((s) => s.name); }
+      catch (e) { seedCache = []; }
+    }
+    const uni = new Map();
+    for (const n of seedCache) uni.set(n, { name: n, watched: false, price: null });
+    for (const m of state.manifest.items) uni.set(m.name, { name: m.name, watched: true, price: m.quote ? m.quote.price : m.latest });
+    const toks = q.toLowerCase().split(/\s+/).filter(Boolean);
+    return Array.from(uni.values())
+      .filter((it) => toks.every((t) => it.name.toLowerCase().includes(t)))
+      .sort((a, b) => (b.watched - a.watched) || (a.name < b.name ? -1 : 1))
+      .slice(0, 25);
+  }
   async function runSearch() {
     const q = $("searchBox").value.trim();
     if (q.length < 2) return closeSearch();
     try {
-      searchResults = (await api("/api/skins/search?q=" + encodeURIComponent(q))).results;
+      searchResults = state.mode === "static" ? await staticSearch(q)
+        : (await api("/api/skins/search?q=" + encodeURIComponent(q))).results;
       const box = $("searchResults");
       box.innerHTML = searchResults.map((r, i) =>
         '<button class="sr-row" data-i="' + i + '" role="option"><span>' + esc(r.name) + '</span>' +
@@ -133,6 +179,13 @@
     if (!r) return;
     closeSearch();
     $("searchBox").value = "";
+    if (state.mode === "static") {
+      if (r.watched) return selectItem(r.name);
+      // read-only host: tracking an item = adding it to the repo's watchlist
+      toast("Add \"" + r.name + "\" to watchlist.json on GitHub — the collector picks it up next run");
+      window.open(ghEditWatchlistUrl(), "_blank", "noopener");
+      return;
+    }
     if (!r.watched) {
       await api("/api/skins/watch", { name: r.name });
       toast("Tracking " + r.name);
@@ -143,14 +196,52 @@
   }
 
   // ── item view ────────────────────────────────────────────────────────────
+  // Static mode: build the exact report shape the tracker API serves, from
+  // the collector's committed files + the SAME shared assembly/analytics.
+  async function staticItemReport(name) {
+    const row = state.manifest.items.find((m) => m.name === name);
+    if (!row) throw new Error("not in the collected set");
+    let lines = [];
+    try {
+      const txt = await (await fetch("data/history/" + row.slug + ".jsonl", { cache: "no-store" })).text();
+      for (const ln of txt.split("\n")) {
+        if (!ln.trim()) continue;
+        try { lines.push(JSON.parse(ln)); } catch (e) { /* torn line */ }
+      }
+    } catch (e) { /* no history file yet */ }
+    let importRows = null;
+    if (row.imported) {
+      try { importRows = (await (await fetch("data/import/" + row.slug + ".json", { cache: "no-store" })).json()).rows; }
+      catch (e) { /* missing import */ }
+    }
+    const series = A.assembleSeries(importRows, lines);
+    const analytics = A.analyze(series.daily);
+    const steamSnaps = lines.filter((l) => l.src === "steam");
+    const last = steamSnaps.length ? steamSnaps[steamSnaps.length - 1] : null;
+    const quote = last ? { t: last.t, price: last.price, lowest: last.lowest != null ? last.lowest : null, vol: last.vol != null ? last.vol : null } : row.quote;
+    const sales = row.skinport || null;
+    const steamGross = quote ? quote.price : analytics.latest;
+    const spMedian = sales && sales.last24h && sales.last24h.median != null ? sales.last24h.median
+      : sales && sales.last7d ? sales.last7d.median : null;
+    return {
+      name, daily: series.daily, skinportDaily: series.skinportDaily,
+      analytics, snapshots: lines.length, imported: !!importRows, watched: true, quote,
+      skinport: { sales, ask: null, qty: null },
+      compare: {
+        steam: { gross: steamGross, net: A.netProceeds(steamGross, "steam"), cash: false },
+        skinport: { gross: spMedian, net: A.netProceeds(spMedian, "skinport"), cash: true },
+      },
+    };
+  }
   async function selectItem(name) {
     state.selected = name;
-    state.item = await api("/api/skins/item?name=" + encodeURIComponent(name));
+    state.item = state.mode === "static" ? await staticItemReport(name)
+      : await api("/api/skins/item?name=" + encodeURIComponent(name));
     renderWatch();
     renderItem();
-    // stale (>60min) or missing quote → take a live snapshot automatically
+    // live mode: stale (>60min) or missing quote → snapshot automatically
     const q = state.item.quote;
-    if (!q || Date.now() - q.t > 3600000) {
+    if (state.mode === "live" && (!q || Date.now() - q.t > 3600000)) {
       $("netStatus").textContent = "snapshotting…";
       refreshItem(name).finally(() => { $("netStatus").textContent = "ready"; });
     }
@@ -173,11 +264,28 @@
     const sp = it.skinport || {};
     const spSales = sp.sales && (sp.sales.last24h || sp.sales.last7d);
     const cookieOn = !!(state.health && state.health.steamCookie);
+    const ro = state.mode === "static";
+
+    // Day-0 momentum: while our own history is too short, Skinport's
+    // realized-sale medians (7/30/90d windows) give an instant read —
+    // current 24h sold median vs the window median. Marked with * and
+    // replaced by true price-history momentum as days accrue.
+    const agg = sp.sales;
+    const aggCur = agg && agg.last24h ? agg.last24h.median : null;
+    const aggMom = (o) => (aggCur != null && o && o.median ? (aggCur - o.median) / o.median : null);
+    let usedAgg = false;
+    const momTile = (label, real, win) => {
+      if (real != null) return tile(label, fmtPct(real), cls(real));
+      const v = aggMom(win);
+      if (v != null) { usedAgg = true; return tile(label + " SOLD*", fmtPct(v), cls(v)); }
+      return tile(label, "—", "");
+    };
     $("itemView").innerHTML =
       '<div class="panel">' +
         '<div class="itemTitle"><h2>' + esc(it.name) + '</h2>' +
         '<span class="hint">' + (it.quote ? "quote " + ago(it.quote.t) : "no snapshot yet") +
-        " · " + an.days + " days of history" + (it.imported ? " (incl. imported)" : "") + "</span></div>" +
+        " · " + an.days + " days of history" + (it.imported ? " (incl. imported)" : "") +
+        (ro ? " · collector updates every 6h" : "") + "</span></div>" +
         '<div class="quoteRow">' +
           "<span>Steam median <b>" + fmt$(it.quote && it.quote.price) + "</b></span>" +
           "<span>lowest ask <b>" + fmt$(it.quote && it.quote.lowest) + "</b></span>" +
@@ -185,15 +293,18 @@
           (sp.ask != null ? "<span>Skinport ask <b>" + fmt$(sp.ask) + "</b></span>" : "") +
         "</div>" +
         '<div class="tiles">' +
-          tile("7D", fmtPct(an.mom7), cls(an.mom7)) +
-          tile("30D", fmtPct(an.mom30), cls(an.mom30)) +
-          tile("90D", fmtPct(an.mom90), cls(an.mom90)) +
+          momTile("7D", an.mom7, agg && agg.last7d) +
+          momTile("30D", an.mom30, agg && agg.last30d) +
+          momTile("90D", an.mom90, agg && agg.last90d) +
           tile("SMA 7 / 30", fmt$(an.sma7) + " / " + fmt$(an.sma30), "") +
           tile("RSI 14", an.rsi14 == null ? "—" : Math.round(an.rsi14), "") +
           tile("VOLATILITY /YR", an.vol30 == null ? "—" : Math.round(an.vol30 * 100) + "%", "") +
           tile("OFF PEAK", an.curDD == null ? "—" : "−" + (an.curDD * 100).toFixed(1) + "%", "") +
           tile("SOLD/DAY (30D)", an.liq30 == null ? "—" : Math.round(an.liq30), "") +
         "</div>" +
+        (usedAgg ? '<div class="hint" style="margin:-6px 0 12px">* from Skinport realized-sale medians — an instant read while price history builds</div>' : "") +
+        (an.days < 30 ? '<div class="warmup">day ' + an.days + " of 30 — trend signals warm up as history builds" +
+          (ro ? " (the collector records every 6 hours)" : "; Import/Bootstrap full Steam history for instant depth") + "</div>" : "") +
         '<div class="sigCard">' +
           '<div class="sigBadge ' + sigCls + '"><span class="sc">' + (sig.score > 0 ? "+" : "") + sig.score + "</span>" + esc(sig.verdict) + "</div>" +
           '<div><ul class="sigReasons">' + sig.reasons.map((r) => "<li>" + esc(r) + "</li>").join("") +
@@ -214,24 +325,29 @@
           spSales ? "median of actual sales · " + ((sp.sales.last24h && sp.sales.last24h.volume) || 0) + " sold in 24h" : "no sales data cached yet") +
       "</div></div>" +
       '<div class="panel"><div class="btnrow">' +
-        '<button class="btn" id="snapBtn">⟳ Snapshot now</button>' +
-        (cookieOn ? '<button class="btn" id="bootBtn" title="Pull full multi-year history from Steam using the configured cookie">⚡ Bootstrap full history</button>' : "") +
-        '<button class="btn" id="importBtn">📋 Import history (paste)</button>' +
+        (ro
+          ? '<a class="btn primary" target="_blank" rel="noopener" href="' + ghEditWatchlistUrl() + '">✎ Edit tracked items (GitHub)</a>' +
+            '<a class="btn" target="_blank" rel="noopener" href="' + ghRunCollectorUrl() + '" title="Actions → Run workflow = snapshot now">⚡ Run collector now</a>'
+          : '<button class="btn" id="snapBtn">⟳ Snapshot now</button>' +
+            (cookieOn ? '<button class="btn" id="bootBtn" title="Pull full multi-year history from Steam using the configured cookie">⚡ Bootstrap full history</button>' : "") +
+            '<button class="btn" id="importBtn">📋 Import history (paste)</button>') +
         '<a class="btn" target="_blank" rel="noopener" href="https://steamcommunity.com/market/listings/730/' + encodeURIComponent(it.name) + '">Steam page ↗</a>' +
-        '<button class="btn danger" id="unwatchBtn">✕ Stop tracking</button>' +
+        (ro ? "" : '<button class="btn danger" id="unwatchBtn">✕ Stop tracking</button>') +
       "</div></div>";
 
     $("ranges").querySelectorAll("button").forEach((b) =>
       b.addEventListener("click", () => { state.range = b.dataset.r; renderItem(); }));
-    $("snapBtn").addEventListener("click", () => { toast("Snapshotting…"); refreshItem(it.name); });
-    if ($("bootBtn")) $("bootBtn").addEventListener("click", bootstrapItem);
-    $("importBtn").addEventListener("click", openImport);
-    $("unwatchBtn").addEventListener("click", async () => {
-      await api("/api/skins/watch", { name: it.name, remove: true });
-      state.selected = null; state.item = null;
-      $("itemView").innerHTML = '<div class="panel"><div class="emptyChart">Pick another item from the watchlist.</div></div>';
-      loadWatch();
-    });
+    if (!ro) {
+      $("snapBtn").addEventListener("click", () => { toast("Snapshotting…"); refreshItem(it.name); });
+      if ($("bootBtn")) $("bootBtn").addEventListener("click", bootstrapItem);
+      $("importBtn").addEventListener("click", openImport);
+      $("unwatchBtn").addEventListener("click", async () => {
+        await api("/api/skins/watch", { name: it.name, remove: true });
+        state.selected = null; state.item = null;
+        $("itemView").innerHTML = '<div class="panel"><div class="emptyChart">Pick another item from the watchlist.</div></div>';
+        loadWatch();
+      });
+    }
     drawChart();
   }
   const tile = (lb, v, c) => '<div class="tile"><div class="lb">' + lb + '</div><div class="v ' + c + '">' + v + "</div></div>";
@@ -314,9 +430,11 @@
       wrap.querySelector(".emptyChart")?.remove();
       const div = document.createElement("div");
       div.className = "emptyChart";
-      div.textContent = rows.length === 1
-        ? "One snapshot recorded — a chart appears once there are two days of data. History accrues automatically while the tracker runs; use Import/Bootstrap for instant multi-year depth."
-        : "No price history yet. Hit ⟳ Snapshot now, or Import/Bootstrap full Steam history.";
+      div.textContent = state.mode === "static"
+        ? "The collector records prices every 6 hours — a chart appears after two days of data. The tiles above already read from live sale medians."
+        : rows.length === 1
+          ? "One snapshot recorded — a chart appears once there are two days of data. History accrues automatically while the tracker runs; use Import/Bootstrap for instant multi-year depth."
+          : "No price history yet. Hit ⟳ Snapshot now, or Import/Bootstrap full Steam history.";
       wrap.appendChild(div);
       $("legend").innerHTML = "";
       chartGeom = null;
@@ -455,8 +573,31 @@
   window.addEventListener("resize", () => drawChart());
 
   // ── portfolio ────────────────────────────────────────────────────────────
+  // Static mode has no server to keep lots on — they live in THIS browser's
+  // localStorage, valued against the collector's latest quotes with the same
+  // fee math the tracker uses.
+  const LOTS_KEY = "skinlab_lots";
+  function localLots() { try { return JSON.parse(localStorage.getItem(LOTS_KEY)) || []; } catch (e) { return []; } }
+  function saveLocalLots(lots) { localStorage.setItem(LOTS_KEY, JSON.stringify(lots)); }
+  function localPortfolioReport() {
+    const lots = localLots().map((lot) => {
+      const row = state.manifest.items.find((m) => m.name === lot.name);
+      const latest = row ? (row.quote ? row.quote.price : row.latest) : null;
+      const cost = A.round2(lot.qty * lot.unitCost);
+      const netSteam = latest != null ? A.round2(lot.qty * A.netProceeds(latest, "steam")) : null;
+      return Object.assign({}, lot, {
+        latest, cost,
+        gross: latest != null ? A.round2(lot.qty * latest) : null,
+        netSteam,
+        pl: netSteam != null ? A.round2(netSteam - cost) : null,
+        plPct: netSteam != null && cost > 0 ? A.round2((netSteam - cost) / cost * 100) : null,
+      });
+    });
+    const sum = (k) => A.round2(lots.reduce((a, l) => a + (l[k] || 0), 0));
+    return { lots, totals: { cost: sum("cost"), gross: sum("gross"), netSteam: sum("netSteam"), pl: sum("pl") } };
+  }
   async function loadPortfolio() {
-    state.portfolio = await api("/api/skins/portfolio");
+    state.portfolio = state.mode === "static" ? localPortfolioReport() : await api("/api/skins/portfolio");
     renderPortfolio();
   }
   function renderPortfolio() {
@@ -476,7 +617,12 @@
         "<td class='chg " + cls(l.pl) + "'>" + fmt$(l.pl) + (l.plPct != null ? "<br><span class='hint'>" + fmtPct(l.plPct / 100) + "</span>" : "") + "</td>" +
         "<td><button class='xbtn' data-i='" + i + "' title='Remove lot' aria-label='Remove lot'>✕</button></td></tr>").join("");
     tb.querySelectorAll(".xbtn").forEach((b) => b.addEventListener("click", async () => {
-      state.portfolio = await api("/api/skins/lot", { remove: p.lots[Number(b.dataset.i)].id });
+      if (state.mode === "static") {
+        saveLocalLots(localLots().filter((l) => l.id !== p.lots[Number(b.dataset.i)].id));
+        state.portfolio = localPortfolioReport();
+      } else {
+        state.portfolio = await api("/api/skins/lot", { remove: p.lots[Number(b.dataset.i)].id });
+      }
       renderPortfolio();
     }));
   }
@@ -485,7 +631,15 @@
     if (!state.selected) return toast("Select an item first", true);
     const qty = Number($("lotQty").value), unitCost = Number($("lotCost").value);
     try {
-      state.portfolio = await api("/api/skins/lot", { name: state.selected, qty, unitCost });
+      if (state.mode === "static") {
+        if (!isFinite(qty) || qty <= 0 || !isFinite(unitCost) || unitCost < 0) throw new Error("need qty>0 and cost>=0");
+        const lots = localLots();
+        lots.push({ id: "l" + Math.random().toString(36).slice(2, 10), name: state.selected, qty, unitCost, addedAt: Date.now() });
+        saveLocalLots(lots);
+        state.portfolio = localPortfolioReport();
+      } else {
+        state.portfolio = await api("/api/skins/lot", { name: state.selected, qty, unitCost });
+      }
       renderPortfolio();
       $("lotQty").value = ""; $("lotCost").value = "";
       toast("Lot added: " + qty + " × " + state.selected);
@@ -493,6 +647,12 @@
   });
 
   $("refreshAllBtn").addEventListener("click", async () => {
+    if (state.mode === "static") {
+      // read-only host — "snapshot now" = manually firing the Actions run
+      window.open(ghRunCollectorUrl(), "_blank", "noopener");
+      toast("On GitHub: Run workflow → the site refreshes when it commits (~2 min)");
+      return;
+    }
     toast("Snapshotting whole watchlist…");
     try {
       const r = await api("/api/skins/refresh", {});
@@ -529,9 +689,34 @@
       boot();
     });
   }
+  // No tracker answered — try the collector's committed data on this host.
+  async function tryStatic() {
+    try {
+      const r = await fetchTimeout("data/index.json", 4000, { cache: "no-store" });
+      if (!r.ok) return false;
+      const manifest = await r.json();
+      if (!manifest || !Array.isArray(manifest.items) || !manifest.items.length) return false;
+      state.mode = "static";
+      state.manifest = manifest;
+      return true;
+    } catch (e) { return false; }
+  }
+  async function bootStatic() {
+    $("netStatus").textContent = "data via GitHub · updated " + ago(state.manifest.generatedAt) + " · read-only";
+    $("refreshAllBtn").textContent = "⚡ Run collector (GitHub)";
+    $("refreshAllBtn").title = "Opens the Actions workflow — Run workflow = snapshot now";
+    const hint = $("lotHint");
+    if (hint) hint.textContent = "Lots are stored in this browser and valued at the latest collected prices.";
+    await loadWatch();
+    await loadPortfolio();
+    if (state.watch.length) await selectItem(state.watch[0].name);
+  }
   async function boot() {
     $("netStatus").textContent = "connecting…";
-    if (!(await resolveApiBase())) return renderSetup();
+    if (!(await resolveApiBase())) {
+      if (await tryStatic()) return bootStatic();
+      return renderSetup();
+    }
     try {
       state.health = await api("/api/skins/health");
       $("netStatus").textContent = "ready · " + (API ? API.replace(/^https?:\/\//, "") : "local") +

@@ -9,7 +9,7 @@
 //
 // Run:    npm start  (= node server.js [port], default 8790)
 //         STEAM_COOKIE="steamLoginSecure=..."        unlocks full-history bootstrap
-//         SKIN_DATA=/path                            data dir (default ./data)
+//         SKIN_DATA=/path                            private data dir (default ./local-data)
 //         SKIN_SNAP_HOURS=6                          auto-snapshot cadence (0 = off)
 // Test:   npm run probe                             (hermetic — fixture transport)
 //
@@ -47,7 +47,10 @@ function writeJson(f, v) { fs.mkdirSync(path.dirname(f), { recursive: true }); f
 function startServer(opts) {
   opts = opts || {};
   const PORT = opts.port != null ? opts.port : Number(process.argv[2] || process.env.SKIN_PORT || 8790);
-  const DATA = opts.dataDir || process.env.SKIN_DATA || path.join(__dirname, "data");
+  // Private per-machine data. NOTE: ./data is the COMMITTED collector output
+  // (public, read by the static dashboard) — the tracker's own snapshots,
+  // caches, and portfolio live in ./local-data (gitignored).
+  const DATA = opts.dataDir || process.env.SKIN_DATA || path.join(__dirname, "local-data");
   const COOKIE = opts.steamCookie != null ? opts.steamCookie : (process.env.STEAM_COOKIE || "");
   const SNAP_HOURS = opts.snapHours != null ? opts.snapHours
     : (process.env.SKIN_SNAP_HOURS != null ? Number(process.env.SKIN_SNAP_HOURS) : 6);
@@ -58,7 +61,13 @@ function startServer(opts) {
   // ── state (loaded fresh per instance — probe restarts must re-read disk) ──
   const wlFile = path.join(DATA, "watchlist.json");
   const pfFile = path.join(DATA, "portfolio.json");
-  let watchlist = readJson(wlFile, null) || [];
+  let watchlist = readJson(wlFile, null);
+  if (!watchlist) {
+    // first boot: seed the private watchlist from the repo's committed one,
+    // so the dashboard opens populated instead of empty
+    watchlist = (readJson(path.join(ROOT, "watchlist.json"), { items: [] }).items || []).slice();
+    if (watchlist.length) writeJson(wlFile, watchlist);
+  }
   let portfolio = readJson(pfFile, null) || [];
   const histCache = new Map(); // slug → parsed snapshot lines
 
@@ -91,16 +100,13 @@ function startServer(opts) {
     return true;
   }
 
-  // ── series assembly ──────────────────────────────────────────────────────
+  // ── series assembly (canonical, shared with collector + browser) ─────────
   function dailyFor(name) {
     const imported = readJson(importFile(name), null);
-    const importDaily = A.toDaily((imported && imported.rows) || [], { volMode: "sum" });
-    const steamSnaps = snaps(name).filter((s) => s.src === "steam");
-    const snapDaily = A.toDaily(steamSnaps, { volMode: "max" });
-    return A.mergeDaily(importDaily, snapDaily); // import wins on collisions (richer)
+    return A.assembleSeries(imported && imported.rows, snaps(name)).daily;
   }
   function skinportDaily(name) {
-    return A.toDaily(snaps(name).filter((s) => s.src === "skinport"), { volMode: "max" });
+    return A.assembleSeries(null, snaps(name)).skinportDaily;
   }
   function latestSteam(name) {
     const s = snaps(name).filter((x) => x.src === "steam");
@@ -283,8 +289,10 @@ function startServer(opts) {
   const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".woff2": "font/woff2" };
   function serveStatic(req, res, pathname) {
     if (pathname === "/") pathname = "/index.html";
-    if (pathname.startsWith("/data/") || pathname.split("/").some((seg) => seg.startsWith(".")))
-      { res.writeHead(403); res.end(); return; } // never serve the data dir or dotfiles
+    // /data (collector output) is public by design; the PRIVATE dir and
+    // dotfiles are not.
+    if (pathname.startsWith("/local-data/") || pathname.split("/").some((seg) => seg.startsWith(".")))
+      { res.writeHead(403); res.end(); return; }
     const fp = path.join(ROOT, path.normalize(pathname).replace(/^([.][.][/\\])+/, ""));
     if (!fp.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
     fs.readFile(fp, (err, buf) => {

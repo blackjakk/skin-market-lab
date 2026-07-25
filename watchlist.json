@@ -1,0 +1,18 @@
+{
+  "note": "The tracked universe for the hosted collector (collect.yml snapshots these every 6h and commits the data — the dashboard link reads it). Add or remove exact Steam market_hash_name strings; the next collector run picks the change up. The local tracker (npm start) seeds its private watchlist from this file on first boot.",
+  "items": [
+    "Fracture Case",
+    "Dreams & Nightmares Case",
+    "Recoil Case",
+    "Revolution Case",
+    "Kilowatt Case",
+    "Clutch Case",
+    "Danger Zone Case",
+    "Gamma 2 Case",
+    "Glove Case",
+    "AK-47 | Redline (Field-Tested)",
+    "AWP | Asiimov (Field-Tested)",
+    "M4A1-S | Printstream (Field-Tested)",
+    "Glock-18 | Fade (Factory New)"
+  ]
+}

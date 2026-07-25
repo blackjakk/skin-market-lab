@@ -2,16 +2,37 @@
 
 CS skin market research tracker. Zero-dependency Node server (`server.js`,
 port 8790) + static dashboard (`index.html`), no build step. `npm start`.
-The dashboard also deploys to GitHub Pages (pages.yml) and DISCOVERS a
-local tracker (same-origin → saved address → localhost:8790,
-`resolveApiBase` in skins.js; the API sends CORS for this) — with no
-tracker reachable it renders a setup panel.
+The dashboard deploys to GitHub Pages (pages.yml, gh-pages branch mirror)
+and boots in one of THREE modes (skins.js): live (a tracker answered
+discovery: same-origin → saved address → localhost:8790, CORS-backed),
+STATIC (no tracker, but `data/index.json` exists on the host → read-only
+dashboard from the collector's committed files), or the setup panel
+(neither). Preserve that ladder when touching boot().
 
 ## Architecture
 
-- Snapshot-accrual model: watchlist prices append to `data/history/*.jsonl`
-  (gitignored) over time; full multi-year Steam history backfills via
-  paste-import (`POST /api/skins/import`) or STEAM_COOKIE bootstrap.
+- HOSTED COLLECTOR (the primary UX — "the link works alone"): collect.yml
+  runs `node collect.js` every 6h on Actions; it snapshots every
+  `watchlist.json` item, appends `data/history/<slug>.jsonl`, and writes
+  `data/index.json` (manifest: quote + analytics summary per item → the
+  static page paints the whole watchlist with ONE fetch), then commits.
+  gates.yml paths-ignores `data/**` so those commits skip the probe battery
+  but still trigger the Pages mirror. `data/` is PUBLIC and committed;
+  `local-data/` is the tracker's PRIVATE dir (gitignored) — never swap the
+  two. Committed `data/import/<slug>.json` files merge into collector
+  analytics (that's how deep backfills reach the hosted dashboard).
+- Static mode is read-only by design: "track more" links to editing
+  watchlist.json on GitHub, "snapshot now" links to the workflow_dispatch
+  page, the portfolio lives in localStorage. Day-0 momentum falls back to
+  Skinport realized-sale medians (tiles marked `*`); items under 30 days
+  show a warm-up chip instead of silent dashes.
+- Snapshot-accrual model (local tracker): watchlist prices append to
+  `local-data/history/*.jsonl` over time; full multi-year Steam history
+  backfills via paste-import (`POST /api/skins/import`) or STEAM_COOKIE
+  bootstrap. First boot seeds the private watchlist from watchlist.json.
+- `assembleSeries` in analytics.js is the ONE canonical raw-records→series
+  assembly — server, collector, and browser static mode all call it; never
+  fork that logic per surface.
 - `analytics.js` is UMD and SHARED VERBATIM by server (require) and browser
   (window.SkinAnalytics) — keep it dependency-free and side-effect-free;
   the probe pins its math to hand-computed values.
@@ -21,12 +42,15 @@ tracker reachable it renders a setup panel.
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 55 checks: analytics units, full API flow, snapshot
-  dedupe, import/bootstrap, portfolio P/L, restart persistence.
-- `node client-probe.js` — 17 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node probe.js` — 62 checks: analytics units, full API flow, snapshot
+  dedupe, import/bootstrap, portfolio P/L, restart persistence,
+  watchlist seeding, the collector (manifest, import merge, dedupe).
+- `node client-probe.js` — 25 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
-  tooltip, portfolio form, static-host discovery + setup panel.
-  Screenshot → /tmp/skin_lab.png.
+  tooltip, portfolio form, static-host discovery, setup panel, and the
+  full STATIC DATA mode (read-only boot from collected files, fallback
+  tiles, warm-up chip, localStorage portfolio).
+  Screenshots → /tmp/skin_lab.png + /tmp/skin_lab_static.png.
 
 ## Traps learned (do not re-learn these)
 

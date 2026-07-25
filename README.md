@@ -10,7 +10,28 @@ build. (Grew up inside the hashmark-heroes repo; now lives here.)
 > point of its score is itemized so you can judge the inputs yourself. Skin
 > markets are volatile and thin; Steam proceeds are wallet-locked.
 
-## Quick start
+## Quick start — just open the link
+
+**https://blackjakk.github.io/skin-market-lab/**
+
+That's the whole product for most use: a GitHub Actions collector
+(`collect.yml`) snapshots every item in `watchlist.json` every 6 hours **on
+GitHub's servers** and commits the data; the page reads those files. Charts,
+momentum, signals, cross-market fee math, and a portfolio (stored in your
+browser) — no install, nothing to keep running, works on your phone.
+
+- **Track more items** — edit `watchlist.json` (the ✎ button in the app
+  links straight there). Exact Steam `market_hash_name` strings; the next
+  collector run picks them up.
+- **Snapshot right now** — Actions → *Collect market data* → Run workflow
+  (the ⚡ button links there). The site refreshes when it commits.
+- **Instant deep history for an item** — commit a Steam pricehistory dump
+  as `data/import/<slug>.json` (get the slug from `data/index.json`), or
+  use the local tracker's paste-import below. Until an item has ~30 days of
+  history the dashboard says so, and its momentum tiles read from Skinport's
+  realized-sale medians (marked `*`) so you get a signal from day zero.
+
+## Power mode — the local tracker (optional)
 
 ```
 git clone https://github.com/blackjakk/skin-market-lab
@@ -18,25 +39,20 @@ cd skin-market-lab
 npm start                # tracker + dashboard on http://localhost:8790
 ```
 
-**The link:** https://blackjakk.github.io/skin-market-lab/ — the same
-dashboard, hosted on GitHub Pages. It auto-connects to a tracker running on
-your machine (`npm start`); with no tracker running it shows setup steps.
-Bookmark whichever you prefer — the Pages link, or http://localhost:8790
-straight from the tracker (identical page, zero cross-origin hops). The
-tracker is what records history and stores your portfolio, locally in
-`data/` — prices can't be fetched from a bare browser because
-Steam/Skinport don't allow cross-origin calls.
-
-Open the dashboard, search an item (cases, skins, knives — the search
-universe is a curated seed list until the full ~20k-name Skinport dump is
-cached on first refresh), click it to start tracking. Every snapshot appends
-to `data/history/*.jsonl` — **history accrues as long as the
-tracker keeps running** (auto-snapshot every `SKIN_SNAP_HOURS`, default 6).
+When a local tracker is running, the same page (either URL) switches to
+live read/write: on-demand snapshots, full-universe search (the ~20k-name
+Skinport dump), devtools paste-import, `STEAM_COOKIE` full-history
+bootstrap, and a server-side portfolio. Private data lives in `local-data/`
+(gitignored) — the committed `data/` dir belongs to the hosted collector.
+On first boot the tracker seeds its watchlist from `watchlist.json`, so it
+opens populated.
 
 ## Getting deep history immediately
 
 Snapshots only build history going forward. Two ways to backfill years of
-Steam price history per item:
+Steam price history per item (both use the local tracker; to publish a
+backfill to the hosted dashboard, commit the resulting
+`local-data/import/<slug>.json` file as `data/import/<slug>.json`):
 
 1. **Paste-import (no setup):** item view → *📋 Import history* — the modal
    gives you a one-liner to run in the devtools console of any logged-in
@@ -75,14 +91,14 @@ browser; unit-pinned by the probe):
 | Skinport `/v1/sales/history` | realized-sale medians 24h/7d/30d/90d | none (brotli) |
 
 Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
-30min–12h). Data lands in `data/` (gitignored).
+30min–12h). Collected data lands in `data/` (committed by the collector); the local tracker keeps its private copy in `local-data/` (gitignored).
 
 ## Gates
 
-- `npm run probe` — 55 checks, hermetic (fixture transport):
+- `npm run probe` — 62 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
-- `npm run probe:ui` — real Chromium drives the dashboard:
+- `npm run probe:ui` — 25 real-Chromium checks across live AND static modes:
   chart pixels actually painted, crosshair tooltip, range switching,
   portfolio form, zero page errors. Screenshot → `/tmp/skin_lab.png`.
 
