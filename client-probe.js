@@ -224,9 +224,23 @@ M.setTransport(async (url) => {
     await pageD.waitForSelector(".warmup", { timeout: 6000 });
     ok((await pageD.textContent("#itemView")).includes("SOLD*"), "day-0 momentum tiles fall back to skinport sale medians");
     ok(/day 1 of 30/.test(await pageD.textContent(".warmup")), "warm-up chip is honest about short history");
-    // localStorage portfolio
+    // back to home: settlement panel + methodology verification
     await pageD.click("#backBtn");
     await pageD.waitForSelector("table.mkt", { timeout: 6000 });
+    ok(/SETTLEMENT FIXINGS/.test(await pageD.textContent("#itemView"))
+      && (await pageD.$$eval("a", (as) => as.some((a) => /methodology\.html$/.test(a.href)))),
+      "settlement panel on home links to the methodology page");
+    // methodology page: budget renders + in-browser hash verification
+    await pageD.goto("http://localhost:5394/methodology.html", { waitUntil: "networkidle" });
+    await pageD.waitForFunction(() => /\$/.test(document.getElementById("budgetOut").textContent), { timeout: 8000 });
+    ok(/Move SETTLE-CASE-7D 1%/.test(await pageD.textContent("#budgetOut")), "methodology page renders the live manipulation budget");
+    await pageD.click("#verifyBtn");
+    await pageD.waitForFunction(() => /VERIFIED|MISMATCH/.test(document.getElementById("verifyOut").textContent), { timeout: 8000 });
+    const verTxt = await pageD.textContent("#verifyOut");
+    ok(/✓ VERIFIED/.test(verTxt) && !/✗/.test(verTxt), "in-browser re-derivation VERIFIES the published fixing hashes");
+    await pageD.goBack({ waitUntil: "networkidle" });
+    await pageD.waitForSelector(".mrow", { timeout: 8000 });
+    // localStorage portfolio (back on home after the methodology round-trip)
     await pageD.click('.mrow:has-text("Redline")');
     await pageD.waitForSelector(".sigCard");
     await pageD.fill("#lotQty", "2");

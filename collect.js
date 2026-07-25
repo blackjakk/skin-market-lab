@@ -17,8 +17,10 @@
 "use strict";
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const A = require("./analytics.js");
 const M = require("./market.js");
+const S = require("./settlement.js");
 const { slug } = require("./server.js");
 
 const DEDUPE_MS = 30 * 60 * 1000; // same guard as the tracker
@@ -183,6 +185,20 @@ async function collect(opts) {
     eth: latest.eth != null ? latest.eth : null,
     cnus: latest.cnus != null ? latest.cnus : null,
   });
+
+  // settlement fixings (SMLX-1): computed from the published series and
+  // hashed — the auditable, re-derivable marks a dated instrument would
+  // settle against. Appended every run; readers take last-per-day.
+  const detail = S.computeAll(manifest.market.series);
+  const fix = { t: Date.now(), day: A.dayKey(Date.now()), methodology: S.METHODOLOGY, fixings: {}, budget: S.manipulationBudget(manifest.items) };
+  for (const name of Object.keys(detail)) {
+    const f = detail[name];
+    fix.fixings[name] = { value: f.value, accruing: f.accruing || null,
+      hash: crypto.createHash("sha256").update(S.canonical(f)).digest("hex") };
+  }
+  manifest.market.settlement = fix;
+  writeJson(path.join(dataDir, "settlement.json"), { latest: fix, detail: detail });
+  fs.appendFileSync(path.join(dataDir, "settlements.jsonl"), JSON.stringify(fix) + "\n");
 
   writeJson(cursorFile, { i: names.length ? (cursor + SALES_BUDGET) % names.length : 0 });
   writeJson(salesStoreFile, salesStore);

@@ -59,6 +59,18 @@ dashboard from the collector's committed files), or the setup panel
   grails sit above the ~$1,800 steam listing cap → no steam quote is
   EXPECTED for art, not an error). Art items' manifest latest falls back
   to the 30d sale median.
+- SETTLEMENT LAYER (SMLX-1, settlement.js — UMD, pure, shared by
+  collector/server/methodology page): dated fixings (SETTLE-CASE-7D/30D,
+  SETTLE-RATIO-30D) = means over the published daily series with MIN-DAY
+  gates (null + "accruing" until met — never fabricated, never backfilled);
+  canonical() gives the byte-exact hash preimage (node crypto and browser
+  crypto.subtle must agree); manipulationBudget() = fee-burn floor to move
+  a fixing 1% (wash 0.5 × $vol × fee × window days). Collector writes
+  data/settlement.json + appends data/settlements.jsonl (readers take
+  last-per-day); methodology.html is the public rulebook with in-browser
+  re-derivation → ✓ VERIFIED badges. Rule changes bump the methodology id.
+  This is a published MEASUREMENT — never present it as operating an
+  instrument.
 - HOME-FIRST UI: boot lands on renderHome (strip + movers + ranked sortable
   table + sparklines); item detail is one click deep with a ← Market back
   button. The watchlist is ~all cases (the index basket) + a few blue-chip
@@ -72,10 +84,10 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 82 checks: analytics units, full API flow, snapshot
+- `node probe.js` — 89 checks: analytics units, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
-- `node client-probe.js` — 32 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node client-probe.js` — 35 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback

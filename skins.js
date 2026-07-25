@@ -185,6 +185,7 @@
           (gain.length ? '<span class="hint">24h gainers</span>' + gain.map(moverChip).join("") : "") +
           (lose.length ? '<span class="hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
         "</div>" : "") +
+      (state.market && state.market.settlement ? settlementPanel(state.market.settlement) : "") +
       '<div class="panel"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
         COLS.map((c) => "<th" + (c.nosort ? "" : ' class="sortable' + (state.sort.key === c.key ? " on" : "") + '" data-k="' + c.key + '"') +
           (c.num ? ' style="text-align:right"' : "") + ">" + c.label +
@@ -230,6 +231,26 @@
       }
       drawIdxChart($("idxChart"), lines);
     }
+  }
+  function settlementPanel(st) {
+    const fx = st.fixings || {};
+    const ft = (name, label) => {
+      const f = fx[name];
+      if (!f) return "";
+      return tile2(label, f.value != null ? String(f.value) : "—",
+        f.value != null ? "hash " + (f.hash || "").slice(0, 12) + "…" : "accruing — " + (f.accruing || ""), "");
+    };
+    const b = st.budget && st.budget.caseIndex;
+    return '<div class="panel"><h2>SETTLEMENT FIXINGS · ' + esc(st.methodology) + "</h2>" +
+      '<div class="tiles">' +
+      ft("SETTLE-CASE-7D", "SETTLE-CASE-7D") +
+      ft("SETTLE-CASE-30D", "SETTLE-CASE-30D") +
+      ft("SETTLE-RATIO-30D", "SETTLE-RATIO-30D") +
+      (b ? tile2("MANIP BUDGET (7D FIX)", "$" + fmtCompact(b.costMove1pctFix7d),
+        "fee-burn floor to move the 7d fixing 1%", "") : "") +
+      "</div>" +
+      '<div class="hint">Dated settlement marks, re-derivable bit-exactly from the committed data — ' +
+      '<a href="methodology.html">methodology &amp; verification</a>. A measurement, not an offer of any instrument.</div></div>';
   }
   const tile2 = (lb, v, sub, c) =>
     '<div class="tile"><div class="lb">' + lb + '</div><div class="v ' + c + '">' + v + '</div>' +

@@ -13,8 +13,10 @@
 const os = require("os");
 const path = require("path");
 const fs = require("fs");
+const crypto = require("crypto");
 const A = require("./analytics.js");
 const M = require("./market.js");
+const S = require("./settlement.js");
 const { startServer, slug } = require("./server.js");
 
 let pass = 0, fail = 0;
@@ -109,6 +111,24 @@ ok(A.corrDaily(corrSeries, "caseIdx", "btc", 30).corr === 1 && A.corrDaily(corrS
   "corrDaily: perfect co-movement = +1, perfect inverse = -1 (log-return pearson)");
 ok(A.corrDaily(corrSeries.slice(0, 5), "caseIdx", "btc", 30).corr === null,
   "corrDaily: refuses to correlate on <10 paired returns");
+
+// ── settlement fixings (SMLX-1) ────────────────────────────────────────────
+const setSeries = Array.from({ length: 7 }, (_, i) => ({ day: A.dayKey(T0 + i * D), t: T0 + i * D, caseIdx: 100 + i, cashRatio: 0.65 }));
+const fx7 = S.computeFixing(setSeries, S.FIXINGS[0]);
+ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-1",
+  "SETTLE-CASE-7D = mean of last 7 daily index values (100..106 → 103)");
+const fxShallow = S.computeFixing(setSeries.slice(0, 2), S.FIXINGS[0]);
+ok(fxShallow.value === null && /2\/3/.test(fxShallow.accruing),
+  "fixing withholds a value below min days (accruing 2/3) — never fabricated");
+ok(S.canonical(fx7) === S.canonical(S.computeFixing(setSeries, S.FIXINGS[0])),
+  "canonical fixing bytes are deterministic (re-derivable hash)");
+const bud = S.manipulationBudget([
+  { cat: "case", tier: null, latest: 2, vol24h: 100000, skinport: null },
+  { cat: "skin", tier: null, latest: 50, vol24h: 10, skinport: { last30d: { median: 10, volume: 30 } } },
+]);
+ok(bud.caseIndex.dailyDollarVolume === 200000 && bud.caseIndex.costMove1pctDay === 15000
+  && bud.caseIndex.costMove1pctFix7d === 105000 && bud.cashRatio.costMove1pctFix30d === 18,
+  "manipulation budget: fee-burn floor arithmetic (0.5 × $vol × fee × window)");
 
 const up = A.signal({ mom7: 0.05, mom30: 0.25, slope30: 0.008, rsi14: 60, curDD: 0.1, vol30: 0.4, liq30: 50 });
 ok(up.score > 12 && /BUY/.test(up.verdict), "signal: sustained uptrend → BUY (" + up.score + ")");
@@ -272,6 +292,10 @@ async function fixtureTransport(url, headers) {
   const mkt = await api("/api/skins/market");
   ok(mkt.status === 200 && mkt.body.today && mkt.body.today.caseIdx === 100,
     "live /api/skins/market: case index at base 100 on day one");
+  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-1"
+    && mkt.body.settlement.fixings["SETTLE-CASE-7D"]
+    && /^[0-9a-f]{64}$/.test(mkt.body.settlement.fixings["SETTLE-CASE-7D"].hash),
+    "live market serves SMLX-1 fixings with 64-hex canonical hashes");
   ok(near(mkt.body.today.cashRatio, 0.87, 0.001) && mkt.body.today.players === 1534000,
     "live market: cash ratio + live player count");
   ok(mkt.body.today.btc === 60000 && mkt.body.today.eth === 1800,
@@ -339,6 +363,14 @@ async function fixtureTransport(url, headers) {
     "collector history jsonl gets steam + skinport lines");
   ok(fs.existsSync(path.join(CROOT, "data", "sales.json")) && fs.existsSync(path.join(CROOT, "data", "skinport-cursor.json")),
     "skinport sales store + rotation cursor persisted (8-per-run budget)");
+  const setPub = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "settlement.json"), "utf8"));
+  const fxPub = setPub.latest.fixings["SETTLE-CASE-7D"];
+  ok(fxPub && fxPub.value === null && /1\/3/.test(fxPub.accruing)
+    && fxPub.hash === crypto.createHash("sha256").update(S.canonical(setPub.detail["SETTLE-CASE-7D"])).digest("hex"),
+    "collector publishes settlement.json; hash re-derives from canonical detail");
+  ok(fs.existsSync(path.join(CROOT, "data", "settlements.jsonl"))
+    && c1.manifest.market.settlement && c1.manifest.market.settlement.budget.caseIndex.dailyDollarVolume === 1311,
+    "fixing history appended; manipulation budget from live volumes (23×57=$1,311)");
   const c2 = await collect({ root: CROOT });
   const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
   ok(hl2.length === hl1.length && c2.manifest.items.length === 4, "immediate re-run dedupes snapshots, still refreshes the manifest");

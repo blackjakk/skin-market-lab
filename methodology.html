@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SMLX-1 — Skin Market Lab Index &amp; Settlement Methodology</title>
+<link rel="stylesheet" href="skins.css">
+<style>
+  .doc { max-width: 880px; margin: 0 auto; padding: 0 20px 60px; }
+  .doc h1 { font-size: 24px; letter-spacing: 1px; margin: 18px 0 4px; }
+  .doc h2 { font-size: 15px; letter-spacing: 1.6px; color: var(--accent); margin: 30px 0 10px;
+    border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .doc p, .doc li { color: var(--text-secondary); font-size: 13.5px; line-height: 1.65; }
+  .doc b { color: var(--text-primary); }
+  .doc code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px;
+    padding: 0 5px; font-size: 12px; }
+  .doc pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; overflow-x: auto; font-size: 11.5px; color: var(--text-secondary); }
+  table.spec { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 10px 0; }
+  table.spec th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 6px 8px;
+    border-bottom: 1px solid var(--line); }
+  table.spec td { padding: 7px 8px; border-bottom: 1px solid var(--line);
+    font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  table.spec td:first-child { color: var(--text-primary); white-space: nowrap; }
+  .ok { color: var(--status-good); font-weight: 700; }
+  .bad { color: var(--status-bad); font-weight: 700; }
+  .muted { color: var(--text-muted); }
+  .topnav { padding: 14px 20px; }
+  .topnav a { color: var(--text-secondary); text-decoration: none; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="topnav"><a href="./">← Skin Market Lab</a></div>
+<div class="doc">
+  <h1>SMLX-1 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
+  <p class="muted">Skin Market Lab · methodology version SMLX-1 · any rule change bumps the version — a
+  fixing is meaningless without its rulebook. <b>This document describes a measurement, not an offer,
+  solicitation, or operation of any financial instrument.</b> Derivatives referencing game items may be
+  regulated products in most jurisdictions; nothing here is legal advice.</p>
+
+  <h2>1 · What this is</h2>
+  <p>Three price indices over Counter-Strike 2 items, plus <b>dated settlement fixings</b> computed from
+  them by fixed rules. Every input is a file committed to this repository by an automated collector
+  (GitHub Actions, every 6 hours), so any counterparty can re-derive every published number
+  <b>bit-exactly</b> from public data — the index operator has no discretion and nothing to assert
+  that you cannot check.</p>
+
+  <h2>2 · The index families</h2>
+  <table class="spec">
+    <tr><th>Index</th><th>Constituents</th><th>Mark source</th><th>Aggregation</th></tr>
+    <tr><td>Lab Case Index</td><td>All tracked cases (the commodity layer)</td>
+      <td>Steam Market daily median price</td><td rowspan="2">Per-item price relative to its own first
+      recorded day; equal-weight geometric mean × 100</td></tr>
+    <tr><td>Liquids Index</td><td>Non-case items with ≥5 median units sold/day (self-gating — “liquids”
+      must be liquid)</td><td>Steam Market daily median</td></tr>
+    <tr><td>Art Index</td><td>Curated grail basket (<code>watchlist.json → art[]</code>)</td>
+      <td>Skinport 30-day realized-sale median, carried forward (appraisal-style; grails sit above the
+      ~$1,800 Steam listing cap and trade rarely)</td><td>Same geometric-relative method over the
+      appraisal marks</td></tr>
+  </table>
+  <p>Mark hygiene, all families: daily UTC buckets, median of intraday readings, a $0 price is never a
+  mark (thin venues report zeros for no-sale windows), zero-volume days keep price but carry no volume,
+  and per-item histories are append-only JSONL in <code>data/history/</code>.</p>
+
+  <h2>3 · Settlement fixings</h2>
+  <p>Averaged fixings are the anti-manipulation choice: to move an N-day mean by 1% an attacker must
+  move <b>every constituent</b> ~1% for <b>N days</b>. Fixings publish with value <code>null</code>
+  (“accruing”) until the minimum day count exists — a fixing is never backfilled or edited.</p>
+  <table class="spec">
+    <tr><th>Fixing</th><th>Definition</th><th>Window</th><th>Min days</th><th>Decimals</th></tr>
+    <tr><td>SETTLE-CASE-7D</td><td>Mean of daily Lab Case Index</td><td>≤7 days</td><td>3</td><td>2</td></tr>
+    <tr><td>SETTLE-CASE-30D</td><td>Mean of daily Lab Case Index</td><td>≤30 days</td><td>10</td><td>2</td></tr>
+    <tr><td>SETTLE-RATIO-30D</td><td>Mean of daily cash ratio (median third-party realized ÷ Steam price)</td>
+      <td>≤30 days</td><td>7</td><td>4</td></tr>
+  </table>
+  <p>Suitability, stated plainly: the case family has commodity-grade depth and is the only plausible
+  candidate for continuous instruments; the cash ratio is a spread/convertibility mark suited to
+  <b>dated</b> settlement only; the art index is <b>never</b> suitable for settlement (appraisal marks,
+  single-sale jumps).</p>
+
+  <h2>4 · Corporate actions &amp; patch events</h2>
+  <ul>
+    <li><b>Case leaves the active drop pool</b> — no index action; the item keeps trading and its price
+    keeps marking (this event is the market's core supply catalyst, not an anomaly).</li>
+    <li><b>Item delisted / renamed / made untradable by Valve</b> — the constituent freezes at its last
+    mark and is removed at the next methodology version; history is never rewritten.</li>
+    <li><b>Structural platform events</b> (e.g., the July 2025 Trade Protection update) — fixings
+    continue mechanically. Consumers of the fixings define their own halt/deferral rules; the
+    methodology's only promise is that the published series is never edited after the fact.</li>
+    <li><b>Data-source loss</b> (venue closes, blocks, or changes terms) — affected marks go null and
+    carry forward per family rules; replacement sources require a version bump.</li>
+  </ul>
+
+  <h2>5 · Manipulation budget <span id="budgetStamp" class="muted"></span></h2>
+  <p>A published <b>floor estimate</b> of the fee-burn required to move a fixing 1%: to shift one
+  item's daily median an attacker must set the price on ≥50% of that day's prints (wash fraction 0.5),
+  paying venue fees (Steam 15%, cash venues ~12%) on that volume; inventory and price risk are
+  deliberately excluded, so true cost is higher. The index is an equal-weight geometric mean, so
+  moving it requires moving every constituent; an N-day fixing multiplies the burn by N. Any credible
+  instrument must cap open interest well below the figure below.</p>
+  <div id="budgetOut"><p class="muted">Loading live budget from data/settlement.json…</p></div>
+
+  <h2>6 · Verification — check the operator</h2>
+  <p>Every fixing publishes a SHA-256 hash over its canonical form
+  (<code>{methodology, name, window, days, values, value}</code>). The button below re-derives the
+  latest fixings <b>in your browser</b> from the committed series in <code>data/index.json</code> and
+  compares hashes against <code>data/settlement.json</code>. From a shell:</p>
+  <pre>node -e "const S=require('./settlement.js'),c=require('crypto');
+const m=require('./data/index.json').market;
+for(const [n,f] of Object.entries(S.computeAll(m.series)))
+  console.log(n, c.createHash('sha256').update(S.canonical(f)).digest('hex'))"</pre>
+  <button class="btn primary" id="verifyBtn">Re-derive &amp; verify fixings</button>
+  <div id="verifyOut" style="margin-top:10px"></div>
+
+  <h2>7 · History</h2>
+  <p>Every collector run appends the day's fixing record to <code>data/settlements.jsonl</code>
+  (last record per day is the day's official fixing). Latest records:</p>
+  <div id="histOut" class="muted">Loading…</div>
+
+  <h2>8 · Disclaimers</h2>
+  <p>Not financial advice; not an offer or invitation to trade any instrument. The underlying market is
+  operated at the sole discretion of Valve Corporation, which can and does change its rules without
+  notice; data sources may revoke access at any time; upstream terms of service do not grant derivative
+  settlement rights over their data. Anyone considering an actual instrument on these fixings needs
+  qualified counsel in every relevant jurisdiction. The authors publish measurements.</p>
+</div>
+<script src="settlement.js"></script>
+<script>
+(function () {
+  "use strict";
+  var S = window.SkinSettlement;
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+  var money = function (v) { return v == null ? "—" : "$" + Math.round(v).toLocaleString("en-US"); };
+
+  function budgetHtml(b) {
+    if (!b) return "<p class='muted'>No budget published yet.</p>";
+    var c = b.caseIndex, r = b.cashRatio;
+    return "<table class='spec'>" +
+      "<tr><th>Quantity</th><th>Value</th><th>Coverage</th></tr>" +
+      "<tr><td>Case basket daily $ volume</td><td>" + money(c.dailyDollarVolume) + "</td><td>" + esc(c.coverage) + "</td></tr>" +
+      "<tr><td>Move case index 1% for one day</td><td>" + money(c.costMove1pctDay) + "</td><td></td></tr>" +
+      "<tr><td><b>Move SETTLE-CASE-7D 1%</b></td><td><b>" + money(c.costMove1pctFix7d) + "</b></td><td></td></tr>" +
+      "<tr><td>Move SETTLE-CASE-30D 1%</td><td>" + money(c.costMove1pctFix30d) + "</td><td></td></tr>" +
+      "<tr><td>Cash-ratio thin-leg 30d $ volume</td><td>" + money(r.thinLegDollarVolume30d) + "</td><td>" + esc(r.coverage) + "</td></tr>" +
+      "<tr><td>Move SETTLE-RATIO-30D 1%</td><td>" + money(r.costMove1pctFix30d) + "</td><td></td></tr>" +
+      "</table><p class='muted'>Model: wash fraction " + b.model.washFraction + ", Steam fee " + b.model.feeSteam +
+      ", cash fee " + b.model.feeCash + " — " + esc(b.model.note) + ".</p>";
+  }
+
+  function sha256Hex(str) {
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)).then(function (buf) {
+      return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
+    });
+  }
+
+  var settlement = null;
+  fetch("data/settlement.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+    settlement = j;
+    document.getElementById("budgetOut").innerHTML = budgetHtml(j.latest && j.latest.budget);
+    document.getElementById("budgetStamp").textContent = j.latest ? "· as of " + j.latest.day : "";
+  }).catch(function () {
+    document.getElementById("budgetOut").innerHTML = "<p class='muted'>data/settlement.json not published yet (first collector run pending).</p>";
+  });
+
+  fetch("data/settlements.jsonl", { cache: "no-store" }).then(function (r) { return r.text(); }).then(function (txt) {
+    var lines = txt.split("\n").filter(Boolean).slice(-8).reverse();
+    var rows = lines.map(function (ln) {
+      try {
+        var f = JSON.parse(ln), fx = f.fixings || {};
+        var cell = function (n) { var x = fx[n]; return x && x.value != null ? x.value : (x ? esc(x.accruing || "—") : "—"); };
+        return "<tr><td>" + esc(f.day) + "</td><td>" + cell("SETTLE-CASE-7D") + "</td><td>" +
+          cell("SETTLE-CASE-30D") + "</td><td>" + cell("SETTLE-RATIO-30D") + "</td></tr>";
+      } catch (e) { return ""; }
+    }).join("");
+    document.getElementById("histOut").innerHTML = rows
+      ? "<table class='spec'><tr><th>Day</th><th>CASE-7D</th><th>CASE-30D</th><th>RATIO-30D</th></tr>" + rows + "</table>"
+      : "No fixing history yet.";
+  }).catch(function () { document.getElementById("histOut").textContent = "No fixing history yet."; });
+
+  document.getElementById("verifyBtn").addEventListener("click", function () {
+    var out = document.getElementById("verifyOut");
+    out.innerHTML = "<p class='muted'>Re-deriving from data/index.json…</p>";
+    fetch("data/index.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (idx) {
+      var derived = S.computeAll(idx.market.series);
+      var names = Object.keys(derived);
+      return Promise.all(names.map(function (n) {
+        return sha256Hex(S.canonical(derived[n])).then(function (h) { return { n: n, f: derived[n], h: h }; });
+      }));
+    }).then(function (res) {
+      var pub = (settlement && settlement.latest && settlement.latest.fixings) || {};
+      out.innerHTML = res.map(function (r) {
+        var p = pub[r.n];
+        var match = p && p.hash === r.h;
+        return "<div>" + (match ? "<span class='ok'>✓ VERIFIED</span> " : "<span class='bad'>✗ MISMATCH</span> ") +
+          esc(r.n) + " = " + (r.f.value != null ? r.f.value : "accruing (" + esc(r.f.accruing || "") + ")") +
+          " <span class='muted'>· " + r.h.slice(0, 16) + "…</span></div>";
+      }).join("") + "<p class='muted'>Derived in this browser from the committed series; hashes compared against the published fixing record." +
+        " A MISMATCH on a freshly-deployed page can mean index.json and settlement.json are from different collector runs — retry after the next run.</p>";
+    }).catch(function (e) { out.innerHTML = "<p class='bad'>Verification failed to load data: " + esc(e.message) + "</p>"; });
+  });
+})();
+</script>
+</body>
+</html>

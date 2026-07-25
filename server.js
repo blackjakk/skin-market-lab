@@ -31,6 +31,7 @@ const path = require("path");
 const crypto = require("crypto");
 const A = require("./analytics.js");
 const M = require("./market.js");
+const S = require("./settlement.js");
 
 const ROOT = __dirname; // static root = the repo itself — the dashboard ships beside the server
 const SNAP_DEDUPE_MS = 30 * 60 * 1000;      // skip snapshots <30min apart per source
@@ -260,6 +261,21 @@ function startServer(opts) {
       if (rec.btc != null) mkt.today.btc = rec.btc;
       if (rec.eth != null) mkt.today.eth = rec.eth;
     }
+    // settlement fixings — live-mode parity with the collector (budget is
+    // case-side only here; the collector's version carries sales coverage)
+    const detail = S.computeAll(mkt.series);
+    const budgetItems = watchlist.map((name) => {
+      const last = latestSteam(name);
+      return { cat: catOf(name), tier: artSet.has(name) ? "art" : null,
+        latest: last ? last.price : null, vol24h: last ? last.vol : null, skinport: null };
+    });
+    const fix = { t: Date.now(), day: A.dayKey(Date.now()), methodology: S.METHODOLOGY, fixings: {}, budget: S.manipulationBudget(budgetItems) };
+    for (const name of Object.keys(detail)) {
+      const f = detail[name];
+      fix.fixings[name] = { value: f.value, accruing: f.accruing || null,
+        hash: crypto.createHash("sha256").update(S.canonical(f)).digest("hex") };
+    }
+    mkt.settlement = fix;
     return mkt;
   }
 
