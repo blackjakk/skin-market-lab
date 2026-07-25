@@ -315,11 +315,17 @@
   //          carried forward — appraisal-style)
   // Each family's index CHAINS: the day's return is the mean of log-returns
   // of constituents present (and included) on BOTH days, cumulated from 100.
+  // WINSORIZED (SMLX-3): each constituent's deviation from the day's
+  // cross-sectional MEDIAN return is clamped to ±clampLog (±0.05 ≈ ±5%) —
+  // market-wide moves pass through in full (the median moves with them),
+  // while a single-name outlier, honest or manipulated, has bounded
+  // influence: moving the index 1% requires pushing ≥ N/5 names ≥5% off
+  // the pack, which the concentrated-attack budget prices directly.
   // Constituent changes are therefore return-neutral at entry/exit — no
   // level jump to front-run. New listings (first mark after the adoption
   // date) season for 30 days, then enter on the FIRST DAY OF THE NEXT
   // CALENDAR MONTH; the founding cohort is grandfathered.
-  const INDEX_RULES = { version: "SMLX-2", adoption: "2026-07-25", seasoningDays: 30 };
+  const INDEX_RULES = { version: "SMLX-3", adoption: "2026-07-25", seasoningDays: 30, clampLog: 0.05 };
   function dayT(day) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day));
     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
@@ -388,7 +394,12 @@
           const p0 = m.priceBy.get(prev), p1 = m.priceBy.get(day);
           if (p0 > 0 && p1 > 0) rets.push(Math.log(p1 / p0));
         }
-        if (rets.length) level = level * Math.exp(rets.reduce((a, b) => a + b, 0) / rets.length);
+        if (rets.length) {
+          const med = median(rets);
+          const cl = INDEX_RULES.clampLog;
+          const adj = rets.map((r) => med + Math.max(-cl, Math.min(cl, r - med)));
+          level = level * Math.exp(adj.reduce((a, b) => a + b, 0) / adj.length);
+        }
         levels[key].push(level); // no overlap → level carries unchanged
       }
     }

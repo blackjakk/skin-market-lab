@@ -186,7 +186,7 @@ async function collect(opts) {
     cnus: latest.cnus != null ? latest.cnus : null,
   });
 
-  // settlement fixings (SMLX-1): computed from the published series and
+  // settlement fixings (SMLX-3): computed from the published series and
   // hashed — the auditable, re-derivable marks a dated instrument would
   // settle against. Appended every run; readers take last-per-day.
   const detail = S.computeAll(manifest.market.series);

@@ -1,11 +1,11 @@
-// ─── settlement.js — SMLX-2 settlement fixings + manipulation budget ────────
+// ─── settlement.js — SMLX-3 settlement fixings + manipulation budget ────────
 // UMD, pure, deterministic — shared by the collector (Node), the live
 // tracker, and the methodology page (browser: window.SkinSettlement).
 //
 // A FIXING is a dated settlement value computed from the committed market
 // series by published rules, so any counterparty re-derives it bit-exactly
 // from the repo's own data files. This is what a cash-settled future or a
-// scalar market would settle against. Methodology id: SMLX-1 (any rule
+// scalar market would settle against. Methodology id: SMLX-3 (any rule
 // change bumps the id — a fixing is meaningless without its rulebook).
 //
 //   SETTLE-CASE-7D   — mean of the last ≤7 daily Lab Case Index values (min 3)
@@ -13,8 +13,10 @@
 //   SETTLE-RATIO-30D — mean of the last ≤30 daily cash-ratio values (min 7)
 //
 // Averaged fixings are the anti-manipulation choice: to move a 7-day mean
-// 1% an attacker must move EVERY constituent 1% for SEVEN days — the
-// manipulationBudget() model prices exactly that.
+// 1% an attacker must sustain the push for SEVEN days, and the SMLX-3
+// winsorization clamp (±0.05 log vs the daily median) forces the push
+// across MANY names at once — manipulationBudget() prices both the
+// uniform attack and the cheapest-k concentrated attack.
 //
 // NOT FINANCIAL ADVICE and NOT an offer of any instrument — this is a
 // published measurement with a verification recipe.
@@ -24,7 +26,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const METHODOLOGY = "SMLX-2";
+  const METHODOLOGY = "SMLX-3";
   const FIXINGS = [
     { name: "SETTLE-CASE-7D", key: "caseIdx", window: 7, minDays: 3, decimals: 2 },
     { name: "SETTLE-CASE-30D", key: "caseIdx", window: 30, minDays: 10, decimals: 2 },
@@ -78,12 +80,18 @@
     const feeSteam = opts.feeSteam != null ? opts.feeSteam : 0.15;
     const feeCash = opts.feeCash != null ? opts.feeCash : 0.12;
     const washFraction = opts.washFraction != null ? opts.washFraction : 0.5;
+    const clampLog = opts.clampLog != null ? opts.clampLog : 0.05;
+    const targetMove = opts.targetMove != null ? opts.targetMove : 0.01;
+    const caseDvs = [];
     let caseDollarVol = 0, caseCovered = 0, caseTotal = 0;
     let ratioLegDollarVol30d = 0, ratioCovered = 0, ratioTotal = 0;
     for (const it of items || []) {
       if (it.cat === "case" && it.tier !== "art") {
         caseTotal++;
-        if (it.latest != null && it.vol24h != null) { caseDollarVol += it.latest * it.vol24h; caseCovered++; }
+        if (it.latest != null && it.vol24h != null) {
+          const dv = it.latest * it.vol24h;
+          caseDollarVol += dv; caseDvs.push(dv); caseCovered++;
+        }
       }
       const s30 = it.skinport && it.skinport.last30d;
       ratioTotal++;
@@ -92,10 +100,29 @@
       }
     }
     const perDayCase = washFraction * caseDollarVol * feeSteam;
+    // Cheapest-k concentrated attack (the honest MINIMUM): the winsorization
+    // clamp means moving the index by targetMove requires pushing at least
+    // ceil(N × targetMove / clampLog) names ≥clampLog off the day's median;
+    // the optimal attacker picks the k thinnest constituents.
+    let concentrated = null;
+    if (caseDvs.length) {
+      const kMin = Math.max(1, Math.ceil(targetMove * caseTotal / clampLog));
+      const sorted = caseDvs.slice().sort((x, y) => x - y);
+      const sumK = sorted.slice(0, Math.min(kMin, sorted.length)).reduce((x, y) => x + y, 0);
+      const perDayK = washFraction * sumK * feeSteam;
+      concentrated = {
+        kMin: kMin,
+        costMove1pctDay: Math.round(perDayK),
+        costMove1pctFix7d: Math.round(perDayK * 7),
+        costMove1pctFix30d: Math.round(perDayK * 30),
+        note: "cheapest-" + kMin + " attack: clamp forces ≥" + kMin + " names ≥" + (clampLog * 100) + "% off the daily median",
+      };
+    }
     const ratioBurn30d = washFraction * ratioLegDollarVol30d * feeCash;
     const r2 = (v) => Math.round(v);
     return {
       model: { washFraction: washFraction, feeSteam: feeSteam, feeCash: feeCash,
+        clampLog: clampLog, targetMove: targetMove,
         note: "fee-burn floor estimate; inventory and price risk excluded" },
       caseIndex: {
         dailyDollarVolume: r2(caseDollarVol),
@@ -103,6 +130,7 @@
         costMove1pctFix7d: r2(perDayCase * 7),
         costMove1pctFix30d: r2(perDayCase * 30),
         coverage: caseCovered + "/" + caseTotal + " constituents priced",
+        concentrated: concentrated,
       },
       cashRatio: {
         thinLegDollarVolume30d: r2(ratioLegDollarVol30d),

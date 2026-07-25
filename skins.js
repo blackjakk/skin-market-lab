@@ -246,8 +246,8 @@
       ft("SETTLE-CASE-7D", "SETTLE-CASE-7D") +
       ft("SETTLE-CASE-30D", "SETTLE-CASE-30D") +
       ft("SETTLE-RATIO-30D", "SETTLE-RATIO-30D") +
-      (b ? tile2("MANIP BUDGET (7D FIX)", "$" + fmtCompact(b.costMove1pctFix7d),
-        "fee-burn floor to move the 7d fixing 1%", "") : "") +
+      (b ? tile2("MANIP BUDGET (7D FIX)", "$" + fmtCompact(b.concentrated ? b.concentrated.costMove1pctFix7d : b.costMove1pctFix7d),
+        "cheapest-attack fee-burn floor to move the 7d fixing 1%", "") : "") +
       "</div>" +
       '<div class="hint">Dated settlement marks, re-derivable bit-exactly from the committed data — ' +
       '<a href="methodology.html">methodology &amp; verification</a>. A measurement, not an offer of any instrument.</div></div>';

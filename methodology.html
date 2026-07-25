@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SMLX-2 — Skin Market Lab Index &amp; Settlement Methodology</title>
+<title>SMLX-3 — Skin Market Lab Index &amp; Settlement Methodology</title>
 <link rel="stylesheet" href="skins.css">
 <style>
   .doc { max-width: 880px; margin: 0 auto; padding: 0 20px 60px; }
@@ -32,8 +32,8 @@
 <body>
 <div class="topnav"><a href="./">← Skin Market Lab</a></div>
 <div class="doc">
-  <h1>SMLX-2 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
-  <p class="muted">Skin Market Lab · methodology version SMLX-2 · any rule change bumps the version — a
+  <h1>SMLX-3 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
+  <p class="muted">Skin Market Lab · methodology version SMLX-3 · any rule change bumps the version — a
   fixing is meaningless without its rulebook. <b>This document describes a measurement, not an offer,
   solicitation, or operation of any financial instrument.</b> Derivatives referencing game items may be
   regulated products in most jurisdictions; nothing here is legal advice.</p>
@@ -49,9 +49,12 @@
   <table class="spec">
     <tr><th>Index</th><th>Constituents</th><th>Mark source</th><th>Aggregation</th></tr>
     <tr><td>Lab Case Index</td><td>All tracked cases (the commodity layer)</td>
-      <td>Steam Market daily median price</td><td rowspan="2">CHAINED: each day's index return is the
-      equal-weight mean of constituents' daily log-returns (items present and included on both days);
-      levels cumulate from 100 — constituent changes are return-neutral at entry/exit</td></tr>
+      <td>Steam Market daily median price</td><td rowspan="2">CHAINED &amp; WINSORIZED: each day's index
+      return is the equal-weight mean of constituents' daily log-returns (items present and included on
+      both days), after clamping each return to within ±0.05 log (≈5%) of the day's <b>cross-sectional
+      median</b> return; levels cumulate from 100. Constituent changes are return-neutral at entry/exit.
+      Because the clamp is median-relative, market-wide moves (crashes, patch shocks) pass through
+      untouched — only single-name deviations from the day's consensus are capped</td></tr>
     <tr><td>Liquids Index</td><td>Non-case items with ≥5 median units sold/day (self-gating — “liquids”
       must be liquid)</td><td>Steam Market daily median</td></tr>
     <tr><td>Art Index</td><td>Curated grail basket (<code>watchlist.json → art[]</code>)</td>
@@ -65,7 +68,8 @@
 
   <h2>3 · Settlement fixings</h2>
   <p>Averaged fixings are the anti-manipulation choice: to move an N-day mean by 1% an attacker must
-  move <b>every constituent</b> ~1% for <b>N days</b>. Fixings publish with value <code>null</code>
+  sustain the push for <b>N days</b>, and the winsorization clamp forces it across <b>many names at
+  once</b> (§5 prices the cheapest such attack). Fixings publish with value <code>null</code>
   (“accruing”) until the minimum day count exists — a fixing is never backfilled or edited.</p>
   <table class="spec">
     <tr><th>Fixing</th><th>Definition</th><th>Window</th><th>Min days</th><th>Decimals</th></tr>
@@ -82,7 +86,7 @@
   <h2>3a · Constituent changes — seasoning &amp; the inclusion calendar</h2>
   <ul>
     <li><b>Founding cohort</b>: items whose first recorded mark is on or before <b>2026-07-25</b>
-    (the SMLX-2 adoption date) are included from their first day.</li>
+    (the adoption date, set at SMLX-2 and unchanged since) are included from their first day.</li>
     <li><b>New listings season for 30 days</b> before becoming eligible — new cases mechanically
     collapse 80–95% from launch-hype prices as drop supply floods in; that dynamic belongs to one
     item's supply schedule, not the market, and never enters the index.</li>
@@ -115,9 +119,17 @@
   <p>A published <b>floor estimate</b> of the fee-burn required to move a fixing 1%: to shift one
   item's daily median an attacker must set the price on ≥50% of that day's prints (wash fraction 0.5),
   paying venue fees (Steam 15%, cash venues ~12%) on that volume; inventory and price risk are
-  deliberately excluded, so true cost is higher. The index is an equal-weight geometric mean, so
-  moving it requires moving every constituent; an N-day fixing multiplies the burn by N. Any credible
-  instrument must cap open interest well below the figure below.</p>
+  deliberately excluded, so true cost is higher. Two attack models are priced:</p>
+  <ul>
+    <li><b>Uniform</b> — move every constituent ~1%: fee-burn on the whole basket's wash volume.</li>
+    <li><b>Concentrated (cheapest-k)</b> — the honest <b>minimum</b>: the ±0.05 clamp caps any one
+    name's contribution at 0.05/N, so moving the index 1% requires pushing at least
+    k&nbsp;=&nbsp;⌈N&nbsp;×&nbsp;0.01&nbsp;/&nbsp;0.05⌉ names ≥5% off the day's median; the optimal
+    attacker picks the k thinnest constituents, and the budget prices exactly that basket. This is the
+    headline number on the dashboard — always quote the cheaper attack.</li>
+  </ul>
+  <p>An N-day fixing multiplies either burn by N. Any credible instrument must cap open interest well
+  below the concentrated figure below.</p>
   <div id="budgetOut"><p class="muted">Loading live budget from data/settlement.json…</p></div>
 
   <h2>6 · Verification — check the operator</h2>
@@ -147,6 +159,12 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       are return-neutral), 30-day seasoning for new listings, first-of-month scheduled inclusion,
       founding-cohort grandfather clause. Adopted before any external instrument referenced the
       fixings; SMLX-1 records in the history retain their stamp.</td></tr>
+    <tr><td>SMLX-3</td><td>2026-07-25</td><td>Median-relative winsorization: each constituent's daily
+      log-return is clamped to within ±0.05 of the day's cross-sectional median before averaging.
+      Closes the concentrated single-name attack (one thin case pumped 50% used to move the whole
+      index ~1%); market-wide moves pass through because the median moves with them. Manipulation
+      budget adds the cheapest-k concentrated attack model, which becomes the headline floor.
+      Prior records retain their stamp.</td></tr>
   </table>
 
   <h2>9 · Disclaimers</h2>
@@ -167,17 +185,26 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
 
   function budgetHtml(b) {
     if (!b) return "<p class='muted'>No budget published yet.</p>";
-    var c = b.caseIndex, r = b.cashRatio;
+    var c = b.caseIndex, r = b.cashRatio, k = c.concentrated;
+    var kRows = "";
+    if (k) {
+      kRows =
+        "<tr><td>Concentrated attack: cheapest " + esc(k.kMin) + " names, 1 day</td><td>" + money(k.costMove1pctDay) + "</td><td>" + esc(k.note || "") + "</td></tr>" +
+        "<tr><td><b>Move SETTLE-CASE-7D 1% (concentrated floor)</b></td><td><b>" + money(k.costMove1pctFix7d) + "</b></td><td></td></tr>" +
+        "<tr><td>Move SETTLE-CASE-30D 1% (concentrated floor)</td><td>" + money(k.costMove1pctFix30d) + "</td><td></td></tr>";
+    }
     return "<table class='spec'>" +
       "<tr><th>Quantity</th><th>Value</th><th>Coverage</th></tr>" +
       "<tr><td>Case basket daily $ volume</td><td>" + money(c.dailyDollarVolume) + "</td><td>" + esc(c.coverage) + "</td></tr>" +
-      "<tr><td>Move case index 1% for one day</td><td>" + money(c.costMove1pctDay) + "</td><td></td></tr>" +
-      "<tr><td><b>Move SETTLE-CASE-7D 1%</b></td><td><b>" + money(c.costMove1pctFix7d) + "</b></td><td></td></tr>" +
-      "<tr><td>Move SETTLE-CASE-30D 1%</td><td>" + money(c.costMove1pctFix30d) + "</td><td></td></tr>" +
+      "<tr><td>Uniform attack: move every case 1% for one day</td><td>" + money(c.costMove1pctDay) + "</td><td></td></tr>" +
+      "<tr><td>Move SETTLE-CASE-7D 1% (uniform)</td><td>" + money(c.costMove1pctFix7d) + "</td><td></td></tr>" +
+      "<tr><td>Move SETTLE-CASE-30D 1% (uniform)</td><td>" + money(c.costMove1pctFix30d) + "</td><td></td></tr>" +
+      kRows +
       "<tr><td>Cash-ratio thin-leg 30d $ volume</td><td>" + money(r.thinLegDollarVolume30d) + "</td><td>" + esc(r.coverage) + "</td></tr>" +
       "<tr><td>Move SETTLE-RATIO-30D 1%</td><td>" + money(r.costMove1pctFix30d) + "</td><td></td></tr>" +
       "</table><p class='muted'>Model: wash fraction " + b.model.washFraction + ", Steam fee " + b.model.feeSteam +
-      ", cash fee " + b.model.feeCash + " — " + esc(b.model.note) + ".</p>";
+      ", cash fee " + b.model.feeCash + (b.model.clampLog != null ? ", clamp ±" + b.model.clampLog + " log" : "") +
+      " — " + esc(b.model.note) + ".</p>";
   }
 
   function sha256Hex(str) {

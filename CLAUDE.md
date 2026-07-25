@@ -59,23 +59,31 @@ dashboard from the collector's committed files), or the setup panel
   grails sit above the ~$1,800 steam listing cap → no steam quote is
   EXPECTED for art, not an error). Art items' manifest latest falls back
   to the 30d sale median.
-- SMLX-2 CONSTRUCTION (perp-grade): indices CHAIN daily returns (mean of
+- SMLX-3 CONSTRUCTION (perp-grade): indices CHAIN daily returns (mean of
   constituents' log-returns over both-days pairs, cumulated from 100) so
   constituent entry/exit is RETURN-NEUTRAL — no level jump to front-run.
-  New listings (first mark after INDEX_RULES.adoption 2026-07-25) season
-  30 days then enter on the next first-of-month; founding cohort
-  grandfathered; art marks carry forward between sparse observations.
-  includedFromDay/INDEX_RULES exported for the probe, which pins the
-  no-jump-on-entry property directly. NEVER revert to level-vs-base — a
-  new case release would create a published riskless trade against any
-  instrument settling on the fixing.
-- SETTLEMENT LAYER (SMLX-2, settlement.js — UMD, pure, shared by
+  WINSORIZED since SMLX-3: each constituent's daily log-return is clamped
+  to ±INDEX_RULES.clampLog (0.05) around the day's CROSS-SECTIONAL MEDIAN
+  return before averaging — closes the concentrated attack (pump one thin
+  case +50% used to move the index ~1%/day) while market-wide moves pass
+  through untouched (the median moves with them; probe pins both
+  properties). New listings (first mark after INDEX_RULES.adoption
+  2026-07-25) season 30 days then enter on the next first-of-month;
+  founding cohort grandfathered; art marks carry forward between sparse
+  observations. includedFromDay/INDEX_RULES exported for the probe, which
+  pins the no-jump-on-entry property directly. NEVER revert to
+  level-vs-base — a new case release would create a published riskless
+  trade against any instrument settling on the fixing.
+- SETTLEMENT LAYER (SMLX-3, settlement.js — UMD, pure, shared by
   collector/server/methodology page): dated fixings (SETTLE-CASE-7D/30D,
   SETTLE-RATIO-30D) = means over the published daily series with MIN-DAY
   gates (null + "accruing" until met — never fabricated, never backfilled);
   canonical() gives the byte-exact hash preimage (node crypto and browser
   crypto.subtle must agree); manipulationBudget() = fee-burn floor to move
-  a fixing 1% (wash 0.5 × $vol × fee × window days). Collector writes
+  a fixing 1% — TWO models: uniform (wash 0.5 × basket $vol × fee ×
+  window days) and concentrated cheapest-k (the clamp forces
+  k = ⌈N×0.01/0.05⌉ names ≥5% off the median; priced on the k thinnest —
+  the HEADLINE floor, always quote the cheaper attack). Collector writes
   data/settlement.json + appends data/settlements.jsonl (readers take
   last-per-day); methodology.html is the public rulebook with in-browser
   re-derivation → ✓ VERIFIED badges. Rule changes bump the methodology id.
@@ -94,8 +102,9 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 94 checks: analytics units, full API flow, snapshot
-  dedupe, import/bootstrap, portfolio P/L, restart persistence,
+- `node probe.js` — 99 checks: analytics units (incl. SMLX-3
+  winsorization + concentrated-budget arithmetic), full API flow,
+  snapshot dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
 - `node client-probe.js` — 35 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair

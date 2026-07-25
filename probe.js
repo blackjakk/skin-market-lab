@@ -158,10 +158,33 @@ const artCarry = A.marketOverview([
 ok(artCarry.series[1].artIdx === 100 && artCarry.series[2].artIdx === 110,
   "art marks carry forward between sparse observations (100 → 100 → 110)");
 
-// ── settlement fixings (SMLX-2) ────────────────────────────────────────────
+// ── SMLX-3 winsorization: median-relative ±0.05 log clamp ──────────────────
+// 4 flat names + 1 pumped +50% in a day: median return 0 → the outlier's
+// contribution clamps to +0.05 → index moves e^(0.05/5) ≈ +1.005% (unclamped
+// SMLX-2 would have printed ≈ +8.4% — the concentrated attack this closes)
+const winso = A.marketOverview([
+  { name: "W1 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 15)], skinportDaily: [] },
+  { name: "W2 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 10)], skinportDaily: [] },
+  { name: "W3 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 10)], skinportDaily: [] },
+  { name: "W4 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 10)], skinportDaily: [] },
+  { name: "W5 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 10)], skinportDaily: [] },
+]);
+ok(near(winso.today.caseIdx, 100 * Math.exp(0.05 / 5), 0.01),
+  "SMLX-3 winsorization: one name pumped +50% moves the index only ≈1% (clamped at ±0.05 vs daily median)");
+// market-wide moves pass through UNTOUCHED: the median moves with the market,
+// so a real crash is never clamped — only single-name deviations are
+const mktWide = A.marketOverview([
+  { name: "C1 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 8)], skinportDaily: [] },
+  { name: "C2 Case", cat: "case", daily: [dcase(T0, 50), dcase(T0 + D, 40)], skinportDaily: [] },
+  { name: "C3 Case", cat: "case", daily: [dcase(T0, 5), dcase(T0 + D, 4)], skinportDaily: [] },
+]);
+ok(near(mktWide.today.caseIdx, 80, 0.01),
+  "SMLX-3 passthrough: a uniform −20% crash prints −20% (median-relative clamp never fights the market)");
+
+// ── settlement fixings (SMLX-3) ────────────────────────────────────────────
 const setSeries = Array.from({ length: 7 }, (_, i) => ({ day: A.dayKey(T0 + i * D), t: T0 + i * D, caseIdx: 100 + i, cashRatio: 0.65 }));
 const fx7 = S.computeFixing(setSeries, S.FIXINGS[0]);
-ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-2",
+ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-3",
   "SETTLE-CASE-7D = mean of last 7 daily index values (100..106 → 103)");
 const fxShallow = S.computeFixing(setSeries.slice(0, 2), S.FIXINGS[0]);
 ok(fxShallow.value === null && /2\/3/.test(fxShallow.accruing),
@@ -175,6 +198,16 @@ const bud = S.manipulationBudget([
 ok(bud.caseIndex.dailyDollarVolume === 200000 && bud.caseIndex.costMove1pctDay === 15000
   && bud.caseIndex.costMove1pctFix7d === 105000 && bud.cashRatio.costMove1pctFix30d === 18,
   "manipulation budget: fee-burn floor arithmetic (0.5 × $vol × fee × window)");
+ok(bud.caseIndex.concentrated && bud.caseIndex.concentrated.kMin === 1
+  && bud.caseIndex.concentrated.costMove1pctDay === 15000,
+  "concentrated budget: single-case basket → cheapest-1 attack equals the uniform floor");
+// cheapest-k arithmetic: 42 cases, dv = $1000×(i+1) → clamp forces
+// k = ⌈42×0.01/0.05⌉ = 9 names; cheapest 9 sum $45,000 → 0.5×0.15×45000
+const kbud = S.manipulationBudget(
+  Array.from({ length: 42 }, (_, i) => ({ cat: "case", tier: null, latest: 1000 * (i + 1), vol24h: 1, skinport: null })));
+ok(kbud.caseIndex.concentrated.kMin === 9 && kbud.caseIndex.concentrated.costMove1pctDay === 3375
+  && kbud.caseIndex.concentrated.costMove1pctFix7d === 23625,
+  "concentrated budget: kMin = ⌈N×move/clamp⌉ = 9, priced on the 9 thinnest names ($3,375/day)");
 
 const up = A.signal({ mom7: 0.05, mom30: 0.25, slope30: 0.008, rsi14: 60, curDD: 0.1, vol30: 0.4, liq30: 50 });
 ok(up.score > 12 && /BUY/.test(up.verdict), "signal: sustained uptrend → BUY (" + up.score + ")");
@@ -338,10 +371,10 @@ async function fixtureTransport(url, headers) {
   const mkt = await api("/api/skins/market");
   ok(mkt.status === 200 && mkt.body.today && mkt.body.today.caseIdx === 100,
     "live /api/skins/market: case index at base 100 on day one");
-  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-2"
+  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-3"
     && mkt.body.settlement.fixings["SETTLE-CASE-7D"]
     && /^[0-9a-f]{64}$/.test(mkt.body.settlement.fixings["SETTLE-CASE-7D"].hash),
-    "live market serves SMLX-1 fixings with 64-hex canonical hashes");
+    "live market serves SMLX-3 fixings with 64-hex canonical hashes");
   ok(near(mkt.body.today.cashRatio, 0.87, 0.001) && mkt.body.today.players === 1534000,
     "live market: cash ratio + live player count");
   ok(mkt.body.today.btc === 60000 && mkt.body.today.eth === 1800,
@@ -417,6 +450,9 @@ async function fixtureTransport(url, headers) {
   ok(fs.existsSync(path.join(CROOT, "data", "settlements.jsonl"))
     && c1.manifest.market.settlement && c1.manifest.market.settlement.budget.caseIndex.dailyDollarVolume === 1311,
     "fixing history appended; manipulation budget from live volumes (23×57=$1,311)");
+  const cCon = c1.manifest.market.settlement.budget.caseIndex.concentrated;
+  ok(cCon && cCon.kMin === 1 && cCon.costMove1pctDay === 98,
+    "collector publishes the concentrated attack budget (cheapest-1 of a 1-case basket: 0.5×1311×0.15≈$98)");
   const c2 = await collect({ root: CROOT });
   const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
   ok(hl2.length === hl1.length && c2.manifest.items.length === 4, "immediate re-run dedupes snapshots, still refreshes the manifest");
