@@ -1,8 +1,11 @@
 name: Deploy to GitHub Pages
 
-# Publishes the dashboard (index.html + assets, served as-is — no build step)
-# to GitHub Pages on every push to main. The static page discovers a tracker
-# running on the visitor's machine (localhost:8790) for live data.
+# Publishes the dashboard on every push to main by mirroring main onto the
+# gh-pages branch, which GitHub Pages serves (auto-provisioned when the
+# branch first appeared — the actions-based deploy path can't CREATE the
+# Pages site with a workflow token, so this repo uses branch deploys).
+# No build step: the site is the repo root as-is. The static page discovers
+# a tracker running on the visitor's machine (localhost:8790) for live data.
 
 on:
   push:
@@ -10,9 +13,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
-  pages: write
-  id-token: write
+  contents: write
 
 concurrency:
   group: pages
@@ -21,20 +22,8 @@ concurrency:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    timeout-minutes: 5
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Configure Pages (auto-enable if needed)
-        uses: actions/configure-pages@v5
-        with:
-          enablement: true
-      - name: Upload site artifact (repo root)
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: .
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      - uses: actions/checkout@v4
+      - name: Mirror main → gh-pages
+        run: git push --force origin HEAD:gh-pages
