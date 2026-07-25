@@ -150,8 +150,8 @@ function startServer(opts) {
     } catch (e) { out.error = String(e.message || e); }
     try {
       const sales = await salesFor(name, true);
-      const m24 = sales && sales.last24h ? sales.last24h.median : null;
-      const m30 = sales && sales.last30d ? sales.last30d.median : null;
+      const m24 = (sales && sales.last24h && sales.last24h.median) || null;
+      const m30 = (sales && sales.last30d && sales.last30d.median) || null;
       if (m24 != null || m30 != null) {
         appendSnap(name, { t: Date.now(), src: "skinport", price: m24 != null ? m24 : m30,
           vol: sales.last24h ? sales.last24h.volume : null, sp30: m30 });
@@ -184,8 +184,8 @@ function startServer(opts) {
     const dump = dumpCached();
     const dumpRow = dump ? (dump.items || []).find((i) => i.name === name) : null;
     const steamGross = last ? last.price : analytics.latest;
-    const spMedian = sales && sales.last24h && sales.last24h.median != null ? sales.last24h.median
-      : sales && sales.last7d ? sales.last7d.median : null;
+    const spMedian = (sales && sales.last24h && sales.last24h.median)
+      || (sales && sales.last7d && sales.last7d.median) || null;
     return {
       name,
       daily,

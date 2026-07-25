@@ -160,6 +160,14 @@ async function fixtureTransport(url, headers) {
 // ── server flow ────────────────────────────────────────────────────────────
 (async () => {
   console.log("— server —");
+  M.setTransport(async () => ({ status: 200, body: JSON.stringify([{ market_hash_name: "Z",
+    last_24_hours: { min: 0, max: 0, avg: 0, median: 0, volume: 0 },
+    last_7_days: { min: 0, max: 0, avg: 0, median: 0, volume: 0 },
+    last_30_days: { min: 0, max: 0, avg: 0, median: 0, volume: 0 },
+    last_90_days: { min: 0, max: 0, avg: 0, median: 0, volume: 0 } }]) }));
+  const zeroed = await M.skinportSalesHistory("Z");
+  ok(zeroed.last30d.median === null && zeroed.last24h.volume === 0,
+    "skinport zero-medians (never sold) map to null — a $0 price is never a mark");
   M.setTransport(fixtureTransport);
   const DATA = path.join(os.tmpdir(), "hh-skin-probe-" + Date.now());
   // pre-write an EMPTY watchlist so the first-boot auto-seed (from the

@@ -378,8 +378,8 @@
     const quote = last ? { t: last.t, price: last.price, lowest: last.lowest != null ? last.lowest : null, vol: last.vol != null ? last.vol : null } : row.quote;
     const sales = row.skinport || null;
     const steamGross = quote ? quote.price : analytics.latest;
-    const spMedian = sales && sales.last24h && sales.last24h.median != null ? sales.last24h.median
-      : sales && sales.last7d ? sales.last7d.median : null;
+    const spMedian = (sales && sales.last24h && sales.last24h.median)
+      || (sales && sales.last7d && sales.last7d.median) || null;
     return {
       name, daily: series.daily, skinportDaily: series.skinportDaily,
       analytics, snapshots: lines.length, imported: !!importRows, watched: true, quote,

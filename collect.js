@@ -97,8 +97,8 @@ async function collect(opts) {
         const fresh = await M.skinportSalesHistory(name);
         if (fresh) {
           salesStore[s] = { t: Date.now(), data: fresh };
-          const m24 = fresh.last24h ? fresh.last24h.median : null;
-          const m30 = fresh.last30d ? fresh.last30d.median : null;
+          const m24 = (fresh.last24h && fresh.last24h.median) || null;
+          const m30 = (fresh.last30d && fresh.last30d.median) || null;
           if (m24 != null || m30 != null)
             appendIfNew({ t: Date.now(), src: "skinport", price: m24 != null ? m24 : m30,
               vol: fresh.last24h ? fresh.last24h.volume : null, sp30: m30 });
@@ -121,7 +121,7 @@ async function collect(opts) {
     const cat = catOf(name);
     const artDaily = tier ? A.toDaily(lines.filter((l) => l.src === "skinport" && l.sp30 != null)
       .map((l) => ({ t: l.t, price: l.sp30 })), { volMode: "max" }) : [];
-    const m30latest = sales && sales.last30d ? sales.last30d.median : null;
+    const m30latest = (sales && sales.last30d && sales.last30d.median) || null;
     marketItems.push({ name, cat, tier, daily: series.daily, skinportDaily: series.skinportDaily, artDaily });
     manifest.items.push({
       name, slug: s, cat, tier,

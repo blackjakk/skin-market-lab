@@ -146,7 +146,11 @@ async function skinportSalesHistory(name) {
   const arr = JSON.parse(res.body);
   const it = Array.isArray(arr) ? arr.find((x) => x && x.market_hash_name === name) || arr[0] : null;
   if (!it) return null;
-  const pick = (o) => (o ? { min: numOrNull(o.min), max: numOrNull(o.max), avg: numOrNull(o.avg), median: numOrNull(o.median), volume: numOrNull(o.volume) } : null);
+  // Skinport reports ZEROS (not nulls) for windows with no sales — and a
+  // $0 price is never a real mark, so zero prices map to null (volume 0 is
+  // a legitimate count and stays).
+  const pz = (v) => { const n = numOrNull(v); return n ? n : null; };
+  const pick = (o) => (o ? { min: pz(o.min), max: pz(o.max), avg: pz(o.avg), median: pz(o.median), volume: numOrNull(o.volume) } : null);
   return {
     last24h: pick(it.last_24_hours), last7d: pick(it.last_7_days),
     last30d: pick(it.last_30_days), last90d: pick(it.last_90_days),

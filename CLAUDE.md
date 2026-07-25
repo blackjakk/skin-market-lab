@@ -72,7 +72,7 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 81 checks: analytics units, full API flow, snapshot
+- `node probe.js` — 82 checks: analytics units, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
 - `node client-probe.js` — 32 checks, real Chromium (PLAYWRIGHT_LIB env
@@ -93,7 +93,9 @@ dashboard from the collector's committed files), or the setup panel
   8 succeed then 429s). The collector therefore refreshes sales for a
   ROTATING 8-item window per run (data/skinport-cursor.json) and serves
   stale aggregates from data/sales.json between turns. NEVER bulk-fetch
-  sales; the tracker's own caches keep 30min–12h TTLs.
+  sales; the tracker's own caches keep 30min–12h TTLs. AND: skinport
+  reports ZEROS (not nulls) for windows with no sales — pz() in market.js
+  maps zero prices to null (volume 0 stays); a $0 price is never a mark.
 - Steam `pricehistory` needs a login cookie; `priceoverview` doesn't.
   Logged-out listing pages no longer embed `var line1` history.
 - Snapshot volume readings are trailing-24h → daily bucket uses `volMode:
