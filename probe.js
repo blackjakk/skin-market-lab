@@ -83,6 +83,24 @@ const moSkins = A.marketOverview([
 ]);
 ok(moSkins.today && moSkins.today.caseIdx === null && near(moSkins.today.cashRatio, 0.8, 1e-9) && moSkins.today.volTotal === 7,
   "marketOverview: skins-only set still reports ratio/volume (index null, not blank)");
+const caSame = A.cashAdjustedIndex([
+  { day: "d1", t: T0, caseIdx: 100, cashRatio: 0.8 },
+  { day: "d2", t: T0 + D, caseIdx: 110, cashRatio: 0.8 },
+]);
+const caDiv = A.cashAdjustedIndex([
+  { day: "d1", t: T0, caseIdx: 100, cashRatio: 0.8 },
+  { day: "d2", t: T0 + D, caseIdx: 110, cashRatio: 0.72 },
+]);
+ok(caSame[1].cashIdx === 110 && caDiv[1].cashIdx === 99,
+  "cashAdjustedIndex: flat ratio tracks the index; falling ratio discounts it (slosh detector)");
+const corrSeries = Array.from({ length: 15 }, (_, i) => {
+  const p = 100 * Math.exp(0.01 * Math.sin(i));
+  return { day: "c" + i, t: T0 + i * D, caseIdx: p, btc: 2 * p, inv: 1 / p };
+});
+ok(A.corrDaily(corrSeries, "caseIdx", "btc", 30).corr === 1 && A.corrDaily(corrSeries, "caseIdx", "inv", 30).corr === -1,
+  "corrDaily: perfect co-movement = +1, perfect inverse = -1 (log-return pearson)");
+ok(A.corrDaily(corrSeries.slice(0, 5), "caseIdx", "btc", 30).corr === null,
+  "corrDaily: refuses to correlate on <10 paired returns");
 
 const up = A.signal({ mom7: 0.05, mom30: 0.25, slope30: 0.008, rsi14: 60, curDD: 0.1, vol30: 0.4, liq30: 50 });
 ok(up.score > 12 && /BUY/.test(up.verdict), "signal: sustained uptrend → BUY (" + up.score + ")");
@@ -112,6 +130,9 @@ async function fixtureTransport(url, headers) {
   }
   if (url.includes("api.steampowered.com/ISteamUserStats")) {
     return { status: 200, body: JSON.stringify({ response: { player_count: 1534000, result: 1 } }) };
+  }
+  if (url.includes("api.coingecko.com")) {
+    return { status: 200, body: JSON.stringify({ bitcoin: { usd: 60000 }, ethereum: { usd: 1800 } }) };
   }
   if (url.includes("api.skinport.com/v1/items")) {
     return { status: 200, body: JSON.stringify([
@@ -235,6 +256,8 @@ async function fixtureTransport(url, headers) {
     "live /api/skins/market: case index at base 100 on day one");
   ok(near(mkt.body.today.cashRatio, 0.87, 0.001) && mkt.body.today.players === 1534000,
     "live market: cash ratio + live player count");
+  ok(mkt.body.today.btc === 60000 && mkt.body.today.eth === 1800,
+    "live market: crypto benchmarks attached (cached macro fetch)");
   const wl2 = await api("/api/skins/watchlist");
   const fr = wl2.body.items.find((x) => x.name === "Fracture Case");
   ok(fr && fr.cat === "case" && Array.isArray(fr.spark) && fr.vol24h === 57,
@@ -266,6 +289,9 @@ async function fixtureTransport(url, headers) {
   ok(c1.manifest.market && c1.manifest.market.today && c1.manifest.market.today.caseIdx === 100
     && c1.manifest.market.today.players === 1534000,
     "collector publishes the market block (index base + players)");
+  ok(c1.manifest.market.today.btc === 60000
+    && c1.manifest.market.series.some((sr) => sr.btc === 60000),
+    "collector records BTC/ETH benchmarks into the macro series");
   const idx = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "index.json"), "utf8"));
   const rd = idx.items.find((i) => i.name === NAME), kn = idx.items.find((i) => i.name === KNIFE);
   ok(rd && rd.quote && rd.quote.price === 23 && typeof rd.score === "number" && rd.verdict && rd.slug === slug(NAME),

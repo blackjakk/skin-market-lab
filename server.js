@@ -233,13 +233,21 @@ function startServer(opts) {
       return { name, cat: catOf(name), daily: s.daily, skinportDaily: s.skinportDaily };
     });
     const mkt = A.marketOverview(items);
-    const pf = path.join(DATA, "cache", "players.json");
+    const pf = path.join(DATA, "cache", "macro.json");
     let rec = readJson(pf, null);
     if (!rec || Date.now() - rec.t > 30 * 60 * 1000) {
-      try { rec = { t: Date.now(), players: await M.steamPlayers() }; writeJson(pf, rec); }
-      catch (e) { /* keep stale (or none) */ }
+      const next = { t: Date.now() };
+      try { next.players = await M.steamPlayers(); } catch (e) { if (rec) next.players = rec.players; }
+      try { const c = await M.cryptoPrices(); next.btc = c.btc; next.eth = c.eth; }
+      catch (e) { if (rec) { next.btc = rec.btc; next.eth = rec.eth; } }
+      rec = next;
+      writeJson(pf, rec);
     }
-    if (mkt.today && rec && rec.players != null) mkt.today.players = rec.players;
+    if (mkt.today && rec) {
+      if (rec.players != null) mkt.today.players = rec.players;
+      if (rec.btc != null) mkt.today.btc = rec.btc;
+      if (rec.eth != null) mkt.today.eth = rec.eth;
+    }
     return mkt;
   }
 

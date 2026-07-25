@@ -102,25 +102,37 @@ async function collect(opts) {
   }
 
   // market overview: the Lab Case Index + cash ratio + total volume, plus
-  // the CS2 live player count (appended raw per run, daily-bucketed here)
+  // per-run macro readings (CS2 players, BTC/ETH — the correlation
+  // benchmarks) appended raw to market.jsonl and daily-bucketed here
   manifest.market = A.marketOverview(marketItems);
-  const playersFile = path.join(dataDir, "market.jsonl");
-  try {
-    const p = await M.steamPlayers();
-    if (p != null) fs.appendFileSync(playersFile, JSON.stringify({ t: Date.now(), players: p }) + "\n");
-  } catch (e) { /* players are garnish — never fail the run over them */ }
-  const playersByDay = new Map();
-  for (const ln of readLines(playersFile)) {
-    if (ln.players == null) continue;
+  const macroFile = path.join(dataDir, "market.jsonl");
+  const reading = { t: Date.now() };
+  try { const p = await M.steamPlayers(); if (p != null) reading.players = p; }
+  catch (e) { /* garnish — never fail the run */ }
+  try { const c = await M.cryptoPrices(); if (c.btc != null) reading.btc = c.btc; if (c.eth != null) reading.eth = c.eth; }
+  catch (e) { /* garnish */ }
+  if (reading.players != null || reading.btc != null)
+    fs.appendFileSync(macroFile, JSON.stringify(reading) + "\n");
+  const byDay = new Map();
+  let latest = {};
+  for (const ln of readLines(macroFile)) {
     const day = A.dayKey(ln.t);
-    playersByDay.set(day, Math.max(playersByDay.get(day) || 0, ln.players));
+    let r = byDay.get(day);
+    if (!r) { r = {}; byDay.set(day, r); }
+    if (ln.players != null) r.players = Math.max(r.players || 0, ln.players);
+    if (ln.btc != null) r.btc = ln.btc;   // last reading of the day wins
+    if (ln.eth != null) r.eth = ln.eth;
+    latest = Object.assign(latest, { players: ln.players != null ? ln.players : latest.players, btc: ln.btc != null ? ln.btc : latest.btc, eth: ln.eth != null ? ln.eth : latest.eth });
   }
-  for (const s of manifest.market.series) if (playersByDay.has(s.day)) s.players = playersByDay.get(s.day);
-  if (manifest.market.today) {
-    let latest = null;
-    for (const ln of readLines(playersFile)) if (ln.players != null) latest = ln.players;
-    manifest.market.today.players = latest;
+  for (const s of manifest.market.series) {
+    const r = byDay.get(s.day);
+    if (r) { if (r.players != null) s.players = r.players; if (r.btc != null) s.btc = r.btc; if (r.eth != null) s.eth = r.eth; }
   }
+  if (manifest.market.today) Object.assign(manifest.market.today, {
+    players: latest.players != null ? latest.players : null,
+    btc: latest.btc != null ? latest.btc : null,
+    eth: latest.eth != null ? latest.eth : null,
+  });
 
   fs.writeFileSync(path.join(dataDir, "index.json"), JSON.stringify(manifest));
   return { manifest, steamOk, total: names.length };

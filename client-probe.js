@@ -31,6 +31,9 @@ M.setTransport(async (url) => {
   if (url.includes("api.steampowered.com/ISteamUserStats")) {
     return { status: 200, body: JSON.stringify({ response: { player_count: 1534000, result: 1 } }) };
   }
+  if (url.includes("api.coingecko.com")) {
+    return { status: 200, body: JSON.stringify({ bitcoin: { usd: 60000 }, ethereum: { usd: 1800 } }) };
+  }
   if (url.includes("api.skinport.com/v1/sales/history")) {
     const agg = { min: 35, max: 48, avg: 40.1, median: 39.5, volume: 34 };
     return { status: 200, body: JSON.stringify([{ market_hash_name: "AK-47 | Redline (Field-Tested)", last_24_hours: agg, last_7_days: agg, last_30_days: agg, last_90_days: agg }]) };
@@ -68,6 +71,7 @@ M.setTransport(async (url) => {
   const stripTxt = await page.textContent("#itemView");
   ok(/LAB CASE INDEX/.test(stripTxt) && /CS2 PLAYERS/.test(stripTxt) && /CASH RATIO/.test(stripTxt),
     "market strip present (index / cash ratio / players)");
+  ok(/VS BITCOIN/.test(stripTxt), "BTC correlation tile present (measuring until 10 paired days)");
   await page.screenshot({ path: "/tmp/skin_lab_home.png", fullPage: true });
   console.log("  📸 /tmp/skin_lab_home.png");
 

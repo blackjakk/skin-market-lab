@@ -37,6 +37,14 @@ dashboard from the collector's committed files), or the setup panel
   data/index.json, the live server serves it at /api/skins/market — one
   function, three surfaces. today{} must stay non-null for skins-only sets
   (ratio/volume/players don't depend on cases).
+- SLOSH DETECTION: `cashAdjustedIndex` (caseIdx × cashRatio rebased — the
+  basket in REAL dollars) and `corrDaily` (log-return pearson vs BTC, null
+  under 10 paired days) live in analytics.js; the collector records BTC/ETH
+  (CoinGecko, keyless) + players per run into data/market.jsonl and folds
+  them into market.series. Home chart draws wallet index / cash-adjusted /
+  BTC-rebased on ONE base-100 axis (never two scales). Stablecoins are the
+  actual cash-out rails but are pegged — that's why BTC/ETH are the
+  correlation benchmarks.
 - HOME-FIRST UI: boot lands on renderHome (strip + movers + ranked sortable
   table + sparklines); item detail is one click deep with a ← Market back
   button. The watchlist is ~all cases (the index basket) + a few blue-chip
@@ -50,10 +58,10 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 71 checks: analytics units, full API flow, snapshot
+- `node probe.js` — 76 checks: analytics units, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
-- `node client-probe.js` — 29 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node client-probe.js` — 30 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback

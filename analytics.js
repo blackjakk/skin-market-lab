@@ -353,9 +353,49 @@
     return { series: series, today: today };
   }
 
+  // ── slosh detection (measured, not vibed) ────────────────────────────────
+  // Cash-adjusted index: caseIdx × (cashRatio / base ratio) — the basket's
+  // value in REAL dollars rather than wallet dollars. When it diverges below
+  // the wallet index, that's wallet inflation / exit pressure, not real
+  // appreciation. Ratio gaps carry the last known value forward.
+  function cashAdjustedIndex(series) {
+    let baseRatio = null, lastRatio = null;
+    const out = [];
+    for (const s of series || []) {
+      if (s.cashRatio != null) lastRatio = s.cashRatio;
+      if (s.caseIdx == null || lastRatio == null) continue;
+      if (baseRatio == null) baseRatio = lastRatio;
+      out.push({ day: s.day, t: s.t, cashIdx: round2(s.caseIdx * lastRatio / baseRatio) });
+    }
+    return out;
+  }
+
+  // Pearson correlation of day-over-day log returns between two keys of the
+  // market series (e.g. "caseIdx" vs "btc") over a trailing window.
+  // Needs ≥10 paired returns to say anything — below that returns null.
+  function corrDaily(series, keyA, keyB, windowDays) {
+    const pts = (series || []).filter((s) => s[keyA] != null && s[keyB] != null && s[keyA] > 0 && s[keyB] > 0);
+    const w = pts.slice(-((windowDays == null ? 30 : windowDays) + 1));
+    const ra = [], rb = [];
+    for (let i = 1; i < w.length; i++) {
+      ra.push(Math.log(w[i][keyA] / w[i - 1][keyA]));
+      rb.push(Math.log(w[i][keyB] / w[i - 1][keyB]));
+    }
+    const n = ra.length;
+    if (n < 10) return { corr: null, n: n };
+    const ma = ra.reduce((a, b) => a + b, 0) / n, mb = rb.reduce((a, b) => a + b, 0) / n;
+    let sab = 0, sa = 0, sb = 0;
+    for (let i = 0; i < n; i++) {
+      const da = ra[i] - ma, db = rb[i] - mb;
+      sab += da * db; sa += da * da; sb += db * db;
+    }
+    if (!sa || !sb) return { corr: null, n: n };
+    return { corr: Math.round(sab / Math.sqrt(sa * sb) * 100) / 100, n: n };
+  }
+
   return {
     parseMoney: parseMoney, parseCount: parseCount, dayKey: dayKey, median: median, toDaily: toDaily,
-    marketOverview: marketOverview,
+    marketOverview: marketOverview, cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,
     maxDrawdown: maxDrawdown, currentDrawdown: currentDrawdown,

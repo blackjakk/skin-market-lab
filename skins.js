@@ -149,7 +149,10 @@
     const movers = state.watch.filter((w) => w.mom1 != null).sort((a, b) => b.mom1 - a.mom1);
     const gain = movers.filter((w) => w.mom1 > 0).slice(0, 3);
     const lose = movers.filter((w) => w.mom1 < 0).slice(-3).reverse();
-    const idxPts = state.market ? state.market.series.filter((s) => s.caseIdx != null) : [];
+    const series = state.market ? state.market.series : [];
+    const idxPts = series.filter((s) => s.caseIdx != null);
+    const cashPts = A.cashAdjustedIndex(series);
+    const btcCorr = A.corrDaily(series, "caseIdx", "btc", 30);
     const strip =
       tile2("LAB CASE INDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
         t && t.idx1 != null ? fmtPct(t.idx1) + " 24h" + (t.idx7 != null ? " · " + fmtPct(t.idx7) + " 7d" : "") : "base 100 at first collection",
@@ -158,10 +161,20 @@
         "cash sale vs steam price", "") +
       tile2("UNITS SOLD / DAY", t ? fmtCompact(t.volTotal) : "—", "across tracked items", "") +
       tile2("CS2 PLAYERS", t && t.players != null ? fmtCompact(t.players) : "—", "in game right now", "") +
+      tile2("VS BITCOIN (30D)", btcCorr.corr != null ? (btcCorr.corr > 0 ? "+" : "") + btcCorr.corr.toFixed(2) : "—",
+        (btcCorr.corr != null ? "return correlation" : "measuring: " + btcCorr.n + "/10 days") +
+        (t && t.btc != null ? " · BTC $" + fmtCompact(t.btc) : ""), "") +
       tile2("TRACKED", String(state.watch.length), state.mode === "static" && state.manifest ? "updated " + ago(state.manifest.generatedAt) : "live tracker", "");
     $("itemView").innerHTML =
       '<div class="panel"><div class="tiles strip">' + strip + "</div>" +
-        (idxPts.length >= 2 ? '<canvas id="idxChart" height="110" aria-label="Lab case index over time" role="img"></canvas>' : "") +
+        (idxPts.length >= 2 ?
+          '<div class="idxLegend">' +
+            '<span><span class="sw" style="background:' + COL.price + '"></span>Lab Index (wallet $)</span>' +
+            '<span><span class="sw" style="background:' + COL.sma7 + '"></span>Cash-adjusted (real $)</span>' +
+            (series.some((s) => s.btc != null) ? '<span><span class="sw" style="background:' + COL.sma30 + '"></span>BTC (rebased)</span>' : "") +
+            '<span class="hint">gap between the first two = wallet inflation / exit pressure</span>' +
+          "</div>" +
+          '<canvas id="idxChart" height="130" aria-label="Lab case index, cash-adjusted index and BTC over time" role="img"></canvas>' : "") +
       "</div>" +
       (gain.length || lose.length ?
         '<div class="panel moversRow">' +
@@ -203,7 +216,16 @@
     $("itemView").querySelectorAll(".moverChip").forEach((b) =>
       b.addEventListener("click", () => selectItem(b.dataset.name)));
     rows.forEach((w, i) => drawSpark($("itemView").querySelector('.spark[data-i="' + i + '"]'), w.spark));
-    if (idxPts.length >= 2) drawIdxChart($("idxChart"), idxPts);
+    if (idxPts.length >= 2) {
+      const lines = [{ pts: idxPts.map((p) => ({ t: p.t, v: p.caseIdx })), col: COL.price, w: 2 }];
+      if (cashPts.length >= 2) lines.push({ pts: cashPts.map((p) => ({ t: p.t, v: p.cashIdx })), col: COL.sma7, w: 1.5 });
+      const btcBase = series.find((s) => s.btc != null);
+      if (btcBase) {
+        const btcPts = series.filter((s) => s.btc != null).map((s) => ({ t: s.t, v: 100 * s.btc / btcBase.btc }));
+        if (btcPts.length >= 2) lines.push({ pts: btcPts, col: COL.sma30, w: 1.5, dash: [5, 4] });
+      }
+      drawIdxChart($("idxChart"), lines);
+    }
   }
   const tile2 = (lb, v, sub, c) =>
     '<div class="tile"><div class="lb">' + lb + '</div><div class="v ' + c + '">' + v + '</div>' +
@@ -227,13 +249,16 @@
     pts.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p)) : ctx.moveTo(x(i), y(p))));
     ctx.stroke();
   }
-  function drawIdxChart(cv, pts) {
-    if (!cv) return;
+  // lines: [{pts:[{t,v}], col, w, dash?}] — all rebased to 100 so ONE axis
+  // serves every series (never two scales on one chart)
+  function drawIdxChart(cv, lines) {
+    if (!cv || !lines.length) return;
     cv.width = cv.parentElement.clientWidth - 8;
     const ctx = cv.getContext("2d");
     const W = cv.width, H = cv.height, L = 40, R = 8, T = 8, B = 16;
-    const t0 = pts[0].t, t1 = pts[pts.length - 1].t || t0 + 1;
-    let lo = Math.min(...pts.map((p) => p.caseIdx)), hi = Math.max(...pts.map((p) => p.caseIdx));
+    const all = lines.flatMap((l) => l.pts);
+    const t0 = Math.min(...all.map((p) => p.t)), t1 = Math.max(...all.map((p) => p.t)) || t0 + 1;
+    let lo = Math.min(...all.map((p) => p.v)), hi = Math.max(...all.map((p) => p.v));
     const pad = (hi - lo) * 0.1 || 1; lo -= pad; hi += pad;
     const x = (t) => L + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (W - L - R);
     const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
@@ -243,11 +268,16 @@
       ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(W - R, yy); ctx.stroke();
       ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(v.toFixed(1), L - 5, yy);
     }
+    const d0 = new Date(t0), d1 = new Date(t1);
+    const dl = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
     ctx.textAlign = "center"; ctx.textBaseline = "top";
-    ctx.fillText(pts[0].day, x(t0) + 24, H - B + 4); ctx.fillText(pts[pts.length - 1].day, x(t1) - 24, H - B + 4);
-    ctx.strokeStyle = COL.price; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
-    pts.forEach((p, i) => (i ? ctx.lineTo(x(p.t), y(p.caseIdx)) : ctx.moveTo(x(p.t), y(p.caseIdx))));
-    ctx.stroke();
+    ctx.fillText(dl(d0), x(t0) + 24, H - B + 4); ctx.fillText(dl(d1), x(t1) - 24, H - B + 4);
+    for (const ln of lines) {
+      ctx.strokeStyle = ln.col; ctx.lineWidth = ln.w || 1.5; ctx.setLineDash(ln.dash || []);
+      ctx.lineJoin = "round"; ctx.beginPath();
+      ln.pts.forEach((p, i) => (i ? ctx.lineTo(x(p.t), y(p.v)) : ctx.moveTo(x(p.t), y(p.v))));
+      ctx.stroke(); ctx.setLineDash([]);
+    }
   }
   function goHome() {
     state.selected = null; state.item = null;

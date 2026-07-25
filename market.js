@@ -155,6 +155,20 @@ async function skinportSalesHistory(name) {
 
 function numOrNull(v) { const n = Number(v); return isFinite(n) ? n : null; }
 
+// ── Crypto benchmarks (the speculative-liquidity tide) ─────────────────────
+// BTC = the risk-appetite benchmark, ETH = the degen beta. Stablecoins move
+// the actual cash-out volume but are pegged — useless for correlation.
+async function cryptoPrices() {
+  const url = "https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum&vs_currencies=usd";
+  const res = await polite(url);
+  if (res.status !== 200) throw new Error("coingecko HTTP " + res.status);
+  const j = JSON.parse(res.body);
+  return {
+    btc: j && j.bitcoin ? numOrNull(j.bitcoin.usd) : null,
+    eth: j && j.ethereum ? numOrNull(j.ethereum.usd) : null,
+  };
+}
+
 // ── Steam live player count (the market's demand fundamental) ──────────────
 async function steamPlayers() {
   const url = "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=" + APP_ID;
@@ -167,5 +181,5 @@ async function steamPlayers() {
 module.exports = {
   APP_ID, setTransport, httpGet,
   steamPriceOverview, steamPriceHistory, parseSteamDate, normalizeHistoryRows,
-  skinportItems, skinportSalesHistory, steamPlayers,
+  skinportItems, skinportSalesHistory, steamPlayers, cryptoPrices,
 };

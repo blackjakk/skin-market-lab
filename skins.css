@@ -212,3 +212,7 @@ tr.mrow:hover, tr.mrow:focus-visible { background: var(--surface-2); outline: no
 .sigMini.good { color: var(--status-good); } .sigMini.bad { color: var(--status-bad); }
 .spark { display: block; }
 .backBtn { margin-bottom: 10px; }
+.idxLegend { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: 11.5px;
+  color: var(--text-secondary); margin: 4px 0 2px; }
+.idxLegend .sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px;
+  vertical-align: middle; margin-right: 5px; }
