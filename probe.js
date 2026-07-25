@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// skins/probe.js — hermetic gate for the CS skin market tracker.
+// probe.js — hermetic gate for the CS skin market tracker.
 //
 // NO network: market.js's transport is replaced with a fixture, the server
 // runs in-process on an ephemeral port with a tmp data dir, timers off.
@@ -8,7 +8,7 @@
 // analytics report → cross-market compare → portfolio P/L → restart
 // persistence). Exit 0 = all pass.
 //
-//   node skins/probe.js
+//   node probe.js
 "use strict";
 const os = require("os");
 const path = require("path");

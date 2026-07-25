@@ -1,0 +1,37 @@
+name: Gates
+
+# Both probes on every push. Hermetic — the fixture transport means no real
+# Steam/Skinport traffic ever leaves CI.
+#   probe.js        — analytics math pinned to hand-computed values + full API flow
+#   client-probe.js — real Chromium drives the dashboard (chart pixels painted,
+#                     crosshair tooltip, portfolio form, static-host discovery)
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: gates-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PLAYWRIGHT_LIB: playwright
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install browser toolchain (client probe only)
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+      - name: Tracker probe (analytics math + API, 55 checks)
+        run: node probe.js
+      - name: Dashboard probe (real Chromium, 17 checks)
+        run: node client-probe.js

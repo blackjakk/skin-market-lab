@@ -513,8 +513,8 @@
       "<p>This dashboard is a static page — prices are recorded by a tiny local tracker that keeps" +
       " your history and portfolio on <b>your</b> machine (Steam/Skinport block direct browser calls).</p>" +
       "<ol>" +
-      "<li>Get the repo (once): <code>git clone https://github.com/blackjakk/hashmark-heroes</code></li>" +
-      "<li>Start the tracker: <code>cd hashmark-heroes &amp;&amp; npm run skins</code></li>" +
+      "<li>Get the repo (once): <code>git clone https://github.com/blackjakk/skin-market-lab</code></li>" +
+      "<li>Start the tracker: <code>cd skin-market-lab &amp;&amp; npm start</code></li>" +
       "<li>Leave it running and hit retry — this page finds it on <code>localhost:8790</code> automatically." +
       " (History accrues while it runs; it also serves this same dashboard at" +
       ' <code>http://localhost:8790</code> if your browser blocks the cross-origin hop.)</li>' +

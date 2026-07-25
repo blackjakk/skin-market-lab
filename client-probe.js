@@ -1,12 +1,12 @@
 #!/usr/bin/env node
-// skins/client-probe.js — Skin Market Lab dashboard, end-to-end in a real
+// client-probe.js — Skin Market Lab dashboard, end-to-end in a real
 // browser. Hermetic: the tracker server runs IN-PROCESS with a fixture
 // transport (no internet), pre-seeded with 120 days of history; Chromium
 // then drives the actual UI: watchlist → item view → stat tiles → canvas
 // chart actually painted → crosshair tooltip → portfolio lot add → P/L.
 // Screenshot written to /tmp/skin_lab.png for visual QA.
 //
-//   node skins/client-probe.js
+//   node client-probe.js
 "use strict";
 const PW_LIB = process.env.PLAYWRIGHT_LIB || "/opt/node22/lib/node_modules/playwright";
 const { chromium } = require(PW_LIB);
@@ -146,7 +146,7 @@ M.setTransport(async (url) => {
     const pageC = await ctxC.newPage();
     await pageC.goto("http://localhost:5393/", { waitUntil: "networkidle" });
     await pageC.waitForSelector("#retryBtn", { timeout: 10000 });
-    ok((await pageC.textContent("#itemView")).includes("npm run skins"), "no tracker → setup panel with run instructions");
+    ok((await pageC.textContent("#itemView")).includes("npm start"), "no tracker → setup panel with run instructions");
     await ctxC.close();
     dummy.close();
   } else { console.log("  ~ setup-panel check skipped (a real tracker owns :8790)"); }

@@ -3,8 +3,8 @@
 A self-contained market-research tool for Counter-Strike skin investing:
 a zero-dependency Node tracker that records prices **over time** and a
 dashboard with charts, indicators, cross-market fee math, and a portfolio
-P/L ledger. Everything lives in this `skins/` directory; it shares nothing
-with the game sim — completely determinism-neutral.
+P/L ledger. Zero dependencies — plain Node and a static page, nothing to
+build. (Grew up inside the hashmark-heroes repo; now lives here.)
 
 > **Not financial advice.** The signal is a transparent heuristic — every
 > point of its score is itemized so you can judge the inputs yourself. Skin
@@ -13,22 +13,24 @@ with the game sim — completely determinism-neutral.
 ## Quick start
 
 ```
-npm run skins            # tracker + dashboard on http://localhost:8790
+git clone https://github.com/blackjakk/skin-market-lab
+cd skin-market-lab
+npm start                # tracker + dashboard on http://localhost:8790
 ```
 
-**The link:** https://blackjakk.github.io/hashmark-heroes/skins/ — the same
+**The link:** https://blackjakk.github.io/skin-market-lab/ — the same
 dashboard, hosted on GitHub Pages. It auto-connects to a tracker running on
-your machine (`npm run skins`); with no tracker running it shows setup
-steps. Bookmark whichever you prefer — the Pages link, or
-http://localhost:8790 straight from the tracker (identical page, zero
-cross-origin hops). The tracker is what records history and stores your
-portfolio, locally in `skins/data/` — prices can't be fetched from a bare
-browser because Steam/Skinport don't allow cross-origin calls.
+your machine (`npm start`); with no tracker running it shows setup steps.
+Bookmark whichever you prefer — the Pages link, or http://localhost:8790
+straight from the tracker (identical page, zero cross-origin hops). The
+tracker is what records history and stores your portfolio, locally in
+`data/` — prices can't be fetched from a bare browser because
+Steam/Skinport don't allow cross-origin calls.
 
 Open the dashboard, search an item (cases, skins, knives — the search
 universe is a curated seed list until the full ~20k-name Skinport dump is
 cached on first refresh), click it to start tracking. Every snapshot appends
-to `skins/data/history/*.jsonl` — **history accrues as long as the
+to `data/history/*.jsonl` — **history accrues as long as the
 tracker keeps running** (auto-snapshot every `SKIN_SNAP_HOURS`, default 6).
 
 ## Getting deep history immediately
@@ -47,7 +49,7 @@ Steam price history per item:
 
 ## What the analytics mean
 
-All computed in `skins/analytics.js` (shared verbatim by server and
+All computed in `analytics.js` (shared verbatim by server and
 browser; unit-pinned by the probe):
 
 - **7D/30D/90D** — momentum vs the closest recorded day that far back.
@@ -73,15 +75,17 @@ browser; unit-pinned by the probe):
 | Skinport `/v1/sales/history` | realized-sale medians 24h/7d/30d/90d | none (brotli) |
 
 Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
-30min–12h). Data lands in `skins/data/` (gitignored).
+30min–12h). Data lands in `data/` (gitignored).
 
 ## Gates
 
-- `node skins/probe.js` — 55 checks, hermetic (fixture transport):
+- `npm run probe` — 55 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
-- `node skins/client-probe.js` — real Chromium drives the dashboard:
+- `npm run probe:ui` — real Chromium drives the dashboard:
   chart pixels actually painted, crosshair tooltip, range switching,
   portfolio form, zero page errors. Screenshot → `/tmp/skin_lab.png`.
 
-Both run in CI (`gates.yml`). Run them when touching anything in `skins/`.
+Both run in CI on every push. The UI probe needs playwright
+(`npm i --no-save playwright && npx playwright install chromium`, or set
+`PLAYWRIGHT_LIB` to an existing install).

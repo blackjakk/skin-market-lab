@@ -1,0 +1,11 @@
+{
+  "name": "skin-market-lab",
+  "version": "1.0.0",
+  "description": "CS skin market research tracker — price history over time, indicators, buy/sell heuristics, cross-market fee math, portfolio P/L. Zero dependencies.",
+  "license": "MIT",
+  "scripts": {
+    "start": "node server.js",
+    "probe": "node probe.js",
+    "probe:ui": "node client-probe.js"
+  }
+}

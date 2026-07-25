@@ -1,5 +1,5 @@
-// ─── skins/server.js — CS skin market tracker (server + dashboard host) ────
-// Plain Node, zero dependencies — same discipline as h2h-server.js.
+// ─── server.js — CS skin market tracker (server + dashboard host) ──────────
+// Plain Node, zero dependencies.
 //
 // What it is: a personal market-research tracker for Counter-Strike skins.
 // It records price snapshots for a watchlist over time (JSONL on disk, so
@@ -7,11 +7,11 @@
 // history from Steam (login cookie) or a pasted pricehistory blob, and serves
 // a dashboard (index.html) with charts, indicators, and portfolio P/L.
 //
-// Run:    node skins/server.js [port]   (or: npm run skins — default port 8790)
+// Run:    npm start  (= node server.js [port], default 8790)
 //         STEAM_COOKIE="steamLoginSecure=..."        unlocks full-history bootstrap
-//         SKIN_DATA=/path                            data dir (default skins/data)
+//         SKIN_DATA=/path                            data dir (default ./data)
 //         SKIN_SNAP_HOURS=6                          auto-snapshot cadence (0 = off)
-// Test:   node skins/probe.js                       (hermetic — fixture transport)
+// Test:   npm run probe                             (hermetic — fixture transport)
 //
 // API (all JSON, USD):
 //   GET  /api/skins/health
@@ -32,7 +32,7 @@ const crypto = require("crypto");
 const A = require("./analytics.js");
 const M = require("./market.js");
 
-const ROOT = __dirname; // static root = the skins/ dir itself — fully self-contained
+const ROOT = __dirname; // static root = the repo itself — the dashboard ships beside the server
 const SNAP_DEDUPE_MS = 30 * 60 * 1000;      // skip snapshots <30min apart per source
 const SALES_TTL_MS = 6 * 3600 * 1000;       // skinport per-item aggregates cache
 const DUMP_TTL_MS = 12 * 3600 * 1000;       // skinport full-dump cache
@@ -283,7 +283,8 @@ function startServer(opts) {
   const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".woff2": "font/woff2" };
   function serveStatic(req, res, pathname) {
     if (pathname === "/") pathname = "/index.html";
-    if (pathname.startsWith("/data/")) { res.writeHead(403); res.end(); return; } // never serve the data dir
+    if (pathname.startsWith("/data/") || pathname.split("/").some((seg) => seg.startsWith(".")))
+      { res.writeHead(403); res.end(); return; } // never serve the data dir or dotfiles
     const fp = path.join(ROOT, path.normalize(pathname).replace(/^([.][.][/\\])+/, ""));
     if (!fp.startsWith(ROOT)) { res.writeHead(403); res.end(); return; }
     fs.readFile(fp, (err, buf) => {

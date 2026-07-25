@@ -1,0 +1,7 @@
+# Tracker runtime data — price snapshots, caches, watchlist, portfolio.
+# Personal market data stays on your machine; never commit it.
+data/
+
+node_modules/
+*.log
+.DS_Store
