@@ -119,19 +119,36 @@ async function collect(opts) {
     const day = A.dayKey(ln.t);
     let r = byDay.get(day);
     if (!r) { r = {}; byDay.set(day, r); }
-    if (ln.players != null) r.players = Math.max(r.players || 0, ln.players);
+    if (ln.players != null) {
+      r.players = Math.max(r.players || 0, ln.players);
+      // CN/US activity gauge: the cron samples 11:17 UTC (≈19:17 Beijing,
+      // China's evening peak) and 23:17 UTC (US evening). The ratio of the
+      // two daily peaks is a crude regional-demand-mix proxy.
+      const h = new Date(ln.t).getUTCHours();
+      if (h >= 10 && h <= 15) r.cn = Math.max(r.cn || 0, ln.players);
+      if (h >= 22 || h <= 3) r.us = Math.max(r.us || 0, ln.players);
+    }
     if (ln.btc != null) r.btc = ln.btc;   // last reading of the day wins
     if (ln.eth != null) r.eth = ln.eth;
     latest = Object.assign(latest, { players: ln.players != null ? ln.players : latest.players, btc: ln.btc != null ? ln.btc : latest.btc, eth: ln.eth != null ? ln.eth : latest.eth });
   }
   for (const s of manifest.market.series) {
     const r = byDay.get(s.day);
-    if (r) { if (r.players != null) s.players = r.players; if (r.btc != null) s.btc = r.btc; if (r.eth != null) s.eth = r.eth; }
+    if (r) {
+      if (r.players != null) s.players = r.players;
+      if (r.btc != null) s.btc = r.btc;
+      if (r.eth != null) s.eth = r.eth;
+      if (r.cn && r.us) s.cnus = Math.round(r.cn / r.us * 100) / 100;
+    }
+  }
+  for (let i = manifest.market.series.length - 1; i >= 0; i--) {
+    if (manifest.market.series[i].cnus != null) { latest.cnus = manifest.market.series[i].cnus; break; }
   }
   if (manifest.market.today) Object.assign(manifest.market.today, {
     players: latest.players != null ? latest.players : null,
     btc: latest.btc != null ? latest.btc : null,
     eth: latest.eth != null ? latest.eth : null,
+    cnus: latest.cnus != null ? latest.cnus : null,
   });
 
   fs.writeFileSync(path.join(dataDir, "index.json"), JSON.stringify(manifest));

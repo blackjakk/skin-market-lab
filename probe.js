@@ -284,6 +284,14 @@ async function fixtureTransport(url, headers) {
   fs.writeFileSync(path.join(CROOT, "watchlist.json"), JSON.stringify({ items: [NAME, KNIFE, "Fracture Case"] }));
   const impRows = Array.from({ length: 40 }, (_, i) => ({ t: Date.now() - (40 - i) * D, price: 4 + i * 0.1, vol: 50 + i }));
   fs.writeFileSync(path.join(CROOT, "data", "import", slug(KNIFE) + ".json"), JSON.stringify({ t: Date.now(), source: "probe", rows: impRows }));
+  // pre-write CN-evening (11:17 UTC) and US-evening (23:17 UTC) player
+  // readings for today — values big enough that the live fixture reading
+  // (1.53M, appended at whatever hour CI runs) can never win the window max
+  const nowD = new Date();
+  const mkT = (h, m) => Date.UTC(nowD.getUTCFullYear(), nowD.getUTCMonth(), nowD.getUTCDate(), h, m);
+  fs.writeFileSync(path.join(CROOT, "data", "market.jsonl"),
+    JSON.stringify({ t: mkT(11, 17), players: 5000000 }) + "\n" +
+    JSON.stringify({ t: mkT(23, 17), players: 4000000 }) + "\n");
   const c1 = await collect({ root: CROOT });
   ok(c1.steamOk === 3 && c1.manifest.items.length === 3 && c1.manifest.errors.length === 0, "collect snapshots every watchlist item");
   ok(c1.manifest.market && c1.manifest.market.today && c1.manifest.market.today.caseIdx === 100
@@ -292,6 +300,9 @@ async function fixtureTransport(url, headers) {
   ok(c1.manifest.market.today.btc === 60000
     && c1.manifest.market.series.some((sr) => sr.btc === 60000),
     "collector records BTC/ETH benchmarks into the macro series");
+  ok(c1.manifest.market.today.cnus === 1.25
+    && c1.manifest.market.series.some((sr) => sr.cnus === 1.25),
+    "CN/US activity gauge: Asia-evening ÷ US-evening peak ratio (5M/4M)");
   const idx = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "index.json"), "utf8"));
   const rd = idx.items.find((i) => i.name === NAME), kn = idx.items.find((i) => i.name === KNIFE);
   ok(rd && rd.quote && rd.quote.price === 23 && typeof rd.score === "number" && rd.verdict && rd.slug === slug(NAME),

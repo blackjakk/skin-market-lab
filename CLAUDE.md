@@ -45,6 +45,13 @@ dashboard from the collector's committed files), or the setup panel
   BTC-rebased on ONE base-100 axis (never two scales). Stablecoins are the
   actual cash-out rails but are pegged — that's why BTC/ETH are the
   correlation benchmarks.
+- CN/US ACTIVITY gauge: the cron's fixed sample hours double as regional
+  peaks — 11:17 UTC ≈ Beijing evening, 23:17 UTC ≈ US evening; collect.js
+  windows market.jsonl player readings (10–15 UTC vs 22–03 UTC, max per
+  window) into series.cnus = cn/us. Manual runs at other hours don't
+  disturb it. Buff-spread integration is PARKED: needs a user-registered
+  key (steamwebapi.com free tier serves Buff163 prices) added as an
+  Actions secret before wiring.
 - HOME-FIRST UI: boot lands on renderHome (strip + movers + ranked sortable
   table + sparklines); item detail is one click deep with a ← Market back
   button. The watchlist is ~all cases (the index basket) + a few blue-chip
@@ -58,10 +65,10 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 76 checks: analytics units, full API flow, snapshot
+- `node probe.js` — 77 checks: analytics units, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
-- `node client-probe.js` — 30 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node client-probe.js` — 31 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback

@@ -80,6 +80,10 @@ backfill to the hosted dashboard, commit the resulting
 - **Vs Bitcoin** — 30-day correlation of index returns against BTC
   (CoinGecko benchmark; ETH recorded too). Appears once ten paired days
   accrue — measured, not vibed.
+- **CN/US activity** — Asia-evening peak players ÷ US-evening peak
+  (the collector's 11:17/23:17 UTC samples). A crude but real gauge of the
+  regional demand mix — Chinese demand is this market's biggest swing
+  factor.
 
 ## What the analytics mean
 
@@ -113,10 +117,10 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 76 checks, hermetic (fixture transport):
+- `npm run probe` — 77 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
-- `npm run probe:ui` — 30 real-Chromium checks across live AND static modes:
+- `npm run probe:ui` — 31 real-Chromium checks across live AND static modes:
   chart pixels actually painted, crosshair tooltip, range switching,
   portfolio form, zero page errors. Screenshot → `/tmp/skin_lab.png`.
 

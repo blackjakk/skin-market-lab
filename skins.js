@@ -161,6 +161,8 @@
         "cash sale vs steam price", "") +
       tile2("UNITS SOLD / DAY", t ? fmtCompact(t.volTotal) : "—", "across tracked items", "") +
       tile2("CS2 PLAYERS", t && t.players != null ? fmtCompact(t.players) : "—", "in game right now", "") +
+      tile2("CN / US ACTIVITY", t && t.cnus != null ? t.cnus.toFixed(2) : "—",
+        t && t.cnus != null ? "Asia-evening ÷ US-evening peak" : "measuring — needs a full day of samples", "") +
       tile2("VS BITCOIN (30D)", btcCorr.corr != null ? (btcCorr.corr > 0 ? "+" : "") + btcCorr.corr.toFixed(2) : "—",
         (btcCorr.corr != null ? "return correlation" : "measuring: " + btcCorr.n + "/10 days") +
         (t && t.btc != null ? " · BTC $" + fmtCompact(t.btc) : ""), "") +
