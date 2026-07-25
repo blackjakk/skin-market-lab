@@ -1,11 +1,11 @@
-// ─── settlement.js — SMLX-3 settlement fixings + manipulation budget ────────
+// ─── settlement.js — SMLX-4 settlement fixings + manipulation budget ────────
 // UMD, pure, deterministic — shared by the collector (Node), the live
 // tracker, and the methodology page (browser: window.SkinSettlement).
 //
 // A FIXING is a dated settlement value computed from the committed market
 // series by published rules, so any counterparty re-derives it bit-exactly
 // from the repo's own data files. This is what a cash-settled future or a
-// scalar market would settle against. Methodology id: SMLX-3 (any rule
+// scalar market would settle against. Methodology id: SMLX-4 (any rule
 // change bumps the id — a fixing is meaningless without its rulebook).
 //
 //   SETTLE-CASE-7D   — mean of the last ≤7 daily Lab Case Index values (min 3)
@@ -13,10 +13,13 @@
 //   SETTLE-RATIO-30D — mean of the last ≤30 daily cash-ratio values (min 7)
 //
 // Averaged fixings are the anti-manipulation choice: to move a 7-day mean
-// 1% an attacker must sustain the push for SEVEN days, and the SMLX-3
-// winsorization clamp (±0.05 log vs the daily median) forces the push
-// across MANY names at once — manipulationBudget() prices both the
-// uniform attack and the cheapest-k concentrated attack.
+// 1% an attacker must sustain the push for SEVEN days; the winsorization
+// clamp (±0.05 log vs the daily median) caps each name's pull at
+// weight×0.05, so the push must control ≥ targetMove/clampLog of total
+// index WEIGHT — and SMLX-4's volume weights make weight proportional to
+// real traded dollars, so there is no thin-name cheap corner.
+// manipulationBudget() prices both the uniform attack and the cheapest
+// weight-accumulation attack.
 //
 // NOT FINANCIAL ADVICE and NOT an offer of any instrument — this is a
 // published measurement with a verification recipe.
@@ -26,7 +29,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const METHODOLOGY = "SMLX-3";
+  const METHODOLOGY = "SMLX-4";
   const FIXINGS = [
     { name: "SETTLE-CASE-7D", key: "caseIdx", window: 7, minDays: 3, decimals: 2 },
     { name: "SETTLE-CASE-30D", key: "caseIdx", window: 30, minDays: 10, decimals: 2 },
@@ -71,10 +74,16 @@
   // Model: to shift one item's daily median price by ~1%, an attacker must
   // set the price on ≥ half that day's prints; the irreducible burn is the
   // venue fee on that wash volume (inventory/price risk excluded — this is
-  // deliberately a LOWER bound). The index is an equal-weight geometric
-  // mean, so moving it 1% requires moving every constituent ~1%; an
-  // N-day-average fixing multiplies the burn by N.
-  //   items: manifest items [{cat, tier, latest, vol24h, skinport}]
+  // deliberately a LOWER bound). The winsorization clamp caps each name's
+  // index pull at weight×clampLog, so moving the index by targetMove needs
+  // control of ≥ targetMove/clampLog of total index WEIGHT; the optimal
+  // attacker accumulates that weight at the lowest fee-burn per unit of
+  // weight. Under SMLX-4 volume weights, weight ∝ traded dollars, so cost
+  // scales with weight everywhere — no cheap corner. An N-day-average
+  // fixing multiplies the burn by N.
+  //   items: manifest items [{cat, tier, latest, vol24h, weight, skinport}]
+  //   (weight = the published index weight; items without one fall back to
+  //    equal share 1/caseTotal, which reproduces the SMLX-3 cheapest-k)
   function manipulationBudget(items, opts) {
     opts = opts || {};
     const feeSteam = opts.feeSteam != null ? opts.feeSteam : 0.15;
@@ -82,7 +91,7 @@
     const washFraction = opts.washFraction != null ? opts.washFraction : 0.5;
     const clampLog = opts.clampLog != null ? opts.clampLog : 0.05;
     const targetMove = opts.targetMove != null ? opts.targetMove : 0.01;
-    const caseDvs = [];
+    const caseMenu = [];
     let caseDollarVol = 0, caseCovered = 0, caseTotal = 0;
     let ratioLegDollarVol30d = 0, ratioCovered = 0, ratioTotal = 0;
     for (const it of items || []) {
@@ -90,7 +99,8 @@
         caseTotal++;
         if (it.latest != null && it.vol24h != null) {
           const dv = it.latest * it.vol24h;
-          caseDollarVol += dv; caseDvs.push(dv); caseCovered++;
+          caseDollarVol += dv; caseCovered++;
+          caseMenu.push({ dv: dv, w: it.weight != null && isFinite(it.weight) ? it.weight : null });
         }
       }
       const s30 = it.skinport && it.skinport.last30d;
@@ -100,22 +110,32 @@
       }
     }
     const perDayCase = washFraction * caseDollarVol * feeSteam;
-    // Cheapest-k concentrated attack (the honest MINIMUM): the winsorization
-    // clamp means moving the index by targetMove requires pushing at least
-    // ceil(N × targetMove / clampLog) names ≥clampLog off the day's median;
-    // the optimal attacker picks the k thinnest constituents.
+    // Cheapest weight-accumulation attack (the honest MINIMUM): greedy by
+    // fee-burn per unit of index weight until targetMove/clampLog of total
+    // weight is controlled.
     let concentrated = null;
-    if (caseDvs.length) {
-      const kMin = Math.max(1, Math.ceil(targetMove * caseTotal / clampLog));
-      const sorted = caseDvs.slice().sort((x, y) => x - y);
-      const sumK = sorted.slice(0, Math.min(kMin, sorted.length)).reduce((x, y) => x + y, 0);
-      const perDayK = washFraction * sumK * feeSteam;
+    if (caseMenu.length) {
+      const weightNeeded = targetMove / clampLog;
+      const anyW = caseMenu.some((c) => c.w != null);
+      const menu = caseMenu
+        .map((c) => ({ dv: c.dv, w: c.w != null ? c.w : 1 / caseTotal }))
+        .sort((a, b) => (a.dv / Math.max(a.w, 1e-12)) - (b.dv / Math.max(b.w, 1e-12)));
+      let cumW = 0, cost = 0, k = 0;
+      for (const c of menu) {
+        if (cumW >= weightNeeded - 1e-12) break;
+        cumW += c.w; cost += washFraction * c.dv * feeSteam; k++;
+      }
       concentrated = {
-        kMin: kMin,
-        costMove1pctDay: Math.round(perDayK),
-        costMove1pctFix7d: Math.round(perDayK * 7),
-        costMove1pctFix30d: Math.round(perDayK * 30),
-        note: "cheapest-" + kMin + " attack: clamp forces ≥" + kMin + " names ≥" + (clampLog * 100) + "% off the daily median",
+        kMin: k,
+        weightNeeded: weightNeeded,
+        weighted: anyW,
+        costMove1pctDay: Math.round(cost),
+        costMove1pctFix7d: Math.round(cost * 7),
+        costMove1pctFix30d: Math.round(cost * 30),
+        note: (anyW ? "cheapest weight-accumulation attack" : "cheapest-k attack (equal-weight fallback)")
+          + ": clamp caps one name's pull at weight×" + clampLog + " — a "
+          + (targetMove * 100) + "% move needs ≥" + Math.round(weightNeeded * 100)
+          + "% of index weight (" + k + " names here)",
       };
     }
     const ratioBurn30d = washFraction * ratioLegDollarVol30d * feeCash;

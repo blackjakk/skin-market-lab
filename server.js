@@ -264,10 +264,14 @@ function startServer(opts) {
     // settlement fixings — live-mode parity with the collector (budget is
     // case-side only here; the collector's version carries sales coverage)
     const detail = S.computeAll(mkt.series);
+    const wCase = (mkt.weights && mkt.weights.case) || {};
+    const wLiq = (mkt.weights && mkt.weights.liq) || {};
     const budgetItems = watchlist.map((name) => {
       const last = latestSteam(name);
       return { cat: catOf(name), tier: artSet.has(name) ? "art" : null,
-        latest: last ? last.price : null, vol24h: last ? last.vol : null, skinport: null };
+        latest: last ? last.price : null, vol24h: last ? last.vol : null,
+        weight: wCase[name] != null ? wCase[name] : (wLiq[name] != null ? wLiq[name] : null),
+        skinport: null };
     });
     const fix = { t: Date.now(), day: A.dayKey(Date.now()), methodology: S.METHODOLOGY, fixings: {}, budget: S.manipulationBudget(budgetItems) };
     for (const name of Object.keys(detail)) {

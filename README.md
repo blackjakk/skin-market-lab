@@ -65,13 +65,14 @@ backfill to the hosted dashboard, commit the resulting
 
 ## The market home (what the header numbers mean)
 
-- **Lab Case Index** — chained: each day's move is the equal-weight mean
-  of tracked cases' daily returns, cumulated from 100 (SMLX-3 — new cases
-  season 30 days and enter on a published calendar, return-neutrally;
-  each day's returns are winsorized at ±5% around the day's median, so
-  one pumped name can't move the index but market-wide moves pass
-  through). Cases are the market's commodity layer: the de facto "S&P of
-  skins".
+- **Lab Case Index** — chained: each day's move is the volume-weighted
+  mean of tracked cases' daily returns, cumulated from 100 (SMLX-4 —
+  weights are each case's median daily dollar volume over the prior
+  month-end's trailing 60 days, capped at 10%; new cases season 30 days
+  and enter on a published calendar, return-neutrally; each day's returns
+  are winsorized at ±5% around the day's median, so one pumped name can't
+  move the index but market-wide moves pass through). Cases are the
+  market's commodity layer: the de facto "S&P of skins".
 - **Cash ratio** — median (third-party realized sale ÷ Steam price).
   ~70–85% is normal; climbing toward 100% = strong real-money demand,
   collapsing = sellers trapped in Steam wallet funds.
@@ -95,7 +96,7 @@ backfill to the hosted dashboard, commit the resulting
   regional demand mix — Chinese demand is this market's biggest swing
   factor.
 
-## Settlement fixings (SMLX-3)
+## Settlement fixings (SMLX-4)
 
 Dated settlement marks computed from the committed series by fixed rules —
 what a cash-settled future or scalar market would settle against:
@@ -143,7 +144,7 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 99 checks, hermetic (fixture transport):
+- `npm run probe` — 104 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
 - `npm run probe:ui` — 35 real-Chromium checks across live AND static modes:

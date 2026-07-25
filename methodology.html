@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SMLX-3 — Skin Market Lab Index &amp; Settlement Methodology</title>
+<title>SMLX-4 — Skin Market Lab Index &amp; Settlement Methodology</title>
 <link rel="stylesheet" href="skins.css">
 <style>
   .doc { max-width: 880px; margin: 0 auto; padding: 0 20px 60px; }
@@ -32,8 +32,8 @@
 <body>
 <div class="topnav"><a href="./">← Skin Market Lab</a></div>
 <div class="doc">
-  <h1>SMLX-3 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
-  <p class="muted">Skin Market Lab · methodology version SMLX-3 · any rule change bumps the version — a
+  <h1>SMLX-4 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
+  <p class="muted">Skin Market Lab · methodology version SMLX-4 · any rule change bumps the version — a
   fixing is meaningless without its rulebook. <b>This document describes a measurement, not an offer,
   solicitation, or operation of any financial instrument.</b> Derivatives referencing game items may be
   regulated products in most jurisdictions; nothing here is legal advice.</p>
@@ -49,10 +49,11 @@
   <table class="spec">
     <tr><th>Index</th><th>Constituents</th><th>Mark source</th><th>Aggregation</th></tr>
     <tr><td>Lab Case Index</td><td>All tracked cases (the commodity layer)</td>
-      <td>Steam Market daily median price</td><td rowspan="2">CHAINED &amp; WINSORIZED: each day's index
-      return is the equal-weight mean of constituents' daily log-returns (items present and included on
-      both days), after clamping each return to within ±0.05 log (≈5%) of the day's <b>cross-sectional
-      median</b> return; levels cumulate from 100. Constituent changes are return-neutral at entry/exit.
+      <td>Steam Market daily median price</td><td rowspan="2">CHAINED, WINSORIZED &amp; VOLUME-WEIGHTED:
+      each day's index return is the <b>volume-weighted</b> mean of constituents' daily log-returns
+      (items present and included on both days), after clamping each return to within ±0.05 log (≈5%)
+      of the day's <b>cross-sectional median</b> return (the clamp center stays unweighted); levels
+      cumulate from 100. Weights per §2a. Constituent changes are return-neutral at entry/exit.
       Because the clamp is median-relative, market-wide moves (crashes, patch shocks) pass through
       untouched — only single-name deviations from the day's consensus are capped</td></tr>
     <tr><td>Liquids Index</td><td>Non-case items with ≥5 median units sold/day (self-gating — “liquids”
@@ -66,10 +67,34 @@
   mark (thin venues report zeros for no-sale windows), zero-volume days keep price but carry no volume,
   and per-item histories are append-only JSONL in <code>data/history/</code>.</p>
 
+  <h2>2a · Volume weights (case &amp; liquids; art stays equal-weight)</h2>
+  <ul>
+    <li><b>Weight</b> = the constituent's <b>median daily dollar volume</b> (price × units sold) over
+    the <b>60 days ending on the last day of the prior calendar month</b>, normalized across the
+    family. The median (not mean) means a burst of wash volume moves nothing — inflating a weight
+    requires sustaining fake volume for 30+ days, paying venue fees the whole way.</li>
+    <li><b>Fully lagged, monthly rebalance</b>: weights change only on the first day of a month, from
+    data that ended before that month began — today's trading can never move today's weights, and the
+    weight set for any month is re-derivable from the committed files alone.</li>
+    <li><b>Cap 10%</b> (effective cap is max(0.10, 1/N) so small baskets stay feasible): excess weight
+    is redistributed pro-rata across uncapped names, iteratively. With the ±0.05 clamp this bounds any
+    single name's daily pull on the index to 0.10 × 0.05 = 0.5%.</li>
+    <li><b>Fallbacks, both neutral</b>: a name with fewer than 5 volume observations in the window
+    takes the <b>median weight</b> of observed names (absence cannot be gamed in either direction); a
+    month where no name has observations (index inception) is equal-weight.</li>
+    <li><b>Why volume-weight at all</b>: it ties index influence to real traded dollars. The cheapest
+    way to move the index becomes buying <i>weight</i>, and weight costs volume — the thin-name cheap
+    corner that survived SMLX-3 (nine near-dead cases, trivially washable) no longer exists. Art is
+    never volume-weighted because appraisal marks have no meaningful volume.</li>
+    <li>The current month's weights are published in <code>data/index.json → market.weights</code> and
+    on each manifest item (<code>weight</code>).</li>
+  </ul>
+
   <h2>3 · Settlement fixings</h2>
   <p>Averaged fixings are the anti-manipulation choice: to move an N-day mean by 1% an attacker must
-  sustain the push for <b>N days</b>, and the winsorization clamp forces it across <b>many names at
-  once</b> (§5 prices the cheapest such attack). Fixings publish with value <code>null</code>
+  sustain the push for <b>N days</b>, and the winsorization clamp forces it across <b>≥20% of index
+  weight</b> — which under volume weights means real traded dollars (§5 prices the cheapest such
+  attack). Fixings publish with value <code>null</code>
   (“accruing”) until the minimum day count exists — a fixing is never backfilled or edited.</p>
   <table class="spec">
     <tr><th>Fixing</th><th>Definition</th><th>Window</th><th>Min days</th><th>Decimals</th></tr>
@@ -122,11 +147,13 @@
   deliberately excluded, so true cost is higher. Two attack models are priced:</p>
   <ul>
     <li><b>Uniform</b> — move every constituent ~1%: fee-burn on the whole basket's wash volume.</li>
-    <li><b>Concentrated (cheapest-k)</b> — the honest <b>minimum</b>: the ±0.05 clamp caps any one
-    name's contribution at 0.05/N, so moving the index 1% requires pushing at least
-    k&nbsp;=&nbsp;⌈N&nbsp;×&nbsp;0.01&nbsp;/&nbsp;0.05⌉ names ≥5% off the day's median; the optimal
-    attacker picks the k thinnest constituents, and the budget prices exactly that basket. This is the
-    headline number on the dashboard — always quote the cheaper attack.</li>
+    <li><b>Concentrated (cheapest weight-accumulation)</b> — the honest <b>minimum</b>: the ±0.05
+    clamp caps any one name's pull at its weight × 0.05, so moving the index 1% requires controlling
+    at least 0.01&nbsp;/&nbsp;0.05&nbsp;=&nbsp;<b>20% of total index weight</b>; the optimal attacker
+    accumulates that weight at the lowest fee-burn per unit of weight, and the budget prices exactly
+    that greedy basket against the published weights. Because SMLX-4 weights are proportional to real
+    traded dollars, cost scales with weight everywhere — the attack can no longer hide in thin names.
+    This is the headline number on the dashboard — always quote the cheaper attack.</li>
   </ul>
   <p>An N-day fixing multiplies either burn by N. Any credible instrument must cap open interest well
   below the concentrated figure below.</p>
@@ -165,6 +192,13 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       index ~1%); market-wide moves pass through because the median moves with them. Manipulation
       budget adds the cheapest-k concentrated attack model, which becomes the headline floor.
       Prior records retain their stamp.</td></tr>
+    <tr><td>SMLX-4</td><td>2026-07-25</td><td>Volume weighting (case &amp; liquids): daily returns are
+      weighted by each name's median daily dollar volume over the 60 days ending at the prior
+      month-end — lagged, monthly-rebalanced, capped at 10%, fallbacks neutral (§2a). Ties index
+      influence to real traded dollars, closing the thin-name corner of the concentrated attack that
+      SMLX-3's clamp alone left open (nine near-dead cases could still move the fixing for ~$8k). The
+      budget's concentrated model becomes cheapest weight-accumulation against the published weights.
+      Art stays equal-weight. Prior records retain their stamp.</td></tr>
   </table>
 
   <h2>9 · Disclaimers</h2>

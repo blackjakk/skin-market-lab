@@ -319,13 +319,29 @@
   // cross-sectional MEDIAN return is clamped to ±clampLog (±0.05 ≈ ±5%) —
   // market-wide moves pass through in full (the median moves with them),
   // while a single-name outlier, honest or manipulated, has bounded
-  // influence: moving the index 1% requires pushing ≥ N/5 names ≥5% off
-  // the pack, which the concentrated-attack budget prices directly.
-  // Constituent changes are therefore return-neutral at entry/exit — no
+  // influence. Constituent changes are return-neutral at entry/exit — no
   // level jump to front-run. New listings (first mark after the adoption
   // date) season for 30 days, then enter on the FIRST DAY OF THE NEXT
   // CALENDAR MONTH; the founding cohort is grandfathered.
-  const INDEX_RULES = { version: "SMLX-3", adoption: "2026-07-25", seasoningDays: 30, clampLog: 0.05 };
+  // VOLUME-WEIGHTED (SMLX-4): case/liq family returns are a WEIGHTED mean —
+  // weight = each name's MEDIAN daily dollar volume (price×units) over the
+  // weightWindowDays ending on the LAST DAY OF THE PRIOR MONTH, normalized
+  // and capped at weightCap (excess redistributed pro-rata; effective cap
+  // is max(weightCap, 1/N) so small baskets stay feasible). Weights
+  // rebalance MONTHLY and are fully lagged, so today's trading can never
+  // move today's weights; the 60d MEDIAN means gaming a weight up needs
+  // ~30+ days of sustained wash volume, paying fees the whole way — priced
+  // by the budget model. Names without weightMinObs observations in the
+  // window take the MEDIAN weight of observed names (absence is neutral);
+  // a month with no observed names (index inception) is equal-weight. Art
+  // has no volume by construction → always equal-weight. The clamp median
+  // stays UNWEIGHTED (a weighted clamp center would let heavy names steer
+  // it). Net effect on the attack surface: influence is proportional to
+  // real traded dollars, so the cheapest concentrated attack must buy
+  // ≥ targetMove/clampLog of total index WEIGHT — there is no thin-name
+  // cheap corner anymore.
+  const INDEX_RULES = { version: "SMLX-4", adoption: "2026-07-25", seasoningDays: 30, clampLog: 0.05,
+    weightWindowDays: 60, weightMinObs: 5, weightCap: 0.10 };
   function dayT(day) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day));
     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
@@ -361,7 +377,10 @@
       const src = isArt ? (it.artDaily || []) : daily;
       if (key && src.length) {
         const priceBy = new Map(src.filter((d) => d.price > 0).map((d) => [d.day, d.price]));
-        if (priceBy.size) fam[key].push({ priceBy: priceBy, includedFrom: includedFromDay(src[0].day), carry: isArt });
+        const dvBy = new Map(src.filter((d) => d.price > 0 && d.vol != null && isFinite(d.vol))
+          .map((d) => [d.day, d.price * d.vol]));
+        if (priceBy.size) fam[key].push({ name: it.name, priceBy: priceBy, dvBy: dvBy,
+          includedFrom: includedFromDay(src[0].day), carry: isArt });
       }
     }
     const days = Array.from(dayRec.keys()).sort();
@@ -376,6 +395,48 @@
       }
       m.priceBy = filled;
     }
+    // SMLX-4 weights: per family, per calendar month — median daily $volume
+    // over the window ending on the LAST DAY OF THE PRIOR MONTH, normalized,
+    // capped at max(weightCap, 1/N) with pro-rata redistribution. Returns
+    // null → equal weight (inception month, or a family with no volume: art).
+    const wCache = new Map();
+    function monthWeights(key, monthKey) {
+      const ck = key + "|" + monthKey;
+      if (wCache.has(ck)) return wCache.get(ck);
+      const members = fam[key];
+      let out = null;
+      if (members.length) {
+        const wEnd = Date.UTC(+monthKey.slice(0, 4), +monthKey.slice(5, 7) - 1, 1) - 86400000;
+        const startKey = dayKey(wEnd - (INDEX_RULES.weightWindowDays - 1) * 86400000);
+        const endKey = dayKey(wEnd);
+        const raw = members.map((m) => {
+          const dvs = [];
+          for (const e of m.dvBy) if (e[0] >= startKey && e[0] <= endKey) dvs.push(e[1]);
+          return dvs.length >= INDEX_RULES.weightMinObs ? median(dvs) : null;
+        });
+        const obs = raw.filter((v) => v != null);
+        if (obs.length) {
+          const fb = median(obs); // unobserved names take the median weight — neutral
+          let w = raw.map((v) => (v != null ? v : fb));
+          const total = w.reduce((a, b) => a + b, 0);
+          if (total > 0) {
+            w = w.map((v) => v / total);
+            const cap = Math.max(INDEX_RULES.weightCap, 1 / members.length);
+            for (let it = 0; it < 30; it++) {
+              const over = w.map((v) => v > cap + 1e-12);
+              if (!over.some(Boolean)) break;
+              let excess = 0, freeSum = 0;
+              w = w.map((v, j) => { if (over[j]) { excess += v - cap; return cap; } freeSum += v; return v; });
+              if (freeSum <= 0) break;
+              w = w.map((v, j) => (over[j] ? v : v + (v / freeSum) * excess));
+            }
+            out = new Map(members.map((m, j) => [m, w[j]]));
+          }
+        }
+      }
+      wCache.set(ck, out);
+      return out;
+    }
     const levels = { case: [], liq: [], art: [] };
     for (const key of ["case", "liq", "art"]) {
       let level = null;
@@ -388,20 +449,37 @@
           continue;
         }
         const prev = days[k - 1];
-        const rets = [];
+        const contrib = []; // [member, log-return]
         for (const m of fam[key]) {
           if (prev < m.includedFrom) continue; // both days must be post-inclusion
           const p0 = m.priceBy.get(prev), p1 = m.priceBy.get(day);
-          if (p0 > 0 && p1 > 0) rets.push(Math.log(p1 / p0));
+          if (p0 > 0 && p1 > 0) contrib.push([m, Math.log(p1 / p0)]);
         }
-        if (rets.length) {
-          const med = median(rets);
+        if (contrib.length) {
+          const med = median(contrib.map((c) => c[1])); // clamp center stays UNWEIGHTED
           const cl = INDEX_RULES.clampLog;
-          const adj = rets.map((r) => med + Math.max(-cl, Math.min(cl, r - med)));
-          level = level * Math.exp(adj.reduce((a, b) => a + b, 0) / adj.length);
+          const wm = monthWeights(key, day.slice(0, 7));
+          let wsum = 0, acc = 0, eqAcc = 0;
+          for (const c of contrib) {
+            const adjR = med + Math.max(-cl, Math.min(cl, c[1] - med));
+            const w = wm ? wm.get(c[0]) : 1;
+            wsum += w; acc += w * adjR; eqAcc += adjR;
+          }
+          level = level * Math.exp(wsum > 0 ? acc / wsum : eqAcc / contrib.length);
         }
         levels[key].push(level); // no overlap → level carries unchanged
       }
+    }
+    // publish the CURRENT month's weights per weighted family (audit surface;
+    // the budget model consumes these so attack cost is priced on the real
+    // weights, not an assumption)
+    const weightsOut = { case: null, liq: null };
+    if (days.length) for (const key of ["case", "liq"]) {
+      if (!fam[key].length) continue;
+      const wm = monthWeights(key, days[days.length - 1].slice(0, 7));
+      const o = {};
+      for (const m of fam[key]) o[m.name] = Math.round((wm ? wm.get(m) : 1 / fam[key].length) * 1e6) / 1e6;
+      weightsOut[key] = o;
     }
     const series = days.map((day, k) => {
       const r = dayRec.get(day);
@@ -431,7 +509,7 @@
       liqIdx: lastNonNull("liqIdx"), artIdx: lastNonNull("artIdx"),
       cashRatio: lastNonNull("cashRatio"), volTotal: lastNonNull("volTotal"),
     } : null;
-    return { series: series, today: today, rules: INDEX_RULES };
+    return { series: series, today: today, rules: INDEX_RULES, weights: weightsOut };
   }
 
   // ── slosh detection (measured, not vibed) ────────────────────────────────

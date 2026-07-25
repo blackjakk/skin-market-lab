@@ -59,31 +59,43 @@ dashboard from the collector's committed files), or the setup panel
   grails sit above the ~$1,800 steam listing cap → no steam quote is
   EXPECTED for art, not an error). Art items' manifest latest falls back
   to the 30d sale median.
-- SMLX-3 CONSTRUCTION (perp-grade): indices CHAIN daily returns (mean of
-  constituents' log-returns over both-days pairs, cumulated from 100) so
-  constituent entry/exit is RETURN-NEUTRAL — no level jump to front-run.
-  WINSORIZED since SMLX-3: each constituent's daily log-return is clamped
-  to ±INDEX_RULES.clampLog (0.05) around the day's CROSS-SECTIONAL MEDIAN
-  return before averaging — closes the concentrated attack (pump one thin
-  case +50% used to move the index ~1%/day) while market-wide moves pass
-  through untouched (the median moves with them; probe pins both
-  properties). New listings (first mark after INDEX_RULES.adoption
-  2026-07-25) season 30 days then enter on the next first-of-month;
-  founding cohort grandfathered; art marks carry forward between sparse
-  observations. includedFromDay/INDEX_RULES exported for the probe, which
-  pins the no-jump-on-entry property directly. NEVER revert to
+- SMLX-4 CONSTRUCTION (perp-grade): indices CHAIN daily returns
+  (cumulated from 100) so constituent entry/exit is RETURN-NEUTRAL — no
+  level jump to front-run. WINSORIZED since SMLX-3: each constituent's
+  daily log-return is clamped to ±INDEX_RULES.clampLog (0.05) around the
+  day's CROSS-SECTIONAL MEDIAN return before averaging — market-wide
+  moves pass through untouched (the median moves with them), single-name
+  pumps are capped. VOLUME-WEIGHTED since SMLX-4 (case+liq; art stays
+  equal): the day's return is the WEIGHTED mean, weight = median daily
+  $volume over the 60d ending at the PRIOR MONTH-END (fully lagged,
+  monthly rebalance — today's trading can never move today's weights;
+  median ⇒ gaming a weight needs 30+ days of sustained wash volume),
+  normalized, capped at weightCap 0.10 (effective max(cap, 1/N), excess
+  redistributed pro-rata; one name's max daily pull = 0.10×0.05 = 0.5%).
+  Fallbacks are NEUTRAL: <weightMinObs obs in window → median weight of
+  observed names; no observations at all (inception month) → equal. The
+  clamp center stays UNWEIGHTED. Current-month weights published in
+  market.weights {case,liq} + manifest item.weight (budget consumes
+  them). New listings (first mark after INDEX_RULES.adoption 2026-07-25)
+  season 30 days then enter on the next first-of-month; founding cohort
+  grandfathered; art marks carry forward between sparse observations.
+  includedFromDay/INDEX_RULES exported for the probe, which pins no-jump,
+  clamp, passthrough, weighting, and cap directly. NEVER revert to
   level-vs-base — a new case release would create a published riskless
   trade against any instrument settling on the fixing.
-- SETTLEMENT LAYER (SMLX-3, settlement.js — UMD, pure, shared by
+- SETTLEMENT LAYER (SMLX-4, settlement.js — UMD, pure, shared by
   collector/server/methodology page): dated fixings (SETTLE-CASE-7D/30D,
   SETTLE-RATIO-30D) = means over the published daily series with MIN-DAY
   gates (null + "accruing" until met — never fabricated, never backfilled);
   canonical() gives the byte-exact hash preimage (node crypto and browser
   crypto.subtle must agree); manipulationBudget() = fee-burn floor to move
   a fixing 1% — TWO models: uniform (wash 0.5 × basket $vol × fee ×
-  window days) and concentrated cheapest-k (the clamp forces
-  k = ⌈N×0.01/0.05⌉ names ≥5% off the median; priced on the k thinnest —
-  the HEADLINE floor, always quote the cheaper attack). Collector writes
+  window days) and concentrated (the clamp caps one name's pull at
+  weight×0.05, so a 1% move needs ≥20% of index WEIGHT; greedy cheapest
+  fee-burn per unit of weight against the PUBLISHED weights — the
+  HEADLINE floor, always quote the cheaper attack; items without a
+  weight fall back to equal share = the SMLX-3 cheapest-k). Collector
+  writes
   data/settlement.json + appends data/settlements.jsonl (readers take
   last-per-day); methodology.html is the public rulebook with in-browser
   re-derivation → ✓ VERIFIED badges. Rule changes bump the methodology id.
@@ -102,10 +114,11 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 99 checks: analytics units (incl. SMLX-3
-  winsorization + concentrated-budget arithmetic), full API flow,
-  snapshot dedupe, import/bootstrap, portfolio P/L, restart persistence,
-  watchlist seeding, the collector (manifest, import merge, dedupe).
+- `node probe.js` — 104 checks: analytics units (incl. SMLX-3
+  winsorization, SMLX-4 volume weights/cap, concentrated-budget
+  arithmetic), full API flow, snapshot dedupe, import/bootstrap,
+  portfolio P/L, restart persistence, watchlist seeding, the collector
+  (manifest, import merge, dedupe).
 - `node client-probe.js` — 35 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the

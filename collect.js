@@ -140,6 +140,14 @@ async function collect(opts) {
   // per-run macro readings (CS2 players, BTC/ETH — the correlation
   // benchmarks) appended raw to market.jsonl and daily-bucketed here
   manifest.market = A.marketOverview(marketItems);
+  // attach each name's published index weight (SMLX-4) so the manipulation
+  // budget prices the attack on the real weights and the site can show them
+  const wCase = (manifest.market.weights && manifest.market.weights.case) || {};
+  const wLiq = (manifest.market.weights && manifest.market.weights.liq) || {};
+  for (const it of manifest.items) {
+    const w = wCase[it.name] != null ? wCase[it.name] : wLiq[it.name];
+    if (w != null) it.weight = w;
+  }
   const macroFile = path.join(dataDir, "market.jsonl");
   const reading = { t: Date.now() };
   try { const p = await M.steamPlayers(); if (p != null) reading.players = p; }

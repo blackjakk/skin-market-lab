@@ -180,11 +180,33 @@ const mktWide = A.marketOverview([
 ]);
 ok(near(mktWide.today.caseIdx, 80, 0.01),
   "SMLX-3 passthrough: a uniform −20% crash prints −20% (median-relative clamp never fights the market)");
+ok(winso.weights && winso.weights.case && Math.abs(winso.weights.case["W1 Case"] - 0.2) < 1e-9,
+  "SMLX-4 inception month (no prior-month volume): equal weights published");
+
+// ── SMLX-4 volume weights: lagged median-$vol, capped 0.10, monthly ────────
+// Jan gives N1 twice the $volume of N2..N12 (raw weight 2/13 ≈ 0.154 → capped
+// at 0.10, excess redistributed); Feb 2 only N1 moves +e^0.04 → the index
+// return is exactly weight × return = 0.10 × 0.04
+const TF1 = Date.UTC(2026, 1, 1), TF2 = Date.UTC(2026, 1, 2);
+const wItems = [];
+for (let n = 1; n <= 12; n++) {
+  const vol = n === 1 ? 200 : 100;
+  const daily = [];
+  for (let i = 0; i < 5; i++) daily.push(dcase(T0 + (19 + i) * D, 10, vol)); // Jan 20–24 ≥ minObs
+  daily.push(dcase(TF1, 10, vol));
+  daily.push(dcase(TF2, n === 1 ? 10 * Math.exp(0.04) : 10, vol));
+  wItems.push({ name: "N" + n + " Case", cat: "case", daily: daily, skinportDaily: [] });
+}
+const wmo = A.marketOverview(wItems);
+ok(near(wmo.series[wmo.series.length - 1].caseIdx, 100 * Math.exp(0.10 * 0.04), 0.001),
+  "SMLX-4 weighting: +4% on the capped-0.10 heavyweight moves the index exactly 0.4% (lagged monthly $vol weights)");
+ok(wmo.weights && near(wmo.weights.case["N1 Case"], 0.10, 1e-6) && near(wmo.weights.case["N2 Case"], 0.9 / 11, 1e-4),
+  "published weights: raw 2/13 clipped to the 0.10 cap, excess redistributed pro-rata");
 
 // ── settlement fixings (SMLX-3) ────────────────────────────────────────────
 const setSeries = Array.from({ length: 7 }, (_, i) => ({ day: A.dayKey(T0 + i * D), t: T0 + i * D, caseIdx: 100 + i, cashRatio: 0.65 }));
 const fx7 = S.computeFixing(setSeries, S.FIXINGS[0]);
-ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-3",
+ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-4",
   "SETTLE-CASE-7D = mean of last 7 daily index values (100..106 → 103)");
 const fxShallow = S.computeFixing(setSeries.slice(0, 2), S.FIXINGS[0]);
 ok(fxShallow.value === null && /2\/3/.test(fxShallow.accruing),
@@ -207,7 +229,19 @@ const kbud = S.manipulationBudget(
   Array.from({ length: 42 }, (_, i) => ({ cat: "case", tier: null, latest: 1000 * (i + 1), vol24h: 1, skinport: null })));
 ok(kbud.caseIndex.concentrated.kMin === 9 && kbud.caseIndex.concentrated.costMove1pctDay === 3375
   && kbud.caseIndex.concentrated.costMove1pctFix7d === 23625,
-  "concentrated budget: kMin = ⌈N×move/clamp⌉ = 9, priced on the 9 thinnest names ($3,375/day)");
+  "concentrated budget, equal-weight fallback: k = ⌈N×move/clamp⌉ = 9 thinnest names ($3,375/day)");
+// SMLX-4 weighted attack: with published weights the attacker accumulates
+// ≥20% of index WEIGHT at the lowest fee-burn per unit of weight. Weights
+// ∝ dv² here so cost/weight strictly FALLS with size — the greedy provably
+// follows the weights (takes the 4 biggest names), not the thin names.
+const sq = Array.from({ length: 42 }, (_, i) => (i + 1) * (i + 1));
+const sqTot = sq.reduce((a, b) => a + b, 0);
+const wbud = S.manipulationBudget(
+  Array.from({ length: 42 }, (_, i) => ({ cat: "case", tier: null, latest: 1000 * (i + 1), vol24h: 1,
+    weight: sq[i] / sqTot, skinport: null })));
+ok(wbud.caseIndex.concentrated.weighted === true && wbud.caseIndex.concentrated.kMin === 4
+  && wbud.caseIndex.concentrated.costMove1pctDay === 12150,
+  "SMLX-4 weighted budget: attack must buy real weight — 4 heavyweight names, $12,150/day (thin names useless)");
 
 const up = A.signal({ mom7: 0.05, mom30: 0.25, slope30: 0.008, rsi14: 60, curDD: 0.1, vol30: 0.4, liq30: 50 });
 ok(up.score > 12 && /BUY/.test(up.verdict), "signal: sustained uptrend → BUY (" + up.score + ")");
@@ -371,10 +405,10 @@ async function fixtureTransport(url, headers) {
   const mkt = await api("/api/skins/market");
   ok(mkt.status === 200 && mkt.body.today && mkt.body.today.caseIdx === 100,
     "live /api/skins/market: case index at base 100 on day one");
-  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-3"
+  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-4"
     && mkt.body.settlement.fixings["SETTLE-CASE-7D"]
     && /^[0-9a-f]{64}$/.test(mkt.body.settlement.fixings["SETTLE-CASE-7D"].hash),
-    "live market serves SMLX-3 fixings with 64-hex canonical hashes");
+    "live market serves SMLX-4 fixings with 64-hex canonical hashes");
   ok(near(mkt.body.today.cashRatio, 0.87, 0.001) && mkt.body.today.players === 1534000,
     "live market: cash ratio + live player count");
   ok(mkt.body.today.btc === 60000 && mkt.body.today.eth === 1800,
@@ -453,6 +487,9 @@ async function fixtureTransport(url, headers) {
   const cCon = c1.manifest.market.settlement.budget.caseIndex.concentrated;
   ok(cCon && cCon.kMin === 1 && cCon.costMove1pctDay === 98,
     "collector publishes the concentrated attack budget (cheapest-1 of a 1-case basket: 0.5×1311×0.15≈$98)");
+  const frW = c1.manifest.items.find((i) => /Fracture/.test(i.name));
+  ok(frW && frW.weight === 1 && cCon.weighted === true,
+    "manifest items carry the published index weight; the budget prices on it (single case → weight 1)");
   const c2 = await collect({ root: CROOT });
   const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
   ok(hl2.length === hl1.length && c2.manifest.items.length === 4, "immediate re-run dedupes snapshots, still refreshes the manifest");
