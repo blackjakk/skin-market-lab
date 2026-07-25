@@ -112,10 +112,56 @@ ok(A.corrDaily(corrSeries, "caseIdx", "btc", 30).corr === 1 && A.corrDaily(corrS
 ok(A.corrDaily(corrSeries.slice(0, 5), "caseIdx", "btc", 30).corr === null,
   "corrDaily: refuses to correlate on <10 paired returns");
 
-// ── settlement fixings (SMLX-1) ────────────────────────────────────────────
+// ── SMLX-2 chained construction: seasoning + scheduled inclusion ───────────
+const mkDay = (t) => A.dayKey(t);
+const dcase = (t, price, vol) => ({ day: mkDay(t), t, price, vol: vol == null ? 10 : vol });
+// chaining continuity: A rises 10%/day, B flat → index = geometric mean path
+const chain = A.marketOverview([
+  { name: "A Case", cat: "case", daily: [dcase(T0, 100), dcase(T0 + D, 110), dcase(T0 + 2 * D, 121)], skinportDaily: [] },
+  { name: "B Case", cat: "case", daily: [dcase(T0, 50), dcase(T0 + D, 50), dcase(T0 + 2 * D, 50)], skinportDaily: [] },
+]);
+ok(chain.series[0].caseIdx === 100 && near(chain.series[1].caseIdx, 104.88, 0.01) && near(chain.series[2].caseIdx, 110, 0.01),
+  "SMLX-2 chaining: index cumulates mean daily log-returns (100 → 104.88 → 110)");
+// no jump on entry: the incumbent must be GRANDFATHERED (first mark before
+// the 2026-07-25 adoption date), the newcomer lists after it
+const TOLD = Date.UTC(2026, 6, 1);  // grandfathered incumbent from 2026-07-01
+const TNEW = Date.UTC(2026, 8, 2);  // newcomer first mark 2026-09-02 → included 2026-11-01
+const oldFlat = [];
+for (let i = 0; i < 130; i++) oldFlat.push(dcase(TOLD + i * D, 10));
+const noJump = A.marketOverview([
+  { name: "Old Case", cat: "case", daily: oldFlat.slice(0, 70), skinportDaily: [] }, // through 2026-09-08
+  { name: "New Case", cat: "case", daily: [dcase(TNEW, 9999), dcase(TNEW + D, 1), dcase(TNEW + 2 * D, 5000)], skinportDaily: [] },
+]);
+ok(noJump.series.every((s) => s.caseIdx === 100),
+  "SMLX-2 no-jump: a seasoning newcomer's prices cannot move the index (all 100)");
+ok(A.includedFromDay("2026-09-02") === "2026-11-01" && A.includedFromDay("2026-01-05") === "2026-01-05",
+  "inclusion calendar: 30d seasoning → next first-of-month; founding cohort grandfathered");
+// scheduled inclusion: newcomer contributes only after its inclusion date
+const newDaily = [];
+for (let i = 0; i < 66; i++) {
+  const t = TNEW + i * D;
+  newDaily.push(dcase(t, mkDay(t) >= "2026-11-03" ? 110 : 100)); // +10% on 2026-11-03
+}
+const incl = A.marketOverview([
+  { name: "Old Case", cat: "case", daily: oldFlat, skinportDaily: [] },
+  { name: "New Case", cat: "case", daily: newDaily, skinportDaily: [] },
+]);
+const byDay = new Map(incl.series.map((s) => [s.day, s.caseIdx]));
+ok(byDay.get("2026-11-01") === 100 && byDay.get("2026-11-02") === 100 && near(byDay.get("2026-11-03"), 104.88, 0.01),
+  "SMLX-2 scheduled inclusion: newcomer's returns count only post-inclusion (+10% ÷ 2 items → 104.88)");
+// art carry-forward: sparse marks fill between observations
+const artCarry = A.marketOverview([
+  { name: "Grail", cat: "skin", tier: "art", daily: [], skinportDaily: [],
+    artDaily: [{ day: mkDay(T0), t: T0, price: 100 }, { day: mkDay(T0 + 2 * D), t: T0 + 2 * D, price: 110 }] },
+  { name: "Filler Case", cat: "case", daily: [dcase(T0, 5), dcase(T0 + D, 5), dcase(T0 + 2 * D, 5)], skinportDaily: [] },
+]);
+ok(artCarry.series[1].artIdx === 100 && artCarry.series[2].artIdx === 110,
+  "art marks carry forward between sparse observations (100 → 100 → 110)");
+
+// ── settlement fixings (SMLX-2) ────────────────────────────────────────────
 const setSeries = Array.from({ length: 7 }, (_, i) => ({ day: A.dayKey(T0 + i * D), t: T0 + i * D, caseIdx: 100 + i, cashRatio: 0.65 }));
 const fx7 = S.computeFixing(setSeries, S.FIXINGS[0]);
-ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-1",
+ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-2",
   "SETTLE-CASE-7D = mean of last 7 daily index values (100..106 → 103)");
 const fxShallow = S.computeFixing(setSeries.slice(0, 2), S.FIXINGS[0]);
 ok(fxShallow.value === null && /2\/3/.test(fxShallow.accruing),
@@ -292,7 +338,7 @@ async function fixtureTransport(url, headers) {
   const mkt = await api("/api/skins/market");
   ok(mkt.status === 200 && mkt.body.today && mkt.body.today.caseIdx === 100,
     "live /api/skins/market: case index at base 100 on day one");
-  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-1"
+  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-2"
     && mkt.body.settlement.fixings["SETTLE-CASE-7D"]
     && /^[0-9a-f]{64}$/.test(mkt.body.settlement.fixings["SETTLE-CASE-7D"].hash),
     "live market serves SMLX-1 fixings with 64-hex canonical hashes");

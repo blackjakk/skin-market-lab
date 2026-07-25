@@ -1,4 +1,4 @@
-// ─── settlement.js — SMLX-1 settlement fixings + manipulation budget ────────
+// ─── settlement.js — SMLX-2 settlement fixings + manipulation budget ────────
 // UMD, pure, deterministic — shared by the collector (Node), the live
 // tracker, and the methodology page (browser: window.SkinSettlement).
 //
@@ -24,7 +24,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const METHODOLOGY = "SMLX-1";
+  const METHODOLOGY = "SMLX-2";
   const FIXINGS = [
     { name: "SETTLE-CASE-7D", key: "caseIdx", window: 7, minDays: 3, decimals: 2 },
     { name: "SETTLE-CASE-30D", key: "caseIdx", window: 30, minDays: 10, decimals: 2 },

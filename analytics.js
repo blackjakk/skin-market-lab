@@ -307,49 +307,102 @@
   //               items with both legs that day. ~0.7–0.85 is normal; rising
   //               toward 1 = strong real-money demand.
   //   volTotal  — total steam units sold/day across the tracked set.
-  // Items are bucketed into three index families:
-  //   case — cat "case" (the commodity layer; live Steam marks)
-  //   liq  — everything else with real Steam liquidity (median ≥5 sold/day;
-  //          "liquids" is the trading community's own word for these)
-  //   art  — tier:"art" grails, marked to it.artDaily (Skinport 30d-median
-  //          marks with per-item carry-forward) because they trade rarely
-  //          and mostly sit ABOVE Steam's listing cap (no live Steam price)
+  // ── SMLX-2 index construction: CHAINED daily returns ─────────────────────
+  // Items bucket into three families:
+  //   case — cat "case" (commodity layer; live Steam marks)
+  //   liq  — everything else with real Steam liquidity (≥5 median sold/day)
+  //   art  — tier:"art" grails, marked to artDaily (Skinport 30d medians,
+  //          carried forward — appraisal-style)
+  // Each family's index CHAINS: the day's return is the mean of log-returns
+  // of constituents present (and included) on BOTH days, cumulated from 100.
+  // Constituent changes are therefore return-neutral at entry/exit — no
+  // level jump to front-run. New listings (first mark after the adoption
+  // date) season for 30 days, then enter on the FIRST DAY OF THE NEXT
+  // CALENDAR MONTH; the founding cohort is grandfathered.
+  const INDEX_RULES = { version: "SMLX-2", adoption: "2026-07-25", seasoningDays: 30 };
+  function dayT(day) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day));
+    return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
+  }
+  function includedFromDay(firstDay) {
+    if (firstDay <= INDEX_RULES.adoption) return firstDay; // founding cohort
+    const el = dayT(firstDay) + INDEX_RULES.seasoningDays * 86400000;
+    const d = new Date(el);
+    const inc = d.getUTCDate() === 1 ? el : Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1);
+    return dayKey(inc);
+  }
   function marketOverview(items) {
-    const days = new Map();
-    const rec = (d) => {
-      let r = days.get(d.day);
-      if (!r) { r = { day: d.day, t: d.t, rels: { case: [], liq: [], art: [] }, ratios: [], vol: 0, sawVol: false }; days.set(d.day, r); }
-      r.t = Math.max(r.t, d.t);
+    const dayRec = new Map();
+    const rec = (day, t) => {
+      let r = dayRec.get(day);
+      if (!r) { r = { day: day, t: t || dayT(day), ratios: [], vol: 0, sawVol: false }; dayRec.set(day, r); }
+      if (t) r.t = Math.max(r.t, t);
       return r;
     };
+    const fam = { case: [], liq: [], art: [] };
     for (const it of items || []) {
       const daily = it.daily || [];
       const isArt = it.tier === "art";
-      const key = isArt ? null : it.cat === "case" ? "case" : liquidity(daily, 30) >= 5 ? "liq" : null;
-      const base = key && daily.length && daily[0].price > 0 ? daily[0].price : null;
+      const key = isArt ? "art" : it.cat === "case" ? "case" : liquidity(daily, 30) >= 5 ? "liq" : null;
       const spBy = new Map((it.skinportDaily || []).map((d) => [d.day, d.price]));
       for (const d of daily) {
-        const r = rec(d);
+        const r = rec(d.day, d.t);
         if (d.vol != null) { r.vol += d.vol; r.sawVol = true; }
-        if (base && d.price > 0) r.rels[key].push(Math.log(d.price / base));
         const sp = spBy.get(d.day);
         if (sp != null && d.price > 0) r.ratios.push(sp / d.price);
       }
-      if (isArt) {
-        const ad = it.artDaily || [];
-        const abase = ad.length && ad[0].price > 0 ? ad[0].price : null;
-        if (abase) for (const d of ad) if (d.price > 0) rec(d).rels.art.push(Math.log(d.price / abase));
+      if (isArt) for (const d of it.artDaily || []) rec(d.day, d.t);
+      const src = isArt ? (it.artDaily || []) : daily;
+      if (key && src.length) {
+        const priceBy = new Map(src.filter((d) => d.price > 0).map((d) => [d.day, d.price]));
+        if (priceBy.size) fam[key].push({ priceBy: priceBy, includedFrom: includedFromDay(src[0].day), carry: isArt });
       }
     }
-    const gm = (rels) => rels.length ? round2(100 * Math.exp(rels.reduce((a, b) => a + b, 0) / rels.length)) : null;
-    const series = Array.from(days.values()).sort((a, b) => (a.day < b.day ? -1 : 1)).map((r) => ({
-      day: r.day, t: r.t,
-      caseIdx: gm(r.rels.case),
-      liqIdx: gm(r.rels.liq),
-      artIdx: gm(r.rels.art),
-      cashRatio: r.ratios.length ? Math.round(median(r.ratios) * 1000) / 1000 : null,
-      volTotal: r.sawVol ? r.vol : null,
-    }));
+    const days = Array.from(dayRec.keys()).sort();
+    // art marks carry forward between observations (appraisal semantics)
+    for (const m of fam.art) if (m.carry) {
+      let last = null;
+      const filled = new Map();
+      for (const day of days) {
+        const p = m.priceBy.get(day);
+        if (p != null) last = p;
+        if (last != null) filled.set(day, last);
+      }
+      m.priceBy = filled;
+    }
+    const levels = { case: [], liq: [], art: [] };
+    for (const key of ["case", "liq", "art"]) {
+      let level = null;
+      for (let k = 0; k < days.length; k++) {
+        const day = days[k];
+        if (level == null) {
+          const hasData = fam[key].some((m) => day >= m.includedFrom && m.priceBy.get(day) != null);
+          if (hasData) level = 100;
+          levels[key].push(level);
+          continue;
+        }
+        const prev = days[k - 1];
+        const rets = [];
+        for (const m of fam[key]) {
+          if (prev < m.includedFrom) continue; // both days must be post-inclusion
+          const p0 = m.priceBy.get(prev), p1 = m.priceBy.get(day);
+          if (p0 > 0 && p1 > 0) rets.push(Math.log(p1 / p0));
+        }
+        if (rets.length) level = level * Math.exp(rets.reduce((a, b) => a + b, 0) / rets.length);
+        levels[key].push(level); // no overlap → level carries unchanged
+      }
+    }
+    const series = days.map((day, k) => {
+      const r = dayRec.get(day);
+      return {
+        day: day, t: r.t,
+        caseIdx: levels.case[k] != null ? round2(levels.case[k]) : null,
+        liqIdx: levels.liq[k] != null ? round2(levels.liq[k]) : null,
+        artIdx: levels.art[k] != null ? round2(levels.art[k]) : null,
+        cashRatio: r.ratios.length ? Math.round(median(r.ratios) * 1000) / 1000 : null,
+        volTotal: r.sawVol ? r.vol : null,
+      };
+    });
     const idx = series.filter((s) => s.caseIdx != null);
     const last = idx.length ? idx[idx.length - 1] : null;
     const prev = idx.length > 1 ? idx[idx.length - 2] : null;
@@ -367,7 +420,7 @@
       liqIdx: lastNonNull("liqIdx"), artIdx: lastNonNull("artIdx"),
       cashRatio: lastNonNull("cashRatio"), volTotal: lastNonNull("volTotal"),
     } : null;
-    return { series: series, today: today };
+    return { series: series, today: today, rules: INDEX_RULES };
   }
 
   // ── slosh detection (measured, not vibed) ────────────────────────────────
@@ -412,7 +465,8 @@
 
   return {
     parseMoney: parseMoney, parseCount: parseCount, dayKey: dayKey, median: median, toDaily: toDaily,
-    marketOverview: marketOverview, cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily,
+    marketOverview: marketOverview, includedFromDay: includedFromDay, INDEX_RULES: INDEX_RULES,
+    cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,
     maxDrawdown: maxDrawdown, currentDrawdown: currentDrawdown,

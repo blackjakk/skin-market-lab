@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SMLX-1 — Skin Market Lab Index &amp; Settlement Methodology</title>
+<title>SMLX-2 — Skin Market Lab Index &amp; Settlement Methodology</title>
 <link rel="stylesheet" href="skins.css">
 <style>
   .doc { max-width: 880px; margin: 0 auto; padding: 0 20px 60px; }
@@ -32,8 +32,8 @@
 <body>
 <div class="topnav"><a href="./">← Skin Market Lab</a></div>
 <div class="doc">
-  <h1>SMLX-1 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
-  <p class="muted">Skin Market Lab · methodology version SMLX-1 · any rule change bumps the version — a
+  <h1>SMLX-2 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
+  <p class="muted">Skin Market Lab · methodology version SMLX-2 · any rule change bumps the version — a
   fixing is meaningless without its rulebook. <b>This document describes a measurement, not an offer,
   solicitation, or operation of any financial instrument.</b> Derivatives referencing game items may be
   regulated products in most jurisdictions; nothing here is legal advice.</p>
@@ -49,8 +49,9 @@
   <table class="spec">
     <tr><th>Index</th><th>Constituents</th><th>Mark source</th><th>Aggregation</th></tr>
     <tr><td>Lab Case Index</td><td>All tracked cases (the commodity layer)</td>
-      <td>Steam Market daily median price</td><td rowspan="2">Per-item price relative to its own first
-      recorded day; equal-weight geometric mean × 100</td></tr>
+      <td>Steam Market daily median price</td><td rowspan="2">CHAINED: each day's index return is the
+      equal-weight mean of constituents' daily log-returns (items present and included on both days);
+      levels cumulate from 100 — constituent changes are return-neutral at entry/exit</td></tr>
     <tr><td>Liquids Index</td><td>Non-case items with ≥5 median units sold/day (self-gating — “liquids”
       must be liquid)</td><td>Steam Market daily median</td></tr>
     <tr><td>Art Index</td><td>Curated grail basket (<code>watchlist.json → art[]</code>)</td>
@@ -77,6 +78,25 @@
   candidate for continuous instruments; the cash ratio is a spread/convertibility mark suited to
   <b>dated</b> settlement only; the art index is <b>never</b> suitable for settlement (appraisal marks,
   single-sale jumps).</p>
+
+  <h2>3a · Constituent changes — seasoning &amp; the inclusion calendar</h2>
+  <ul>
+    <li><b>Founding cohort</b>: items whose first recorded mark is on or before <b>2026-07-25</b>
+    (the SMLX-2 adoption date) are included from their first day.</li>
+    <li><b>New listings season for 30 days</b> before becoming eligible — new cases mechanically
+    collapse 80–95% from launch-hype prices as drop supply floods in; that dynamic belongs to one
+    item's supply schedule, not the market, and never enters the index.</li>
+    <li><b>Scheduled inclusion</b>: an eligible item enters on the <b>first day of the next calendar
+    month</b> after its seasoning completes. Because construction is chained, entry is
+    return-neutral: the index level cannot move on inclusion day — there is no arithmetic to
+    front-run, only the newcomer's future returns.</li>
+    <li><b>Both-days rule</b>: an item contributes a return only when it has marks on both days of a
+    pair and both days are on/after its inclusion date; art marks carry forward between sparse
+    observations (appraisal semantics).</li>
+    <li><b>Liquids membership</b> (≥5 median sold/day) is evaluated at computation time over trailing
+    data; the published fixing records in <code>data/settlements.jsonl</code> are authoritative and
+    never rewritten if a re-derivation with later data would classify differently.</li>
+  </ul>
 
   <h2>4 · Corporate actions &amp; patch events</h2>
   <ul>
@@ -117,7 +137,19 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   (last record per day is the day's official fixing). Latest records:</p>
   <div id="histOut" class="muted">Loading…</div>
 
-  <h2>8 · Disclaimers</h2>
+  <h2>8 · Version history</h2>
+  <table class="spec">
+    <tr><th>Version</th><th>Date</th><th>Change</th></tr>
+    <tr><td>SMLX-1</td><td>2026-07-25</td><td>Launch: level-vs-first-day geometric construction.
+      Known limit: a new constituent entered at relative 1.0, mechanically diluting the level —
+      acceptable for research, disqualifying for settlement.</td></tr>
+    <tr><td>SMLX-2</td><td>2026-07-25</td><td>Chained daily-return construction (constituent changes
+      are return-neutral), 30-day seasoning for new listings, first-of-month scheduled inclusion,
+      founding-cohort grandfather clause. Adopted before any external instrument referenced the
+      fixings; SMLX-1 records in the history retain their stamp.</td></tr>
+  </table>
+
+  <h2>9 · Disclaimers</h2>
   <p>Not financial advice; not an offer or invitation to trade any instrument. The underlying market is
   operated at the sole discretion of Valve Corporation, which can and does change its rules without
   notice; data sources may revoke access at any time; upstream terms of service do not grant derivative

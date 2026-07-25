@@ -65,9 +65,10 @@ backfill to the hosted dashboard, commit the resulting
 
 ## The market home (what the header numbers mean)
 
-- **Lab Case Index** — geometric mean of every tracked case's price
-  relative to its own first recorded day, ×100. Cases are the market's
-  commodity layer, so this basket is the de facto "S&P of skins".
+- **Lab Case Index** — chained: each day's move is the equal-weight mean
+  of tracked cases' daily returns, cumulated from 100 (SMLX-2 — new cases
+  season 30 days and enter on a published calendar, return-neutrally).
+  Cases are the market's commodity layer: the de facto "S&P of skins".
 - **Cash ratio** — median (third-party realized sale ÷ Steam price).
   ~70–85% is normal; climbing toward 100% = strong real-money demand,
   collapsing = sellers trapped in Steam wallet funds.
@@ -91,7 +92,7 @@ backfill to the hosted dashboard, commit the resulting
   regional demand mix — Chinese demand is this market's biggest swing
   factor.
 
-## Settlement fixings (SMLX-1)
+## Settlement fixings (SMLX-2)
 
 Dated settlement marks computed from the committed series by fixed rules —
 what a cash-settled future or scalar market would settle against:
@@ -138,7 +139,7 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 89 checks, hermetic (fixture transport):
+- `npm run probe` — 94 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
 - `npm run probe:ui` — 35 real-Chromium checks across live AND static modes:

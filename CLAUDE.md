@@ -59,7 +59,17 @@ dashboard from the collector's committed files), or the setup panel
   grails sit above the ~$1,800 steam listing cap → no steam quote is
   EXPECTED for art, not an error). Art items' manifest latest falls back
   to the 30d sale median.
-- SETTLEMENT LAYER (SMLX-1, settlement.js — UMD, pure, shared by
+- SMLX-2 CONSTRUCTION (perp-grade): indices CHAIN daily returns (mean of
+  constituents' log-returns over both-days pairs, cumulated from 100) so
+  constituent entry/exit is RETURN-NEUTRAL — no level jump to front-run.
+  New listings (first mark after INDEX_RULES.adoption 2026-07-25) season
+  30 days then enter on the next first-of-month; founding cohort
+  grandfathered; art marks carry forward between sparse observations.
+  includedFromDay/INDEX_RULES exported for the probe, which pins the
+  no-jump-on-entry property directly. NEVER revert to level-vs-base — a
+  new case release would create a published riskless trade against any
+  instrument settling on the fixing.
+- SETTLEMENT LAYER (SMLX-2, settlement.js — UMD, pure, shared by
   collector/server/methodology page): dated fixings (SETTLE-CASE-7D/30D,
   SETTLE-RATIO-30D) = means over the published daily series with MIN-DAY
   gates (null + "accruing" until met — never fabricated, never backfilled);
@@ -84,7 +94,7 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 89 checks: analytics units, full API flow, snapshot
+- `node probe.js` — 94 checks: analytics units, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
 - `node client-probe.js` — 35 checks, real Chromium (PLAYWRIGHT_LIB env
