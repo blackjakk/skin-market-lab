@@ -72,7 +72,7 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 80 checks: analytics units, full API flow, snapshot
+- `node probe.js` — 81 checks: analytics units, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
 - `node client-probe.js` — 32 checks, real Chromium (PLAYWRIGHT_LIB env
@@ -88,9 +88,12 @@ dashboard from the collector's committed files), or the setup panel
   3-digit comma group as thousands; unit counts go through `parseCount`
   (digits-only). EU price strings ("43,80€") still parse as decimals.
 - Skinport API is brotli-ONLY (`Accept-Encoding: br` +
-  `zlib.brotliDecompressSync`) and hard rate-limited (8 req/5min on
-  /v1/items) → disk caches with 30min–12h TTLs + politeness gaps in
-  market.js. Don't tighten the TTLs.
+  `zlib.brotliDecompressSync`) and hard rate-limited: 8 req/5min PER IP on
+  /v1/items AND /v1/sales/history (proven empirically 2026-07-25 — exactly
+  8 succeed then 429s). The collector therefore refreshes sales for a
+  ROTATING 8-item window per run (data/skinport-cursor.json) and serves
+  stale aggregates from data/sales.json between turns. NEVER bulk-fetch
+  sales; the tracker's own caches keep 30min–12h TTLs.
 - Steam `pricehistory` needs a login cookie; `priceoverview` doesn't.
   Logged-out listing pages no longer embed `var line1` history.
 - Snapshot volume readings are trailing-24h → daily bucket uses `volMode:

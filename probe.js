@@ -329,6 +329,8 @@ async function fixtureTransport(url, headers) {
   const hl1 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
   ok(hl1.some((l) => JSON.parse(l).src === "steam") && hl1.some((l) => JSON.parse(l).src === "skinport"),
     "collector history jsonl gets steam + skinport lines");
+  ok(fs.existsSync(path.join(CROOT, "data", "sales.json")) && fs.existsSync(path.join(CROOT, "data", "skinport-cursor.json")),
+    "skinport sales store + rotation cursor persisted (8-per-run budget)");
   const c2 = await collect({ root: CROOT });
   const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
   ok(hl2.length === hl1.length && c2.manifest.items.length === 4, "immediate re-run dedupes snapshots, still refreshes the manifest");

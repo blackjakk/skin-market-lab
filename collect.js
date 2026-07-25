@@ -24,6 +24,7 @@ const { slug } = require("./server.js");
 const DEDUPE_MS = 30 * 60 * 1000; // same guard as the tracker
 
 function readJson(f, fb) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return fb; } }
+function writeJson(f, v) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(v)); }
 function readLines(f) {
   const out = [];
   try {
@@ -57,6 +58,18 @@ async function collect(opts) {
   const marketItems = [];
   let steamOk = 0;
 
+  // Skinport's sales endpoint allows only 8 requests per 5 minutes, so each
+  // run refreshes a rotating window of 8 items (cursor persisted) and every
+  // item keeps serving its last stored aggregates until its turn comes
+  // round (~2 days at 4 runs/day — fine for 24h/7d/30d windows).
+  const SALES_BUDGET = 8;
+  const salesStoreFile = path.join(dataDir, "sales.json");
+  const salesStore = readJson(salesStoreFile, {});
+  const cursorFile = path.join(dataDir, "skinport-cursor.json");
+  const cursor = readJson(cursorFile, { i: 0 }).i % Math.max(1, names.length);
+  const fetchSet = new Set(Array.from({ length: Math.min(SALES_BUDGET, names.length) },
+    (_, k) => names[(cursor + k) % names.length]));
+
   for (const name of names) {
     const s = slug(name);
     const hf = path.join(dataDir, "history", s + ".jsonl");
@@ -70,7 +83,7 @@ async function collect(opts) {
     };
 
     const tier = artSet.has(name) ? "art" : null;
-    let quote = null, sales = null, noQuote = false;
+    let quote = null, noQuote = false;
     try {
       const po = await M.steamPriceOverview(name, A);
       if (po) {
@@ -79,17 +92,23 @@ async function collect(opts) {
         steamOk++;
       } else noQuote = true;
     } catch (e) { manifest.errors.push(name + ": " + String(e.message || e)); }
-    try {
-      sales = await M.skinportSalesHistory(name);
-      const m24 = sales && sales.last24h ? sales.last24h.median : null;
-      const m30 = sales && sales.last30d ? sales.last30d.median : null;
-      if (m24 != null || m30 != null)
-        appendIfNew({ t: Date.now(), src: "skinport", price: m24 != null ? m24 : m30,
-          vol: sales.last24h ? sales.last24h.volume : null, sp30: m30 });
-    } catch (e) { /* skinport is optional garnish */ }
-    // art grails routinely have NO steam quote (thin, above the listing
-    // cap) — that's expected, not an error, as long as sales data exists
-    if (noQuote && !(tier === "art" && sales))
+    if (fetchSet.has(name)) {
+      try {
+        const fresh = await M.skinportSalesHistory(name);
+        if (fresh) {
+          salesStore[s] = { t: Date.now(), data: fresh };
+          const m24 = fresh.last24h ? fresh.last24h.median : null;
+          const m30 = fresh.last30d ? fresh.last30d.median : null;
+          if (m24 != null || m30 != null)
+            appendIfNew({ t: Date.now(), src: "skinport", price: m24 != null ? m24 : m30,
+              vol: fresh.last24h ? fresh.last24h.volume : null, sp30: m30 });
+        }
+      } catch (e) { console.log("[collect] skinport " + name + ": " + e.message); }
+    }
+    const sales = salesStore[s] ? salesStore[s].data : null;
+    // art grails (and anything above the ~$1,800 steam listing cap) have NO
+    // steam quote by nature — only flag items with no data from EITHER side
+    if (noQuote && tier !== "art" && !sales)
       manifest.errors.push(name + ": no steam quote (unknown item, or too rare for a median)");
 
     if (!quote) { // serve the last stored quote so one bad run never blanks the site
@@ -165,6 +184,8 @@ async function collect(opts) {
     cnus: latest.cnus != null ? latest.cnus : null,
   });
 
+  writeJson(cursorFile, { i: names.length ? (cursor + SALES_BUDGET) % names.length : 0 });
+  writeJson(salesStoreFile, salesStore);
   fs.writeFileSync(path.join(dataDir, "index.json"), JSON.stringify(manifest));
   return { manifest, steamOk, total: names.length };
 }
