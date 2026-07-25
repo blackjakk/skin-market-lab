@@ -63,7 +63,7 @@ async function collect(opts) {
         quote = { t: po.t, price: po.price, lowest: po.lowest, vol: po.vol };
         appendIfNew({ t: po.t, src: "steam", price: po.price, lowest: po.lowest, vol: po.vol });
         steamOk++;
-      } else manifest.errors.push(name + ": steam item not found");
+      } else manifest.errors.push(name + ": no steam quote (unknown item, or too rare for a median)");
     } catch (e) { manifest.errors.push(name + ": " + String(e.message || e)); }
     try {
       sales = await M.skinportSalesHistory(name);
