@@ -32,7 +32,15 @@ dashboard from the collector's committed files), or the setup panel
   bootstrap. First boot seeds the private watchlist from watchlist.json.
 - `assembleSeries` in analytics.js is the ONE canonical raw-records→series
   assembly — server, collector, and browser static mode all call it; never
-  fork that logic per surface.
+  fork that logic per surface. Same rule for `marketOverview` (the Lab Case
+  Index / cash ratio / volume block): collector publishes it in
+  data/index.json, the live server serves it at /api/skins/market — one
+  function, three surfaces. today{} must stay non-null for skins-only sets
+  (ratio/volume/players don't depend on cases).
+- HOME-FIRST UI: boot lands on renderHome (strip + movers + ranked sortable
+  table + sparklines); item detail is one click deep with a ← Market back
+  button. The watchlist is ~all cases (the index basket) + a few blue-chip
+  skins — keep the basket broad, the index is only as good as its coverage.
 - `analytics.js` is UMD and SHARED VERBATIM by server (require) and browser
   (window.SkinAnalytics) — keep it dependency-free and side-effect-free;
   the probe pins its math to hand-computed values.
@@ -42,10 +50,10 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 62 checks: analytics units, full API flow, snapshot
+- `node probe.js` — 71 checks: analytics units, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence,
   watchlist seeding, the collector (manifest, import merge, dedupe).
-- `node client-probe.js` — 25 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node client-probe.js` — 29 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback

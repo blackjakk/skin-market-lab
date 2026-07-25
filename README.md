@@ -63,6 +63,17 @@ backfill to the hosted dashboard, commit the resulting
    and use *⚡ Bootstrap full history* per item. The cookie stays on your
    machine; treat it like a password.
 
+## The market home (what the header numbers mean)
+
+- **Lab Case Index** — geometric mean of every tracked case's price
+  relative to its own first recorded day, ×100. Cases are the market's
+  commodity layer, so this basket is the de facto "S&P of skins".
+- **Cash ratio** — median (third-party realized sale ÷ Steam price).
+  ~70–85% is normal; climbing toward 100% = strong real-money demand,
+  collapsing = sellers trapped in Steam wallet funds.
+- **Units sold/day** — total Steam sales across the tracked set (liquidity).
+- **CS2 players** — live in-game count, the market's demand fundamental.
+
 ## What the analytics mean
 
 All computed in `analytics.js` (shared verbatim by server and
@@ -95,10 +106,10 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 62 checks, hermetic (fixture transport):
+- `npm run probe` — 71 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
-- `npm run probe:ui` — 25 real-Chromium checks across live AND static modes:
+- `npm run probe:ui` — 29 real-Chromium checks across live AND static modes:
   chart pixels actually painted, crosshair tooltip, range switching,
   portfolio form, zero page errors. Screenshot → `/tmp/skin_lab.png`.
 

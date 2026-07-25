@@ -35,6 +35,15 @@ function readLines(f) {
   return out;
 }
 
+const CAT_BY_NAME = (() => {
+  const m = new Map();
+  for (const s of (readJson(path.join(__dirname, "seed.json"), { items: [] }).items || [])) m.set(s.name, s.cat);
+  return m;
+})();
+function catOf(name) {
+  return CAT_BY_NAME.get(name) || (/\b(Case|Package)$/.test(name) ? "case" : name.startsWith("★") ? "knife" : "skin");
+}
+
 async function collect(opts) {
   opts = opts || {};
   const root = opts.root || __dirname;
@@ -42,6 +51,7 @@ async function collect(opts) {
   const names = opts.names || (readJson(path.join(root, "watchlist.json"), { items: [] }).items || []);
   fs.mkdirSync(path.join(dataDir, "history"), { recursive: true });
   const manifest = { generatedAt: Date.now(), items: [], errors: [] };
+  const marketItems = [];
   let steamOk = 0;
 
   for (const name of names) {
@@ -78,12 +88,38 @@ async function collect(opts) {
     const imported = readJson(path.join(dataDir, "import", s + ".json"), null);
     const series = A.assembleSeries(imported && imported.rows, lines);
     const an = A.analyze(series.daily);
+    const cat = catOf(name);
+    marketItems.push({ name, cat, daily: series.daily, skinportDaily: series.skinportDaily });
     manifest.items.push({
-      name, slug: s,
+      name, slug: s, cat,
       quote, skinport: sales, imported: !!imported,
-      days: an.days, latest: an.latest, mom7: an.mom7, mom30: an.mom30,
+      days: an.days, latest: an.latest,
+      mom1: A.momentum(series.daily, 1), mom7: an.mom7, mom30: an.mom30,
+      vol24h: quote ? quote.vol : null,
+      spark: series.daily.slice(-14).map((d) => d.price),
       verdict: an.signal.verdict, score: an.signal.score,
     });
+  }
+
+  // market overview: the Lab Case Index + cash ratio + total volume, plus
+  // the CS2 live player count (appended raw per run, daily-bucketed here)
+  manifest.market = A.marketOverview(marketItems);
+  const playersFile = path.join(dataDir, "market.jsonl");
+  try {
+    const p = await M.steamPlayers();
+    if (p != null) fs.appendFileSync(playersFile, JSON.stringify({ t: Date.now(), players: p }) + "\n");
+  } catch (e) { /* players are garnish — never fail the run over them */ }
+  const playersByDay = new Map();
+  for (const ln of readLines(playersFile)) {
+    if (ln.players == null) continue;
+    const day = A.dayKey(ln.t);
+    playersByDay.set(day, Math.max(playersByDay.get(day) || 0, ln.players));
+  }
+  for (const s of manifest.market.series) if (playersByDay.has(s.day)) s.players = playersByDay.get(s.day);
+  if (manifest.market.today) {
+    let latest = null;
+    for (const ln of readLines(playersFile)) if (ln.players != null) latest = ln.players;
+    manifest.market.today.players = latest;
   }
 
   fs.writeFileSync(path.join(dataDir, "index.json"), JSON.stringify(manifest));

@@ -200,6 +200,11 @@ function startServer(opts) {
     };
   }
 
+  function catOf(name) {
+    const s = seed.find((x) => x.name === name);
+    if (s && s.cat) return s.cat;
+    return /\b(Case|Package)$/.test(name) ? "case" : name.startsWith("★") ? "knife" : "skin";
+  }
   function watchSummary() {
     return watchlist.map((name) => {
       const daily = dailyFor(name);
@@ -207,14 +212,35 @@ function startServer(opts) {
       const last = latestSteam(name);
       return {
         name,
+        cat: catOf(name),
         latest: last ? last.price : an.latest,
         vol24h: last ? last.vol : null,
         t: last ? last.t : null,
         days: an.days,
-        mom7: an.mom7, mom30: an.mom30,
+        mom1: A.momentum(daily, 1), mom7: an.mom7, mom30: an.mom30,
+        spark: daily.slice(-14).map((d) => d.price),
         verdict: an.signal.verdict, score: an.signal.score,
       };
     });
+  }
+
+  // market overview (Lab Case Index / cash ratio / volume / players) —
+  // same shared math the collector publishes for the static site
+  async function marketReport() {
+    const items = watchlist.map((name) => {
+      const imported = readJson(importFile(name), null);
+      const s = A.assembleSeries(imported && imported.rows, snaps(name));
+      return { name, cat: catOf(name), daily: s.daily, skinportDaily: s.skinportDaily };
+    });
+    const mkt = A.marketOverview(items);
+    const pf = path.join(DATA, "cache", "players.json");
+    let rec = readJson(pf, null);
+    if (!rec || Date.now() - rec.t > 30 * 60 * 1000) {
+      try { rec = { t: Date.now(), players: await M.steamPlayers() }; writeJson(pf, rec); }
+      catch (e) { /* keep stale (or none) */ }
+    }
+    if (mkt.today && rec && rec.players != null) mkt.today.players = rec.players;
+    return mkt;
   }
 
   function portfolioReport() {
@@ -315,6 +341,7 @@ function startServer(opts) {
       }
       if (p === "/api/skins/search") return sendJson(res, 200, { results: search(u.searchParams.get("q")) });
       if (p === "/api/skins/watchlist") return sendJson(res, 200, { items: watchSummary() });
+      if (p === "/api/skins/market") return sendJson(res, 200, await marketReport());
       if (p === "/api/skins/item") {
         const name = u.searchParams.get("name");
         if (!name) return sendJson(res, 400, { error: "name required" });

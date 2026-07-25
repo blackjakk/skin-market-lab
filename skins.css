@@ -184,3 +184,31 @@ table.dt th { color: var(--text-muted); }
 /* data-honesty chip: shown while an item's own history is still short */
 .warmup { display: inline-block; margin: 0 0 12px; padding: 5px 11px; border-radius: 99px;
   border: 1px solid var(--accent); color: var(--accent); font-size: 11.5px; letter-spacing: .3px; }
+
+/* ── market home ─────────────────────────────────────────────────────────── */
+.strip { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 6px; }
+.tile .sub2 { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+#idxChart { width: 100%; display: block; margin-top: 6px; }
+.moversRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; }
+.moverChip { display: inline-flex; gap: 7px; align-items: center; padding: 5px 11px; border-radius: 99px;
+  border: 1px solid var(--line); background: var(--surface-2); color: var(--text-primary);
+  font-size: 12px; cursor: pointer; }
+.moverChip:hover { border-color: var(--text-muted); }
+.moverChip .nm { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scrollX { overflow-x: auto; }
+table.mkt { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 760px; }
+table.mkt th { text-align: left; color: var(--text-muted); font-weight: 600; font-size: 11px;
+  letter-spacing: .8px; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.mkt th.sortable { cursor: pointer; }
+table.mkt th.sortable:hover, table.mkt th.sortable.on { color: var(--text-primary); }
+table.mkt td { padding: 7px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
+table.mkt td.r { text-align: right; }
+table.mkt td.nm { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+tr.mrow { cursor: pointer; }
+tr.mrow:hover, tr.mrow:focus-visible { background: var(--surface-2); outline: none; }
+.catChip { font-size: 9.5px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);
+  border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; }
+.sigMini { font-size: 10.5px; font-weight: 700; letter-spacing: .6px; color: var(--status-neutral); }
+.sigMini.good { color: var(--status-good); } .sigMini.bad { color: var(--status-bad); }
+.spark { display: block; }
+.backBtn { margin-bottom: 10px; }

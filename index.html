@@ -21,14 +21,14 @@
 <main class="grid">
   <aside>
     <div class="panel">
-      <h2>WATCHLIST</h2>
+      <h2>FIND AN ITEM</h2>
       <div class="searchWrap">
         <input id="searchBox" placeholder="Search skins, cases, knives…" autocomplete="off"
                aria-label="Search items to track">
         <div id="searchResults" role="listbox"></div>
       </div>
-      <div id="watchRows" style="margin-top:10px"></div>
       <div class="btnrow">
+        <button class="btn" id="homeBtn" title="Back to the market overview">🏠 Market</button>
         <button class="btn" id="refreshAllBtn" title="Record a price snapshot for every watched item">⟳ Snapshot all</button>
       </div>
     </div>
@@ -46,7 +46,7 @@
     </div>
   </aside>
 
-  <section id="itemView"><div class="panel"><div class="emptyChart">Search for an item and add it to the watchlist to begin.</div></div></section>
+  <section id="itemView"><div class="panel"><div class="emptyChart">Loading market…</div></div></section>
 </main>
 
 <div id="tooltip" aria-hidden="true"></div>

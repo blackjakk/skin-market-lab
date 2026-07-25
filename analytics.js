@@ -295,8 +295,67 @@
     return m;
   }
 
+  // ── market overview (the CoinGecko-style header numbers) ─────────────────
+  // items: [{name, cat, daily, skinportDaily}] (daily from assembleSeries).
+  // Returns { series:[{day,t,caseIdx,cashRatio,volTotal}], today:{...} }.
+  //   caseIdx   — the Lab Case Index: geometric mean of each CASE's price
+  //               relative to its own first recorded day, ×100. Cases are
+  //               the market's commodity layer — this is the "S&P of skins".
+  //               (Known limit: an item added later enters at rel=1, which
+  //               slightly dilutes the level; fine for a personal index.)
+  //   cashRatio — median (third-party realized price ÷ steam price) across
+  //               items with both legs that day. ~0.7–0.85 is normal; rising
+  //               toward 1 = strong real-money demand.
+  //   volTotal  — total steam units sold/day across the tracked set.
+  function marketOverview(items) {
+    const days = new Map();
+    const rec = (d) => {
+      let r = days.get(d.day);
+      if (!r) { r = { day: d.day, t: d.t, rels: [], ratios: [], vol: 0, sawVol: false }; days.set(d.day, r); }
+      r.t = Math.max(r.t, d.t);
+      return r;
+    };
+    for (const it of items || []) {
+      const daily = it.daily || [];
+      const isCase = it.cat === "case";
+      const base = isCase && daily.length && daily[0].price > 0 ? daily[0].price : null;
+      const spBy = new Map((it.skinportDaily || []).map((d) => [d.day, d.price]));
+      for (const d of daily) {
+        const r = rec(d);
+        if (d.vol != null) { r.vol += d.vol; r.sawVol = true; }
+        if (base && d.price > 0) r.rels.push(Math.log(d.price / base));
+        const sp = spBy.get(d.day);
+        if (sp != null && d.price > 0) r.ratios.push(sp / d.price);
+      }
+    }
+    const series = Array.from(days.values()).sort((a, b) => (a.day < b.day ? -1 : 1)).map((r) => ({
+      day: r.day, t: r.t,
+      caseIdx: r.rels.length ? round2(100 * Math.exp(r.rels.reduce((a, b) => a + b, 0) / r.rels.length)) : null,
+      cashRatio: r.ratios.length ? Math.round(median(r.ratios) * 1000) / 1000 : null,
+      volTotal: r.sawVol ? r.vol : null,
+    }));
+    const idx = series.filter((s) => s.caseIdx != null);
+    const last = idx.length ? idx[idx.length - 1] : null;
+    const prev = idx.length > 1 ? idx[idx.length - 2] : null;
+    let back7 = null;
+    if (last) for (let i = idx.length - 2; i >= 0; i--) { back7 = idx[i]; if (last.t - idx[i].t >= 7 * 86400000) break; }
+    if (back7 && last.t - back7.t < 5 * 86400000) back7 = null; // too shallow to call it "7d"
+    const lastNonNull = (k) => { for (let i = series.length - 1; i >= 0; i--) if (series[i][k] != null) return series[i][k]; return null; };
+    // today exists whenever ANY series data exists — the cash ratio, volume,
+    // and player count don't depend on cases being tracked
+    const today = series.length ? {
+      day: series[series.length - 1].day,
+      caseIdx: last ? last.caseIdx : null,
+      idx1: last && prev ? last.caseIdx / prev.caseIdx - 1 : null,
+      idx7: last && back7 && back7 !== last ? last.caseIdx / back7.caseIdx - 1 : null,
+      cashRatio: lastNonNull("cashRatio"), volTotal: lastNonNull("volTotal"),
+    } : null;
+    return { series: series, today: today };
+  }
+
   return {
     parseMoney: parseMoney, parseCount: parseCount, dayKey: dayKey, median: median, toDaily: toDaily,
+    marketOverview: marketOverview,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,
     maxDrawdown: maxDrawdown, currentDrawdown: currentDrawdown,

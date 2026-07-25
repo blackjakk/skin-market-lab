@@ -155,8 +155,17 @@ async function skinportSalesHistory(name) {
 
 function numOrNull(v) { const n = Number(v); return isFinite(n) ? n : null; }
 
+// ── Steam live player count (the market's demand fundamental) ──────────────
+async function steamPlayers() {
+  const url = "https://api.steampowered.com/ISteamUserStats/GetNumberOfCurrentPlayers/v1/?appid=" + APP_ID;
+  const res = await polite(url);
+  if (res.status !== 200) throw new Error("steam players HTTP " + res.status);
+  const j = JSON.parse(res.body);
+  return j && j.response && j.response.result === 1 ? numOrNull(j.response.player_count) : null;
+}
+
 module.exports = {
   APP_ID, setTransport, httpGet,
   steamPriceOverview, steamPriceHistory, parseSteamDate, normalizeHistoryRows,
-  skinportItems, skinportSalesHistory,
+  skinportItems, skinportSalesHistory, steamPlayers,
 };

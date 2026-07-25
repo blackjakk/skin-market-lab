@@ -21,7 +21,8 @@
   // mode: "live"   — a tracker server answers (full read/write)
   //       "static" — no tracker; reading the collector's committed data
   //                  files from this same static host (GitHub Pages)
-  const state = { mode: "live", manifest: null, watch: [], selected: null, item: null, portfolio: null, range: "3M", hover: -1 };
+  const state = { mode: "live", manifest: null, watch: [], market: null, selected: null, item: null,
+    portfolio: null, range: "3M", hover: -1, view: "home", sort: { key: "vol24h", dir: -1 } };
   const RANGES = { "1M": 31, "3M": 92, "1Y": 366, "ALL": Infinity };
 
   // Where "edit the watchlist" and "run the collector" live on GitHub.
@@ -91,44 +92,166 @@
     return m < 1 ? "just now" : m < 60 ? m + "m ago" : m < 1440 ? Math.round(m / 60) + "h ago" : Math.round(m / 1440) + "d ago";
   };
 
-  // ── watchlist ────────────────────────────────────────────────────────────
-  // Sorted best-score-first in both modes: the sidebar doubles as a movers
-  // board — buy candidates float up, sell candidates sink.
-  function sortWatch(items) {
-    return items.slice().sort((a, b) => (b.score == null ? -999 : b.score) - (a.score == null ? -999 : a.score));
-  }
+  // ── market home (the CoinGecko-shaped landing) ───────────────────────────
   async function loadWatch() {
     if (state.mode === "static") {
-      state.watch = sortWatch(state.manifest.items.map((m) => ({
-        name: m.name,
+      state.watch = state.manifest.items.map((m) => ({
+        name: m.name, cat: m.cat || null,
         latest: m.quote ? m.quote.price : m.latest,
-        vol24h: m.quote ? m.quote.vol : null,
+        vol24h: m.vol24h != null ? m.vol24h : (m.quote ? m.quote.vol : null),
         t: m.quote ? m.quote.t : null,
-        days: m.days, mom7: m.mom7, mom30: m.mom30,
+        days: m.days, mom1: m.mom1, mom7: m.mom7, mom30: m.mom30,
+        spark: m.spark || [],
         verdict: m.verdict, score: m.score,
-      })));
+      }));
     } else {
-      state.watch = sortWatch((await api("/api/skins/watchlist")).items);
+      state.watch = (await api("/api/skins/watchlist")).items;
     }
-    renderWatch();
+    if (state.view === "home") renderHome();
   }
-  function renderWatch() {
-    const host = $("watchRows");
-    if (!state.watch.length) {
-      host.innerHTML = '<div class="hint">Nothing tracked yet — search above and click an item to start recording its price.</div>';
-      return;
-    }
-    host.innerHTML = state.watch.map((w, i) =>
-      '<div class="wrow' + (w.name === state.selected ? " sel" : "") + '" data-i="' + i + '" tabindex="0" role="button" aria-label="' + esc(w.name) + '">' +
-      '<span class="nm">' + esc(w.name) + '</span><span class="px">' + fmt$(w.latest) + '</span>' +
-      '<span class="sub"><span class="chg ' + cls(w.mom7) + '">7d ' + fmtPct(w.mom7) + '</span>' +
-      '<span class="chg ' + cls(w.mom30) + '">30d ' + fmtPct(w.mom30) + '</span>' +
-      '<span>' + esc(w.verdict || "") + '</span></span></div>').join("");
-    host.querySelectorAll(".wrow").forEach((el) => {
-      const go = () => selectItem(state.watch[Number(el.dataset.i)].name);
+  async function loadMarket() {
+    try {
+      state.market = state.mode === "static" ? (state.manifest.market || null) : await api("/api/skins/market");
+    } catch (e) { state.market = null; }
+  }
+
+  const fmtCompact = (v) => v == null ? "—"
+    : v >= 1e6 ? (v / 1e6).toFixed(2) + "M"
+    : v >= 1e4 ? Math.round(v / 1e3) + "k"
+    : v >= 1e3 ? (v / 1e3).toFixed(1) + "k"
+    : String(Math.round(v));
+
+  const COLS = [
+    { key: "name", label: "Item", num: false },
+    { key: "latest", label: "Price", num: true },
+    { key: "mom1", label: "24h", num: true },
+    { key: "mom7", label: "7d", num: true },
+    { key: "mom30", label: "30d", num: true },
+    { key: "vol24h", label: "Sold 24h", num: true },
+    { key: "spark", label: "14d", num: false, nosort: true },
+    { key: "score", label: "Signal", num: true },
+  ];
+  function sortedRows() {
+    const { key, dir } = state.sort;
+    return state.watch.slice().sort((a, b) => {
+      const av = a[key], bv = b[key];
+      if (av == null && bv == null) return 0;
+      if (av == null) return 1;         // nulls sink regardless of direction
+      if (bv == null) return -1;
+      if (typeof av === "string") return dir * av.localeCompare(bv);
+      return dir * (av - bv);
+    });
+  }
+  function renderHome() {
+    state.view = "home";
+    const t = state.market && state.market.today;
+    const rows = sortedRows();
+    const movers = state.watch.filter((w) => w.mom1 != null).sort((a, b) => b.mom1 - a.mom1);
+    const gain = movers.filter((w) => w.mom1 > 0).slice(0, 3);
+    const lose = movers.filter((w) => w.mom1 < 0).slice(-3).reverse();
+    const idxPts = state.market ? state.market.series.filter((s) => s.caseIdx != null) : [];
+    const strip =
+      tile2("LAB CASE INDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
+        t && t.idx1 != null ? fmtPct(t.idx1) + " 24h" + (t.idx7 != null ? " · " + fmtPct(t.idx7) + " 7d" : "") : "base 100 at first collection",
+        t && t.idx1 != null ? cls(t.idx1) : "") +
+      tile2("CASH RATIO", t && t.cashRatio != null ? Math.round(t.cashRatio * 100) + "%" : "—",
+        "cash sale vs steam price", "") +
+      tile2("UNITS SOLD / DAY", t ? fmtCompact(t.volTotal) : "—", "across tracked items", "") +
+      tile2("CS2 PLAYERS", t && t.players != null ? fmtCompact(t.players) : "—", "in game right now", "") +
+      tile2("TRACKED", String(state.watch.length), state.mode === "static" && state.manifest ? "updated " + ago(state.manifest.generatedAt) : "live tracker", "");
+    $("itemView").innerHTML =
+      '<div class="panel"><div class="tiles strip">' + strip + "</div>" +
+        (idxPts.length >= 2 ? '<canvas id="idxChart" height="110" aria-label="Lab case index over time" role="img"></canvas>' : "") +
+      "</div>" +
+      (gain.length || lose.length ?
+        '<div class="panel moversRow">' +
+          (gain.length ? '<span class="hint">24h gainers</span>' + gain.map(moverChip).join("") : "") +
+          (lose.length ? '<span class="hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
+        "</div>" : "") +
+      '<div class="panel"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
+        COLS.map((c) => "<th" + (c.nosort ? "" : ' class="sortable' + (state.sort.key === c.key ? " on" : "") + '" data-k="' + c.key + '"') +
+          (c.num ? ' style="text-align:right"' : "") + ">" + c.label +
+          (state.sort.key === c.key ? (state.sort.dir < 0 ? " ↓" : " ↑") : "") + "</th>").join("") +
+      "</tr></thead><tbody>" +
+      rows.map((w, i) =>
+        '<tr class="mrow" data-i="' + i + '" tabindex="0" aria-label="' + esc(w.name) + '">' +
+        "<td>" + (i + 1) + "</td>" +
+        '<td class="nm">' + esc(w.name) + (w.cat ? ' <span class="catChip">' + esc(w.cat) + "</span>" : "") + "</td>" +
+        '<td class="r">' + fmt$(w.latest) + "</td>" +
+        '<td class="r chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</td>" +
+        '<td class="r chg ' + cls(w.mom7) + '">' + fmtPct(w.mom7) + "</td>" +
+        '<td class="r chg ' + cls(w.mom30) + '">' + fmtPct(w.mom30) + "</td>" +
+        '<td class="r">' + fmtCompact(w.vol24h) + "</td>" +
+        '<td><canvas class="spark" width="90" height="26" data-i="' + i + '"></canvas></td>' +
+        '<td class="r"><span class="sigMini ' + (w.score >= 12 ? "good" : w.score <= -12 ? "bad" : "") + '">' + esc(w.verdict || "—") + "</span></td>" +
+        "</tr>").join("") +
+      "</tbody></table></div>" +
+      (state.watch.some((w) => w.days < 30)
+        ? '<div class="hint" style="margin-top:8px">Some items are still warming up (under 30 days of history) — momentum fills in as the collector accrues data.</div>' : "") +
+      "</div>";
+    $("itemView").querySelectorAll("th.sortable, th[data-k]").forEach((th) => th.addEventListener("click", () => {
+      const k = th.dataset.k;
+      if (!k) return;
+      state.sort = { key: k, dir: state.sort.key === k ? -state.sort.dir : (k === "name" ? 1 : -1) };
+      renderHome();
+    }));
+    $("itemView").querySelectorAll(".mrow").forEach((el) => {
+      const go = () => selectItem(rows[Number(el.dataset.i)].name);
       el.addEventListener("click", go);
       el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
     });
+    $("itemView").querySelectorAll(".moverChip").forEach((b) =>
+      b.addEventListener("click", () => selectItem(b.dataset.name)));
+    rows.forEach((w, i) => drawSpark($("itemView").querySelector('.spark[data-i="' + i + '"]'), w.spark));
+    if (idxPts.length >= 2) drawIdxChart($("idxChart"), idxPts);
+  }
+  const tile2 = (lb, v, sub, c) =>
+    '<div class="tile"><div class="lb">' + lb + '</div><div class="v ' + c + '">' + v + '</div>' +
+    (sub ? '<div class="sub2">' + sub + "</div>" : "") + "</div>";
+  const moverChip = (w) =>
+    '<button class="moverChip" data-name="' + esc(w.name) + '"><span class="nm">' + esc(shortName(w.name)) + '</span> <span class="chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</span></button>";
+  function shortName(n) { return n.replace(/ \((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$/, "").replace("Operation ", ""); }
+
+  function drawSpark(cv, prices) {
+    if (!cv) return;
+    const pts = (prices || []).filter((p) => p != null);
+    if (pts.length < 2) return;
+    const ctx = cv.getContext("2d");
+    const W = cv.width, H = cv.height, pad = 2;
+    let lo = Math.min(...pts), hi = Math.max(...pts);
+    if (hi === lo) { hi += 1e-9; }
+    const x = (i) => pad + (i / (pts.length - 1)) * (W - 2 * pad);
+    const y = (v) => pad + (1 - (v - lo) / (hi - lo)) * (H - 2 * pad);
+    ctx.strokeStyle = pts[pts.length - 1] >= pts[0] ? "#3fae6a" : "#e66767";
+    ctx.lineWidth = 1.5; ctx.lineJoin = "round"; ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p)) : ctx.moveTo(x(i), y(p))));
+    ctx.stroke();
+  }
+  function drawIdxChart(cv, pts) {
+    if (!cv) return;
+    cv.width = cv.parentElement.clientWidth - 8;
+    const ctx = cv.getContext("2d");
+    const W = cv.width, H = cv.height, L = 40, R = 8, T = 8, B = 16;
+    const t0 = pts[0].t, t1 = pts[pts.length - 1].t || t0 + 1;
+    let lo = Math.min(...pts.map((p) => p.caseIdx)), hi = Math.max(...pts.map((p) => p.caseIdx));
+    const pad = (hi - lo) * 0.1 || 1; lo -= pad; hi += pad;
+    const x = (t) => L + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (W - L - R);
+    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    ctx.font = "10px -apple-system, sans-serif"; ctx.strokeStyle = COL.grid; ctx.fillStyle = COL.text; ctx.lineWidth = 1;
+    for (let i = 0; i <= 2; i++) {
+      const v = lo + (hi - lo) * i / 2, yy = Math.round(y(v)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(W - R, yy); ctx.stroke();
+      ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(v.toFixed(1), L - 5, yy);
+    }
+    ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(pts[0].day, x(t0) + 24, H - B + 4); ctx.fillText(pts[pts.length - 1].day, x(t1) - 24, H - B + 4);
+    ctx.strokeStyle = COL.price; ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+    pts.forEach((p, i) => (i ? ctx.lineTo(x(p.t), y(p.caseIdx)) : ctx.moveTo(x(p.t), y(p.caseIdx))));
+    ctx.stroke();
+  }
+  function goHome() {
+    state.selected = null; state.item = null;
+    renderHome();
   }
 
   // ── search ───────────────────────────────────────────────────────────────
@@ -235,9 +358,9 @@
   }
   async function selectItem(name) {
     state.selected = name;
+    state.view = "item";
     state.item = state.mode === "static" ? await staticItemReport(name)
       : await api("/api/skins/item?name=" + encodeURIComponent(name));
-    renderWatch();
     renderItem();
     // live mode: stale (>60min) or missing quote → snapshot automatically
     const q = state.item.quote;
@@ -282,6 +405,7 @@
     };
     $("itemView").innerHTML =
       '<div class="panel">' +
+        '<button class="btn backBtn" id="backBtn">← Market</button>' +
         '<div class="itemTitle"><h2>' + esc(it.name) + '</h2>' +
         '<span class="hint">' + (it.quote ? "quote " + ago(it.quote.t) : "no snapshot yet") +
         " · " + an.days + " days of history" + (it.imported ? " (incl. imported)" : "") +
@@ -335,6 +459,7 @@
         (ro ? "" : '<button class="btn danger" id="unwatchBtn">✕ Stop tracking</button>') +
       "</div></div>";
 
+    $("backBtn").addEventListener("click", goHome);
     $("ranges").querySelectorAll("button").forEach((b) =>
       b.addEventListener("click", () => { state.range = b.dataset.r; renderItem(); }));
     if (!ro) {
@@ -344,8 +469,8 @@
       $("unwatchBtn").addEventListener("click", async () => {
         await api("/api/skins/watch", { name: it.name, remove: true });
         state.selected = null; state.item = null;
-        $("itemView").innerHTML = '<div class="panel"><div class="emptyChart">Pick another item from the watchlist.</div></div>';
-        loadWatch();
+        await loadWatch();
+        goHome();
       });
     }
     drawChart();
@@ -658,6 +783,7 @@
       const r = await api("/api/skins/refresh", {});
       const bad = r.results.filter((x) => !x.ok);
       toast(bad.length ? bad.length + " item(s) failed — Steam rate limits; retry in a minute" : "Snapshots recorded for " + r.results.length + " item(s)", !!bad.length);
+      await loadMarket();
       await loadWatch();
       if (state.selected) selectItem(state.selected);
       loadPortfolio();
@@ -708,8 +834,9 @@
     const hint = $("lotHint");
     if (hint) hint.textContent = "Lots are stored in this browser and valued at the latest collected prices.";
     await loadWatch();
+    await loadMarket();
     await loadPortfolio();
-    if (state.watch.length) await selectItem(state.watch[0].name);
+    renderHome();
   }
   async function boot() {
     $("netStatus").textContent = "connecting…";
@@ -723,13 +850,14 @@
         (state.health.steamCookie ? " · steam cookie set" : "") +
         (state.health.snapHours ? " · auto-snap " + state.health.snapHours + "h" : "");
       await loadWatch();
+      await loadMarket();
       await loadPortfolio();
-      if (state.watch.length) await selectItem(state.watch[0].name);
-      else $("itemView").innerHTML = '<div class="panel"><div class="emptyChart">Search for an item and add it to the watchlist to begin.</div></div>';
+      renderHome();
     } catch (e) {
       renderSetup();
       toast("Tracker connection lost: " + e.message, true);
     }
   }
+  $("homeBtn").addEventListener("click", goHome);
   boot();
 })();

@@ -28,6 +28,9 @@ M.setTransport(async (url) => {
     return { status: 200, body: JSON.stringify({ success: true, lowest_price: "$41.90", volume: "63", median_price: "$43.25" }) };
   if (url.includes("api.skinport.com/v1/items"))
     return { status: 200, body: JSON.stringify([{ market_hash_name: "AK-47 | Redline (Field-Tested)", min_price: 38.2, mean_price: 41, max_price: 90, quantity: 420 }]) };
+  if (url.includes("api.steampowered.com/ISteamUserStats")) {
+    return { status: 200, body: JSON.stringify({ response: { player_count: 1534000, result: 1 } }) };
+  }
   if (url.includes("api.skinport.com/v1/sales/history")) {
     const agg = { min: 35, max: 48, avg: 40.1, median: 39.5, volume: 34 };
     return { status: 200, body: JSON.stringify([{ market_hash_name: "AK-47 | Redline (Field-Tested)", last_24_hours: agg, last_7_days: agg, last_30_days: agg, last_90_days: agg }]) };
@@ -38,6 +41,8 @@ M.setTransport(async (url) => {
 (async () => {
   const PORT = 5392;
   const DATA = path.join(os.tmpdir(), "hh-skin-client-probe-" + Date.now());
+  fs.mkdirSync(DATA, { recursive: true });
+  fs.writeFileSync(path.join(DATA, "watchlist.json"), "[]"); // suppress first-boot seeding — this scenario controls its own list
   const inst = startServer({ port: PORT, dataDir: DATA, snapHours: 0, steamCookie: "" });
   await new Promise((r) => inst.server.once("listening", r));
   const NAME = "AK-47 | Redline (Field-Tested)";
@@ -57,11 +62,18 @@ M.setTransport(async (url) => {
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto("http://localhost:" + PORT + "/", { waitUntil: "networkidle" });
 
-  await page.waitForSelector(".wrow", { timeout: 8000 });
-  ok(true, "dashboard boots; watchlist row renders");
-  ok((await page.textContent(".wrow .px")).includes("$43.25"), "watch row shows the live snapshot price");
+  await page.waitForSelector(".mrow", { timeout: 8000 });
+  ok(true, "dashboard boots on the market home; ranked table renders");
+  ok((await page.textContent('.mrow:has-text("Redline")')).includes("$43.25"), "table row shows the live snapshot price");
+  const stripTxt = await page.textContent("#itemView");
+  ok(/LAB CASE INDEX/.test(stripTxt) && /CS2 PLAYERS/.test(stripTxt) && /CASH RATIO/.test(stripTxt),
+    "market strip present (index / cash ratio / players)");
+  await page.screenshot({ path: "/tmp/skin_lab_home.png", fullPage: true });
+  console.log("  📸 /tmp/skin_lab_home.png");
 
+  await page.click('.mrow:has-text("Redline")');
   await page.waitForSelector("#chart");
+  ok(!!(await page.$("#backBtn")), "item view opens from the table with a ← Market back button");
   const painted = await page.evaluate(() => {
     const cv = document.getElementById("chart");
     const ctx = cv.getContext("2d");
@@ -139,7 +151,7 @@ M.setTransport(async (url) => {
   await ctxB.addInitScript(() => localStorage.setItem("skinlab_api", "http://localhost:" + 5392));
   const pageB = await ctxB.newPage();
   await pageB.goto("http://localhost:5393/", { waitUntil: "networkidle" });
-  await pageB.waitForSelector(".wrow", { timeout: 8000 });
+  await pageB.waitForSelector(".mrow", { timeout: 8000 });
   ok(true, "static-host page discovers the tracker cross-origin (saved address + CORS)");
   ok((await pageB.textContent("#netStatus")).includes("5392"), "netStatus names the discovered tracker");
   await ctxB.close();
@@ -179,10 +191,14 @@ M.setTransport(async (url) => {
     const errorsD = [];
     pageD.on("pageerror", (e) => errorsD.push(String(e)));
     await pageD.goto("http://localhost:5394/", { waitUntil: "networkidle" });
-    await pageD.waitForSelector(".wrow", { timeout: 10000 });
-    const rows = await pageD.$$eval(".wrow .nm", (els) => els.map((e) => e.textContent));
-    ok(rows.length === 2 && /Redline/.test(rows[0]), "static data mode boots read-only; movers sort puts the uptrend first");
+    await pageD.waitForSelector(".mrow", { timeout: 10000 });
+    const rows = await pageD.$$eval(".mrow .nm", (els) => els.map((e) => e.textContent));
+    ok(rows.length === 2, "static data mode boots read-only on the market home (" + rows.length + " rows)");
     ok(/read-only/.test(await pageD.textContent("#netStatus")), "netStatus says read-only + data via GitHub");
+    ok(/LAB CASE INDEX/.test(await pageD.textContent("#itemView")), "market strip renders from the committed manifest");
+    await pageD.screenshot({ path: "/tmp/skin_lab_static.png", fullPage: true });
+    console.log("  📸 /tmp/skin_lab_static.png");
+    await pageD.click('.mrow:has-text("Redline")');
     await pageD.waitForSelector("#chart");
     const paintedD = await pageD.evaluate(() => {
       const cv = document.getElementById("chart");
@@ -195,21 +211,24 @@ M.setTransport(async (url) => {
     ok((await pageD.$$eval("a.btn", (els) => els.map((a) => a.href).join(" "))).includes("watchlist.json"),
       "read-only actions link to editing watchlist.json on GitHub");
     // the 1-day item leans on skinport aggregates + warm-up honesty
-    await pageD.click('.wrow:has-text("Fracture Case")');
+    await pageD.click("#backBtn");
+    await pageD.waitForSelector("table.mkt", { timeout: 6000 });
+    ok(true, "← Market returns to the ranked table");
+    await pageD.click('.mrow:has-text("Fracture Case")');
     await pageD.waitForSelector(".warmup", { timeout: 6000 });
     ok((await pageD.textContent("#itemView")).includes("SOLD*"), "day-0 momentum tiles fall back to skinport sale medians");
     ok(/day 1 of 30/.test(await pageD.textContent(".warmup")), "warm-up chip is honest about short history");
     // localStorage portfolio
-    await pageD.click('.wrow:has-text("Redline")');
-    await pageD.waitForSelector(".tiles");
+    await pageD.click("#backBtn");
+    await pageD.waitForSelector("table.mkt", { timeout: 6000 });
+    await pageD.click('.mrow:has-text("Redline")');
+    await pageD.waitForSelector(".sigCard");
     await pageD.fill("#lotQty", "2");
     await pageD.fill("#lotCost", "30");
     await pageD.click("#lotForm button[type=submit]");
     await pageD.waitForSelector("table.pf td", { timeout: 4000 });
     ok(/\$60\.00/.test(await pageD.textContent("#pfTotals")), "portfolio works serverless (localStorage lots, fee-adjusted)");
     ok(errorsD.length === 0, "static mode: zero uncaught page errors" + (errorsD.length ? " — " + errorsD[0] : ""));
-    await pageD.screenshot({ path: "/tmp/skin_lab_static.png", fullPage: true });
-    console.log("  📸 /tmp/skin_lab_static.png");
     await ctxD.close();
     statD.close();
     fs.rmSync(SROOT, { recursive: true, force: true });

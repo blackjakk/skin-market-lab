@@ -33,7 +33,7 @@ jobs:
         run: |
           npm install --no-save playwright
           npx playwright install --with-deps chromium
-      - name: Tracker probe (analytics math + API + collector, 62 checks)
+      - name: Tracker probe (analytics math + API + collector, 71 checks)
         run: node probe.js
-      - name: Dashboard probe (real Chromium, live + static modes, 25 checks)
+      - name: Dashboard probe (real Chromium, live + static modes, 29 checks)
         run: node client-probe.js
