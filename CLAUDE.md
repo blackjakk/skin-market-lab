@@ -59,7 +59,7 @@ dashboard from the collector's committed files), or the setup panel
   grails sit above the ~$1,800 steam listing cap → no steam quote is
   EXPECTED for art, not an error). Art items' manifest latest falls back
   to the 30d sale median.
-- SMLX-5 CONSTRUCTION (perp-grade): indices CHAIN daily returns
+- SMLX-6 CONSTRUCTION (perp-grade): indices CHAIN daily returns
   (cumulated from 100) so constituent entry/exit is RETURN-NEUTRAL — no
   level jump to front-run. WINSORIZED since SMLX-3: each constituent's
   daily log-return is clamped to ±INDEX_RULES.clampLog (0.05) around the
@@ -85,7 +85,8 @@ dashboard from the collector's committed files), or the setup panel
   clamp center uses these SAME weights (see WEIGHTED-MEDIAN CLAMP CENTER
   above). Current-month weights published in market.weights {case,liq} +
   manifest item.weight (budget consumes them). New listings (first mark
-  after INDEX_RULES.adoption 2026-07-25) season 30 days then enter on the
+  after INDEX_RULES.adoption 2026-07-25) season 365 days (SMLX-6 — the
+  measured supply-decay phase; was 30) then enter on the
   next first-of-month; founding cohort grandfathered; art marks carry
   forward between sparse observations. includedFromDay/INDEX_RULES
   exported for the probe, which pins no-jump, clamp, passthrough,
@@ -99,7 +100,7 @@ dashboard from the collector's committed files), or the setup panel
   basket's grandfathered status — series = {launch, today}, 2 flat marks,
   index 100, stable forever. Seed BEFORE the snapshot (assembleSeries is
   order-sensitive; an out-of-order older line is dropped).
-- SETTLEMENT LAYER (SMLX-5, settlement.js — UMD, pure, shared by
+- SETTLEMENT LAYER (SMLX-6, settlement.js — UMD, pure, shared by
   collector/server/methodology page): dated fixings (SETTLE-CASE-7D/30D,
   SETTLE-RATIO-30D) = means over the published daily series with MIN-DAY
   gates (null + "accruing" until met — never fabricated, never backfilled);
@@ -192,6 +193,33 @@ dashboard from the collector's committed files), or the setup panel
   venue: DESIGNED in TRUST_ARCHITECTURE.md §4, deliberately NOT
   dark-built — wire it + live-verify in the same session the
   BUFF_API_KEY secret lands (the book-lane incident is the lesson).
+- BACKTEST (backfill.js + backtest.js + backtest.html + backtest/ —
+  offline STUDY, never a live-index input): reconstructs the case index
+  2014→now by running the EXACT shipped marketOverview over Steam's own
+  daily aggregates (steamPriceHistoryPublic — the SSR listing payload's
+  "prices" query, logged-out). Variants isolate each protection by
+  overriding the EXPORTED INDEX_RULES (withRules helper, restored in
+  finally; probe pins zero leakage): shipped / noSeason / noClamp /
+  equalWeight. STRICT SEPARATION: backtest/history/*.json must NEVER be
+  copied into data/import/ — the collector merges import files into the
+  LIVE index and a silent multi-year backfill would rebase every fixing.
+  Regenerate: node backfill.js (network, ~4min, idempotent) then node
+  backtest.js (pure, ~3s) → backtest/result.json → backtest.html.
+  FINDINGS THAT BECAME SMLX-6 (the backtest caught two real defects):
+  (1) penny-era marks ($0.02-0.10, one tick = ±30-50%) + 1-2-contributor
+  days (the mover IS the weighted median → clamp can't fire) ratcheted
+  the index to literal zero → minPrice 0.25 + minContributors 3;
+  (2) 30d seasoning admitted cases mid-supply-decay (measured: −1590%/yr
+  ann. months 0-3, −36%/yr months 3-12, SIGN FLIPS after year 1, +41%/yr
+  4y+) while volume weights concentrate on exactly those high-volume new
+  names → −95% over 12y vs equal-weight +2000% (the commodity-contango
+  problem in skin form) → seasoningDays 365 (the measured knee: 30d→4.8,
+  180d→2793, 365d→4446, 730d→4612 end level; equal-weight+365d → 5488,
+  so the weighted-vs-equal gap is back to ~2%/yr = the honest cost of
+  manipulation resistance). Reference result: +4,346% (CAGR 37.5%, vol
+  40%, maxDD −53% peaking 2023-04-18 post-CS2-announce). Clamp engages
+  ~97% of days and costs ~10%/yr of right tail vs noClamp — the
+  measured, published price of settlement-grade manipulation resistance.
 - `analytics.js` is UMD and SHARED VERBATIM by server (require) and browser
   (window.SkinAnalytics) — keep it dependency-free and side-effect-free;
   the probe pins its math to hand-computed values.
@@ -201,7 +229,7 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 122 checks: analytics units (incl. SMLX-3
+- `node probe.js` — 129 checks: analytics units (incl. SMLX-3
   winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
   clamp, concentrated/center-capture budget arithmetic, INTEG-1 lane
   pins, order-book fetcher parsing), full API flow, snapshot dedupe,

@@ -154,6 +154,32 @@ async function steamOrderBook(name) {
   };
 }
 
+// ── Full price history, LOGGED-OUT (same SSR payload as the book) ──────────
+// The listing page's react-query cache also embeds the item's COMPLETE daily
+// price history: {"ecurrency":1,"prices":[{time(SECONDS),price_median($),
+// purchases(units)},...]} back to release — data the old pricehistory
+// endpoint only served to logged-in cookies. Powers the backtest
+// (backfill.js); NOT wired into the live index (a backfill would rebase the
+// published series — a methodology event).
+// → [{t(ms), price, vol}] | null when the payload lacks a history block.
+async function steamPriceHistoryPublic(name) {
+  const url = "https://steamcommunity.com/market/listings/" + APP_ID + "/" + enc(name);
+  const res = await polite(url);
+  if (res.status !== 200) throw new Error("steam listing page HTTP " + res.status);
+  const s = res.body.replace(/\\/g, "");
+  const m = /"ecurrency":1,"prices":\[([^\]]*)\]/.exec(s);
+  if (!m) return null;
+  let arr;
+  try { arr = JSON.parse("[" + m[1] + "]"); } catch (e) { return null; }
+  const out = [];
+  for (const r of arr) {
+    if (!r || !isFinite(r.time) || !(r.price_median > 0)) continue;
+    out.push({ t: r.time * 1000, price: r.price_median,
+      vol: isFinite(r.purchases) ? r.purchases : null });
+  }
+  return out.length ? out : null;
+}
+
 // "Dec 06 2013 01: +0" → ms epoch (UTC)
 const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 function parseSteamDate(s) {
@@ -255,6 +281,6 @@ async function steamPlayers() {
 module.exports = {
   APP_ID, setTransport, httpGet,
   steamPriceOverview, steamPriceHistory, parseSteamDate, normalizeHistoryRows,
-  steamOrderBook,
+  steamOrderBook, steamPriceHistoryPublic,
   skinportItems, skinportSalesHistory, steamPlayers, cryptoPrices,
 };

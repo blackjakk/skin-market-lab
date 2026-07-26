@@ -70,14 +70,18 @@ const asm = A.assembleSeries(
 ok(asm.daily.length === 2 && asm.daily[0].price === 5 && asm.daily[1].price === 6
   && asm.skinportDaily.length === 1 && asm.skinportDaily[0].price === 4,
   "assembleSeries: import wins collisions, skinport split out");
+// SMLX-6 needs ≥3 case contributors: A +10%, B +21%, C flat →
+// median ret = ln(1.1); B clamped to med+0.05, C to med−0.05 →
+// mean = ln(1.1) exactly → index 110.00 (the clamp is symmetric here)
 const mo = A.marketOverview([
   { name: "A Case", cat: "case", daily: [{ day: A.dayKey(T0), t: T0, price: 10, vol: 100 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 11, vol: 120 }], skinportDaily: [{ day: A.dayKey(T0 + D), t: T0 + D, price: 8.8, vol: 5 }] },
   { name: "B Case", cat: "case", daily: [{ day: A.dayKey(T0), t: T0, price: 100, vol: 10 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 121, vol: 12 }], skinportDaily: [] },
+  { name: "C Case", cat: "case", daily: [{ day: A.dayKey(T0), t: T0, price: 5, vol: 0 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 5, vol: 0 }], skinportDaily: [] },
   { name: "S", cat: "skin", daily: [{ day: A.dayKey(T0), t: T0, price: 50, vol: 7 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 40, vol: 7 }], skinportDaily: [] },
 ]);
-ok(mo.series.length === 2 && mo.series[0].caseIdx === 100 && near(mo.today.caseIdx, 115.37, 0.01),
-  "marketOverview: case index = geometric mean of case relatives (skins excluded)");
-ok(near(mo.today.idx1, 0.1537, 0.001) && mo.today.idx7 === null,
+ok(mo.series.length === 2 && mo.series[0].caseIdx === 100 && near(mo.today.caseIdx, 110.00, 0.01),
+  "marketOverview: case index = clamped weighted mean of case returns (skins excluded)");
+ok(near(mo.today.idx1, 0.10, 0.001) && mo.today.idx7 === null,
   "marketOverview: 24h index change; 7d withheld while series is shallow");
 ok(near(mo.today.cashRatio, 0.8, 1e-9) && mo.today.volTotal === 139,
   "marketOverview: cash ratio median + summed daily volume");
@@ -116,17 +120,27 @@ ok(A.corrDaily(corrSeries.slice(0, 5), "caseIdx", "btc", 30).corr === null,
 // ── SMLX-2 chained construction: seasoning + scheduled inclusion ───────────
 const mkDay = (t) => A.dayKey(t);
 const dcase = (t, price, vol) => ({ day: mkDay(t), t, price, vol: vol == null ? 10 : vol });
-// chaining continuity: A rises 10%/day, B flat → index = geometric mean path
+// chaining continuity: A rises 4%/day (inside the clamp), B and C flat →
+// each day's return = ln(1.04)/3, cumulated
 const chain = A.marketOverview([
-  { name: "A Case", cat: "case", daily: [dcase(T0, 100), dcase(T0 + D, 110), dcase(T0 + 2 * D, 121)], skinportDaily: [] },
+  { name: "A Case", cat: "case", daily: [dcase(T0, 100), dcase(T0 + D, 104), dcase(T0 + 2 * D, 108.16)], skinportDaily: [] },
   { name: "B Case", cat: "case", daily: [dcase(T0, 50), dcase(T0 + D, 50), dcase(T0 + 2 * D, 50)], skinportDaily: [] },
+  { name: "C Case", cat: "case", daily: [dcase(T0, 20), dcase(T0 + D, 20), dcase(T0 + 2 * D, 20)], skinportDaily: [] },
 ]);
-ok(chain.series[0].caseIdx === 100 && near(chain.series[1].caseIdx, 104.88, 0.01) && near(chain.series[2].caseIdx, 110, 0.01),
-  "SMLX-2 chaining: index cumulates mean daily log-returns (100 → 104.88 → 110)");
+ok(chain.series[0].caseIdx === 100 && near(chain.series[1].caseIdx, 100 * Math.exp(Math.log(1.04) / 3), 0.01)
+  && near(chain.series[2].caseIdx, 100 * Math.exp(2 * Math.log(1.04) / 3), 0.01),
+  "SMLX-2 chaining: index cumulates mean daily log-returns (100 → 101.32 → 102.65)");
+// default inclusion calendar: SMLX-6 seasons a new listing 365 days (the
+// measured supply-decay phase) → next first-of-month
+ok(A.includedFromDay("2026-09-02") === "2027-10-01" && A.includedFromDay("2026-01-05") === "2026-01-05",
+  "inclusion calendar: 365d seasoning → next first-of-month; founding cohort grandfathered");
+// The seasoning MECHANICS (no-jump, scheduled inclusion) are length-agnostic —
+// tested at a 30d override so fixtures stay small; restored right after.
+A.INDEX_RULES.seasoningDays = 30;
 // no jump on entry: the incumbent must be GRANDFATHERED (first mark before
 // the 2026-07-25 adoption date), the newcomer lists after it
 const TOLD = Date.UTC(2026, 6, 1);  // grandfathered incumbent from 2026-07-01
-const TNEW = Date.UTC(2026, 8, 2);  // newcomer first mark 2026-09-02 → included 2026-11-01
+const TNEW = Date.UTC(2026, 8, 2);  // newcomer first mark 2026-09-02 → included 2026-11-01 (30d override)
 const oldFlat = [];
 for (let i = 0; i < 130; i++) oldFlat.push(dcase(TOLD + i * D, 10));
 const noJump = A.marketOverview([
@@ -135,8 +149,8 @@ const noJump = A.marketOverview([
 ]);
 ok(noJump.series.every((s) => s.caseIdx === 100),
   "SMLX-2 no-jump: a seasoning newcomer's prices cannot move the index (all 100)");
-ok(A.includedFromDay("2026-09-02") === "2026-11-01" && A.includedFromDay("2026-01-05") === "2026-01-05",
-  "inclusion calendar: 30d seasoning → next first-of-month; founding cohort grandfathered");
+ok(A.includedFromDay("2026-09-02") === "2026-11-01",
+  "inclusion calendar mechanics (30d override): eligible → next first-of-month");
 // scheduled inclusion: newcomer contributes only after its inclusion date
 const newDaily = [];
 for (let i = 0; i < 66; i++) {
@@ -145,11 +159,16 @@ for (let i = 0; i < 66; i++) {
 }
 const incl = A.marketOverview([
   { name: "Old Case", cat: "case", daily: oldFlat, skinportDaily: [] },
+  { name: "Old2 Case", cat: "case", daily: oldFlat, skinportDaily: [] },
   { name: "New Case", cat: "case", daily: newDaily, skinportDaily: [] },
 ]);
 const byDay = new Map(incl.series.map((s) => [s.day, s.caseIdx]));
-ok(byDay.get("2026-11-01") === 100 && byDay.get("2026-11-02") === 100 && near(byDay.get("2026-11-03"), 104.88, 0.01),
-  "SMLX-2 scheduled inclusion: newcomer's returns count only post-inclusion (+10% ÷ 2 items → 104.88)");
+ok(byDay.get("2026-11-01") === 100 && byDay.get("2026-11-02") === 100
+  && near(byDay.get("2026-11-03"), 100 * Math.exp(0.05 / 3), 0.01),
+  "SMLX-2 scheduled inclusion: newcomer's returns count only post-inclusion (+10% clamped to +5%, ÷3 → 101.68)");
+A.INDEX_RULES.seasoningDays = 365; // restore the shipped default
+ok(A.INDEX_RULES.seasoningDays === 365 && A.includedFromDay("2026-09-02") === "2027-10-01",
+  "seasoning override restored (shipped default 365d back in force)");
 // art carry-forward: sparse marks fill between observations
 const artCarry = A.marketOverview([
   { name: "Grail", cat: "skin", tier: "art", daily: [], skinportDaily: [],
@@ -183,6 +202,26 @@ ok(near(mktWide.today.caseIdx, 80, 0.01),
   "SMLX-3 passthrough: a uniform −20% crash prints −20% (median-relative clamp never fights the market)");
 ok(winso.weights && winso.weights.case && Math.abs(winso.weights.case["W1 Case"] - 0.2) < 1e-9,
   "SMLX-4 inception month (no prior-month volume): equal weights published");
+
+// ── SMLX-6 mark-quality floors (found by the 2013-2026 backtest) ───────────
+// penny marks: one $0.01 tick at $0.02 is a -50% "return" — quantization
+// noise, not information. Sub-$0.25 marks contribute nothing.
+const penny = A.marketOverview([
+  { name: "P1 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 10)], skinportDaily: [] },
+  { name: "P2 Case", cat: "case", daily: [dcase(T0, 8), dcase(T0 + D, 8)], skinportDaily: [] },
+  { name: "P3 Case", cat: "case", daily: [dcase(T0, 5), dcase(T0 + D, 5)], skinportDaily: [] },
+  { name: "P4 Case", cat: "case", daily: [dcase(T0, 0.02), dcase(T0 + D, 0.01)], skinportDaily: [] },
+]);
+ok(penny.today.caseIdx === 100,
+  "SMLX-6 minPrice: a penny case's -50% tick carries no return information (index unmoved)");
+// breadth floor: an "index" of one or two names is that name's price with a
+// hat on — under 3 contributors the level carries
+const thinDay = A.marketOverview([
+  { name: "T1 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 15)], skinportDaily: [] },
+  { name: "T2 Case", cat: "case", daily: [dcase(T0, 10), dcase(T0 + D, 10)], skinportDaily: [] },
+]);
+ok(thinDay.today.caseIdx === 100,
+  "SMLX-6 minContributors: a 2-name day carries the level (no single-name passthrough past the clamp)");
 
 // ── SMLX-4 volume weights: lagged median-$vol, capped 0.10, monthly ────────
 // Jan gives N1 twice the $volume of N2..N12 (raw weight 2/13 ≈ 0.154 → capped
@@ -228,7 +267,7 @@ ok(capLast < 101 && near(capLast, 100.5, 0.2),
 // ── settlement fixings (SMLX-3) ────────────────────────────────────────────
 const setSeries = Array.from({ length: 7 }, (_, i) => ({ day: A.dayKey(T0 + i * D), t: T0 + i * D, caseIdx: 100 + i, cashRatio: 0.65 }));
 const fx7 = S.computeFixing(setSeries, S.FIXINGS[0]);
-ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-5",
+ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-6",
   "SETTLE-CASE-7D = mean of last 7 daily index values (100..106 → 103)");
 const fxShallow = S.computeFixing(setSeries.slice(0, 2), S.FIXINGS[0]);
 ok(fxShallow.value === null && /2\/3/.test(fxShallow.accruing),
@@ -355,10 +394,13 @@ async function fixtureTransport(url, headers) {
     return { status: 200, body: JSON.stringify({ success: true, price_prefix: "$", prices }) };
   }
   if (url.includes("/market/listings/")) // SSR listing page with the embedded react-query order book
-    // (TRAPS mirrored from live: integer CENTS, PER-LEVEL quantities)
+    // + full price history (TRAPS mirrored from live: integer CENTS,
+    // PER-LEVEL quantities; history time in SECONDS, price in dollars)
     return { status: 200, body: '<html>window.SSR.loaderData = "{\\"amtMaxBuyOrder\\":2250,\\"amtMinSellOrder\\":2350,' +
       '\\"cBuyOrders\\":60,\\"cSellOrders\\":90,\\"rgCompactBuyOrders\\":[2250,5,2200,15,2000,40],' +
-      '\\"rgCompactSellOrders\\":[2350,4,2400,11,3000,75]}"</html>' };
+      '\\"rgCompactSellOrders\\":[2350,4,2400,11,3000,75],' +
+      '\\"ecurrency\\":1,\\"prices\\":[{\\"time\\":1596758400,\\"price_median\\":10.7,\\"purchases\\":57688},' +
+      '{\\"time\\":1596844800,\\"price_median\\":6.93,\\"purchases\\":48599}]}"</html>' };
   if (url.includes("api.steampowered.com/ISteamUserStats")) {
     return { status: 200, body: JSON.stringify({ response: { player_count: 1534000, result: 1 } }) };
   }
@@ -397,6 +439,9 @@ async function fixtureTransport(url, headers) {
   ok(book.bidQty5 === 20 && book.askQty5 === 15 && book.bidUsd5 === 460 && book.askUsd5 === 345
     && book.cBuy === 60 && book.cSell === 90,
     "steamOrderBook: ±5%-of-mid depth summed over PER-LEVEL quantities + total book sizes");
+  const histPub = await M.steamPriceHistoryPublic("Fracture Case");
+  ok(histPub.length === 2 && histPub[0].t === 1596758400000 && histPub[0].price === 10.7 && histPub[0].vol === 57688,
+    "steamPriceHistoryPublic: full logged-out history from the same SSR payload (seconds → ms)");
   const DATA = path.join(os.tmpdir(), "hh-skin-probe-" + Date.now());
   // pre-write an EMPTY watchlist so the first-boot auto-seed (from the
   // repo's committed watchlist.json) doesn't inject items under this test;
@@ -516,10 +561,10 @@ async function fixtureTransport(url, headers) {
   const mkt = await api("/api/skins/market");
   ok(mkt.status === 200 && mkt.body.today && mkt.body.today.caseIdx === 100,
     "live /api/skins/market: grandfathered case indexes at base 100 (launch + today, flat)");
-  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-5"
+  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-6"
     && mkt.body.settlement.fixings["SETTLE-CASE-7D"]
     && /^[0-9a-f]{64}$/.test(mkt.body.settlement.fixings["SETTLE-CASE-7D"].hash),
-    "live market serves SMLX-5 fixings with 64-hex canonical hashes");
+    "live market serves SMLX-6 fixings with 64-hex canonical hashes");
   ok(mkt.body.integrity && mkt.body.integrity.version === "INTEG-1" && mkt.body.integrity.summary,
     "live market serves the INTEG-1 block (assessIntegrity — one function, all surfaces)");
   ok(near(mkt.body.today.cashRatio, 0.87, 0.001) && mkt.body.today.players === 1534000,
@@ -663,6 +708,22 @@ async function fixtureTransport(url, headers) {
     && w4.reasons.some((r) => /independently sampled prices diverge/.test(r)),
     "witness alarms when the primary's marks diverge from independently sampled reality (≥2 names)");
   fs.rmSync(CROOT, { recursive: true, force: true });
+
+  // ── backtest engine plumbing (variants via INDEX_RULES override) ──────────
+  console.log("— backtest —");
+  const { computeBacktest } = require("./backtest.js");
+  const BT0 = Date.UTC(2020, 0, 1);
+  const btItems = ["X1 Case", "X2 Case", "X3 Case"].map((n) => ({
+    name: n, cat: "case", tier: null, skinportDaily: [], artDaily: [],
+    daily: Array.from({ length: 800 }, (_, i) => dcase(BT0 + i * D, 10)),
+  }));
+  const bt = computeBacktest(btItems);
+  ok(Object.keys(bt.variants).length === 4 && bt.variants.smlx6.stats && bt.variants.smlx6.stats.endLevel === 100
+    && bt.variants.smlx6.stats.firstDay === "2021-01-01" && bt.clamp.engagedDays === 0,
+    "backtest: 4 variants over shipped code; flat cohort seasons 365d → included 2021-01-01 (leap year) at level 100");
+  ok(A.INDEX_RULES.version === "SMLX-6" && A.INDEX_RULES.adoption === "2026-07-25"
+    && A.INDEX_RULES.seasoningDays === 365 && A.INDEX_RULES.clampLog === 0.05 && A.INDEX_RULES.weightMinObs === 5,
+    "backtest variant overrides fully restore the shipped INDEX_RULES (no leakage into production math)");
 
   M.setTransport(null);
   fs.rmSync(DATA, { recursive: true, force: true });

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SMLX-5 — Skin Market Lab Index &amp; Settlement Methodology</title>
+<title>SMLX-6 — Skin Market Lab Index &amp; Settlement Methodology</title>
 <link rel="stylesheet" href="skins.css">
 <style>
   .doc { max-width: 880px; margin: 0 auto; padding: 0 20px 60px; }
@@ -32,8 +32,8 @@
 <body>
 <div class="topnav"><a href="./">← Skin Market Lab</a></div>
 <div class="doc">
-  <h1>SMLX-5 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
-  <p class="muted">Skin Market Lab · methodology version SMLX-5 · any rule change bumps the version — a
+  <h1>SMLX-6 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
+  <p class="muted">Skin Market Lab · methodology version SMLX-6 · any rule change bumps the version — a
   fixing is meaningless without its rulebook. <b>This document describes a measurement, not an offer,
   solicitation, or operation of any financial instrument.</b> Derivatives referencing game items may be
   regulated products in most jurisdictions; nothing here is legal advice.</p>
@@ -56,7 +56,10 @@
       volume-weighted, so seizing it needs &gt;50% of index weight, not a count majority of thin
       names); levels cumulate from 100. Weights per §2a. Constituent changes are return-neutral at
       entry/exit. Because the clamp is median-relative, market-wide moves (crashes, patch shocks) pass
-      through untouched — only single-name deviations from the day's consensus are capped</td></tr>
+      through untouched — only single-name deviations from the day's consensus are capped.
+      MARK-QUALITY FLOORS (SMLX-6, case family): marks under $0.25 contribute no return (one-cent
+      tick = quantization noise), and a day's return applies only with ≥3 contributors — otherwise
+      the level carries</td></tr>
     <tr><td>Liquids Index</td><td>Non-case items with ≥5 median units sold/day (self-gating — “liquids”
       must be liquid)</td><td>Steam Market daily median</td></tr>
     <tr><td>Art Index</td><td>Curated grail basket (<code>watchlist.json → art[]</code>)</td>
@@ -121,9 +124,14 @@
   <ul>
     <li><b>Founding cohort</b>: items whose first recorded mark is on or before <b>2026-07-25</b>
     (the adoption date, set at SMLX-2 and unchanged since) are included from their first day.</li>
-    <li><b>New listings season for 30 days</b> before becoming eligible — new cases mechanically
-    collapse 80–95% from launch-hype prices as drop supply floods in; that dynamic belongs to one
-    item's supply schedule, not the market, and never enters the index.</li>
+    <li><b>New listings season for 365 days</b> before becoming eligible (SMLX-6; was 30). The
+    2013–2026 backtest measured the case lifecycle: annualized log-returns of roughly −1590% in
+    months 0–3 and −36% in months 3–12, flipping positive after year one (+7% in year 2, +41% beyond
+    year 4) as the drop pool retires. That decay is one item's supply schedule, not the market — and
+    because new cases also dominate trading volume, a 30-day seasoning let volume weights concentrate
+    on mid-decay names: a structural short-tilt that compounded to −95% over the reconstruction while
+    an equal-weight basket gained +2000%. At 365 days the tilt is gone. See
+    <a href="backtest.html">the backtest</a>.</li>
     <li><b>Scheduled inclusion</b>: an eligible item enters on the <b>first day of the next calendar
     month</b> after its seasoning completes. Because construction is chained, entry is
     return-neutral: the index level cannot move on inclusion day — there is no arithmetic to
@@ -271,6 +279,15 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       weighted median to the plain median exactly, so no equal-weight behavior changes. Manipulation
       budget adds the center-capture model (price of unbounded control). Prior records retain their
       stamp.</td></tr>
+    <tr><td>SMLX-6</td><td>2026-07-26</td><td>The backtest release — both rules found by
+      reconstructing 2013–2026 from Steam's own daily aggregates (<a href="backtest.html">report</a>):
+      (1) mark-quality floors for the case family — marks under $0.25 carry no return (a one-cent
+      tick at penny prices is a 30–50% quantization artifact) and a day's return needs ≥3
+      contributors, else the level carries (on 1–2 name days the mover is the weighted median, so the
+      clamp cannot fire); (2) seasoning extended 30 → 365 days to match the measured supply-decay
+      phase of new cases. Neither rule changes any published live value (the founding basket is
+      grandfathered, all above $0.25, all contributing); both close regimes the backtest showed
+      grinding the index to zero. Prior records retain their stamp.</td></tr>
   </table>
 
   <h2>9 · Disclaimers</h2>

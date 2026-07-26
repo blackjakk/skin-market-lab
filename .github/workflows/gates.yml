@@ -10,7 +10,8 @@ on:
   push:
     branches: [main, "claude/**"]
     paths-ignore:
-      - "data/**"   # collector commits are data-only — no code to gate
+      - "data/**"     # collector commits are data-only — no code to gate
+      - "backtest/**" # backtest artifacts (fetched history + result) — data, not code
   pull_request:
   workflow_dispatch:
 
@@ -33,7 +34,7 @@ jobs:
         run: |
           npm install --no-save playwright
           npx playwright install --with-deps chromium
-      - name: Tracker probe (analytics math + API + collector, 122 checks)
+      - name: Tracker probe (analytics math + API + collector, 129 checks)
         run: node probe.js
       - name: Dashboard probe (real Chromium, live + static modes, 36 checks)
         run: node client-probe.js

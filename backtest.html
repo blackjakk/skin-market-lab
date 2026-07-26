@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backtest — Lab Case Index reconstructed 2014–2026</title>
+<link rel="stylesheet" href="skins.css">
+<style>
+  .doc { max-width: 940px; margin: 0 auto; padding: 0 20px 60px; }
+  .doc h1 { font-size: 24px; letter-spacing: 1px; margin: 18px 0 4px; }
+  .doc h2 { font-size: 15px; letter-spacing: 1.6px; color: var(--accent); margin: 30px 0 10px;
+    border-bottom: 1px solid var(--line); padding-bottom: 6px; }
+  .doc p, .doc li { color: var(--text-secondary); font-size: 13.5px; line-height: 1.65; }
+  .doc b { color: var(--text-primary); }
+  .doc code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px;
+    padding: 0 5px; font-size: 12px; }
+  table.spec { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 10px 0; }
+  table.spec th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 6px 8px;
+    border-bottom: 1px solid var(--line); }
+  table.spec td { padding: 7px 8px; border-bottom: 1px solid var(--line);
+    font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+  table.spec td:first-child { color: var(--text-primary); }
+  .muted { color: var(--text-muted); }
+  .up { color: var(--status-good); } .dn { color: var(--status-bad); }
+  .topnav { padding: 14px 20px; }
+  .topnav a { color: var(--text-secondary); text-decoration: none; font-size: 13px; margin-right: 14px; }
+  .chartBox { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
+    padding: 12px; margin: 12px 0; }
+  .chartBox canvas { width: 100%; height: 320px; display: block; }
+  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); margin: 8px 2px 0; }
+  .legend .sw { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
+  .tiles2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 12px 0; }
+  .tile2 { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .tile2 .lb { font-size: 10.5px; letter-spacing: 1.2px; color: var(--text-muted); }
+  .tile2 .v { font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 2px;
+    font-variant-numeric: tabular-nums; }
+  .tile2 .sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+<div class="topnav"><a href="./">← Skin Market Lab</a><a href="methodology.html">Methodology</a></div>
+<div class="doc">
+  <h1>Backtest <span class="muted">·</span> the index, had it existed since 2014</h1>
+  <p class="muted" id="stamp">Loading backtest/result.json…</p>
+  <p>This is an <b>offline validation study</b>, not the live index. It reconstructs the Lab Case
+  Index by running the <b>exact shipped code</b> (the same <code>marketOverview</code> the collector
+  runs — no reimplementation) over <b>Steam's own daily aggregates</b> (median price + units sold per
+  day, per case, fetched logged-out from the public listing pages). The live index starts at its
+  2026-07-25 adoption and is never backfilled; this page exists so the methodology's behavior through
+  real market history is <i>measured</i>, not asserted.</p>
+
+  <h2>1 · The reconstructed index (log scale)</h2>
+  <div class="chartBox"><canvas id="mainChart"></canvas>
+    <div class="legend" id="mainLegend"></div></div>
+  <div class="tiles2" id="statTiles"></div>
+
+  <h2>2 · What each protection is worth — variants</h2>
+  <p>Each variant disables exactly one rule; everything else stays as shipped. The gaps are the
+  measured value (or cost) of each layer over twelve years of real history:</p>
+  <table class="spec" id="variantTable"></table>
+  <ul>
+    <li><b>Seasoning is worth everything.</b> New cases average −1590%/yr (annualized log) in their
+    first three months and −36%/yr through month twelve, turning positive only after the drop pool
+    retires — and they dominate trading volume while they fall. Without the 365-day seasoning the
+    volume-weighted index compounds to zero; this is the commodity-index "contango" problem in skin
+    form, and the seasoning rule is the roll methodology that fixes it.</li>
+    <li><b>The clamp costs measured right-tail and buys manipulation resistance.</b> Honest single-name
+    pops get clipped at the same ±5% that caps a manipulator's pump — that asymmetry is the price of
+    a settlement-grade index, and it is now a published number rather than a hope (compare the
+    no-clamp variant).</li>
+    <li><b>Weighting costs little.</b> Volume-weighted vs equal-weight differ by roughly 2%/yr — the
+    honest cost of making index influence proportional to real traded dollars.</li>
+  </ul>
+
+  <h2>3 · Event studies</h2>
+  <p>Windows are measured on the reconstruction; the dates are public history:</p>
+  <table class="spec" id="eventTable"></table>
+  <table class="spec" id="movesTable"></table>
+
+  <h2>4 · Diagnostics</h2>
+  <div class="tiles2" id="diagTiles"></div>
+  <p id="weightsLine"></p>
+
+  <h2>5 · What the backtest changed (SMLX-6)</h2>
+  <p>The first reconstruction attempt ground the index to literal zero — and both causes were
+  methodology defects, not data errors. <b>(1) Penny-era quantization:</b> 2013–2016 cases traded at
+  $0.02–$0.10, where a one-cent tick is a −33/−50% "return"; on days with one or two contributors the
+  mover is its own clamp center, so those ticks passed unclamped and ratcheted the level down.
+  <b>(2) Seasoning far too short:</b> 30 days admitted cases eleven months into a measured −36%/yr
+  supply-decay phase, precisely when volume weights concentrate on them. Both are now shipped rules
+  (marks under $0.25 carry no return; ≥3 contributors or the level carries; 365-day seasoning) —
+  neither changes any live published value, and this page is the evidence for why they exist. That is
+  what a backtest is for.</p>
+
+  <h2>6 · Honest caveats</h2>
+  <ul>
+    <li><b>Different marks.</b> The reconstruction uses Steam's own daily medians; the live index
+    marks from the collector's intraday snapshots. Levels will not be bit-identical going forward —
+    the backtest validates the methodology, it does not extend the live series.</li>
+    <li><b>Today's basket, applied backward.</b> The 42 cases are the current watchlist; cases
+    essentially never delist on Steam, so survivorship bias is minimal, but basket curation history
+    is not simulated.</li>
+    <li><b>No manipulation in-sample (probably).</b> The reconstruction shows the rules under
+    (mostly) honest history; the manipulation budget prices what the rules resist. Different
+    questions, both published.</li>
+  </ul>
+</div>
+<script>
+(function () {
+  "use strict";
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+    return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+  var COL = { smlx6: "#3987e5", noClamp: "#199e70", equalWeight: "#9085e9", noSeason: "#d95926" };
+  var fmtPct = function (v) { return v == null ? "—" : (v > 0 ? "+" : "") + v + "%"; };
+  var cls = function (v) { return v > 0 ? "up" : v < 0 ? "dn" : ""; };
+
+  function drawChart(cv, runs) {
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    var W = cv.clientWidth, H = cv.clientHeight;
+    cv.width = W * dpr; cv.height = H * dpr;
+    var ctx = cv.getContext("2d");
+    ctx.scale(dpr, dpr);
+    var padL = 44, padR = 8, padT = 8, padB = 20;
+    var t0 = Infinity, t1 = -Infinity, lo = Infinity, hi = -Infinity;
+    runs.forEach(function (r) {
+      r.pts.forEach(function (p) {
+        if (p[2] <= 0) return;
+        t0 = Math.min(t0, p[1]); t1 = Math.max(t1, p[1]);
+        lo = Math.min(lo, p[2]); hi = Math.max(hi, p[2]);
+      });
+    });
+    var lg = function (v) { return Math.log(v); };
+    var X = function (t) { return padL + (t - t0) / (t1 - t0) * (W - padL - padR); };
+    var Y = function (v) { return padT + (1 - (lg(v) - lg(lo)) / (lg(hi) - lg(lo))) * (H - padT - padB); };
+    ctx.font = "10px sans-serif";
+    ctx.fillStyle = "#8b90a0"; ctx.strokeStyle = "rgba(139,144,160,.18)";
+    [10, 100, 1000, 10000].forEach(function (g) {
+      if (g < lo || g > hi) return;
+      ctx.beginPath(); ctx.moveTo(padL, Y(g)); ctx.lineTo(W - padR, Y(g)); ctx.stroke();
+      ctx.fillText(g >= 1000 ? (g / 1000) + "k" : String(g), 6, Y(g) + 3);
+    });
+    for (var y = 2015; y <= 2026; y += 2) {
+      var t = Date.UTC(y, 0, 1);
+      if (t < t0 || t > t1) continue;
+      ctx.fillText(String(y), X(t) - 10, H - 6);
+    }
+    runs.forEach(function (r) {
+      ctx.beginPath(); ctx.strokeStyle = r.col; ctx.lineWidth = r.w || 1.5;
+      var started = false;
+      r.pts.forEach(function (p) {
+        if (p[2] <= 0) return;
+        var x = X(p[1]), y = Y(p[2]);
+        if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+  }
+
+  fetch("backtest/result.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
+    var v = j.variants, ref = v.smlx6, st = ref.stats;
+    document.getElementById("stamp").textContent = j.itemCount + " cases · " + st.firstDay + " → " + st.lastDay
+      + " · " + st.days + " index days · source: " + j.source;
+    // chart: day strings → ms for x
+    var runs = Object.keys(v).map(function (k) {
+      return { col: COL[k], w: k === "smlx6" ? 2.2 : 1.2,
+        pts: v[k].series.map(function (p) { return [p[0], Date.parse(p[0]), p[1]]; }) };
+    });
+    drawChart(document.getElementById("mainChart"), runs);
+    document.getElementById("mainLegend").innerHTML = Object.keys(v).map(function (k) {
+      return "<span><span class='sw' style='background:" + COL[k] + "'></span>" + esc(v[k].label) + "</span>";
+    }).join("");
+    var tile = function (lb, val, sub) {
+      return "<div class='tile2'><div class='lb'>" + lb + "</div><div class='v'>" + val + "</div>"
+        + (sub ? "<div class='sub'>" + sub + "</div>" : "") + "</div>";
+    };
+    document.getElementById("statTiles").innerHTML =
+      tile("END LEVEL", st.endLevel.toLocaleString("en-US"), "base 100 at " + st.firstDay) +
+      tile("TOTAL RETURN", fmtPct(st.totalReturnPct), "") +
+      tile("CAGR", fmtPct(st.cagrPct), "") +
+      tile("ANN. VOL", st.annVolPct + "%", "daily log-returns") +
+      tile("MAX DRAWDOWN", st.maxDrawdownPct + "%", esc(st.maxDrawdownPeak + " → " + st.maxDrawdownTrough)) +
+      tile("WORST DAY", fmtPct(st.worstDay.pct), esc(st.worstDay.day));
+    document.getElementById("variantTable").innerHTML =
+      "<tr><th>Variant</th><th>End level</th><th>Total</th><th>CAGR</th><th>Max DD</th></tr>" +
+      Object.keys(v).map(function (k) {
+        var s = v[k].stats;
+        return "<tr><td><span class='sw' style='display:inline-block;width:12px;height:3px;background:" + COL[k]
+          + ";border-radius:2px;margin-right:8px;vertical-align:middle'></span>" + esc(v[k].label) + "</td><td>"
+          + (s ? s.endLevel.toLocaleString("en-US") : "—") + "</td><td class='" + cls(s && s.totalReturnPct) + "'>"
+          + (s ? fmtPct(s.totalReturnPct) : "—") + "</td><td>" + (s ? fmtPct(s.cagrPct) : "—") + "</td><td>"
+          + (s ? s.maxDrawdownPct + "%" : "—") + "</td></tr>";
+      }).join("");
+    document.getElementById("eventTable").innerHTML =
+      "<tr><th>Event</th><th>Date</th><th>Index before</th><th>~30d after</th><th>Move</th></tr>" +
+      j.events.map(function (e) {
+        return "<tr><td>" + esc(e.label) + "</td><td>" + esc(e.day) + "</td><td>" + e.pre.toLocaleString("en-US")
+          + "</td><td>" + e.post.toLocaleString("en-US") + "</td><td class='" + cls(e.movePct) + "'>"
+          + fmtPct(e.movePct) + "</td></tr>";
+      }).join("");
+    document.getElementById("movesTable").innerHTML =
+      "<tr><th>Largest 30-day windows</th><th>From</th><th>To</th><th>Move</th></tr>" +
+      j.topMoves.up.map(function (w, i) {
+        return "<tr><td>Up #" + (i + 1) + "</td><td>" + esc(w.from) + "</td><td>" + esc(w.to)
+          + "</td><td class='up'>" + fmtPct(w.movePct) + "</td></tr>"; }).join("") +
+      j.topMoves.down.map(function (w, i) {
+        return "<tr><td>Down #" + (i + 1) + "</td><td>" + esc(w.from) + "</td><td>" + esc(w.to)
+          + "</td><td class='dn'>" + fmtPct(w.movePct) + "</td></tr>"; }).join("");
+    document.getElementById("diagTiles").innerHTML =
+      tile("CLAMP ENGAGED", j.clamp.ratePct + "%", "of days, ≥1 name clipped") +
+      tile("BIGGEST ABSORB", (j.clamp.topAbsorbed[0] ? fmtPct(j.clamp.topAbsorbed[0].absorbedPct) : "—"),
+        esc(j.clamp.topAbsorbed[0] ? j.clamp.topAbsorbed[0].day : "")) +
+      tile("NAMES AT 10% CAP", String(j.weights.cappedAtTen), "current month");
+    document.getElementById("weightsLine").innerHTML = "<b>Current top weights</b> (reference run): "
+      + j.weights.top.map(function (w) { return esc(w.name.replace(" Case", "")) + " "
+      + (w.w * 100).toFixed(1) + "%"; }).join(" · ");
+  }).catch(function (e) {
+    document.getElementById("stamp").textContent = "backtest/result.json not found — run backfill.js then backtest.js.";
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,11 +1,11 @@
-// ─── settlement.js — SMLX-5 settlement fixings + manipulation budget ────────
+// ─── settlement.js — SMLX-6 settlement fixings + manipulation budget ────────
 // UMD, pure, deterministic — shared by the collector (Node), the live
 // tracker, and the methodology page (browser: window.SkinSettlement).
 //
 // A FIXING is a dated settlement value computed from the committed market
 // series by published rules, so any counterparty re-derives it bit-exactly
 // from the repo's own data files. This is what a cash-settled future or a
-// scalar market would settle against. Methodology id: SMLX-5 (any rule
+// scalar market would settle against. Methodology id: SMLX-6 (any rule
 // change bumps the id — a fixing is meaningless without its rulebook).
 //
 //   SETTLE-CASE-7D   — mean of the last ≤7 daily Lab Case Index values (min 3)
@@ -29,7 +29,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const METHODOLOGY = "SMLX-5";
+  const METHODOLOGY = "SMLX-6";
   const FIXINGS = [
     { name: "SETTLE-CASE-7D", key: "caseIdx", window: 7, minDays: 3, decimals: 2 },
     { name: "SETTLE-CASE-30D", key: "caseIdx", window: 30, minDays: 10, decimals: 2 },

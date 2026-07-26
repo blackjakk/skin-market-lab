@@ -368,8 +368,35 @@
   // EXACTLY to the plain median, so the inception month and all
   // equal-weight fallbacks are unchanged. A single name (capped at
   // weightCap 0.10) can never be >50% → no one name controls the center.
-  const INDEX_RULES = { version: "SMLX-5", adoption: "2026-07-25", seasoningDays: 30, clampLog: 0.05,
-    weightWindowDays: 60, weightMinObs: 5, weightCap: 0.10 };
+  // SMLX-6 — THE BACKTEST RELEASE (both rules found by reconstructing
+  // 2013-2026 from Steam's own daily aggregates, not by live data):
+  // 1. MARK-QUALITY FLOORS (CASE family only): (a) a constituent
+  //    contributes a return only when BOTH day marks are ≥ minPrice
+  //    ($0.25) — at penny prices one $0.01 tick is a 30-50% "return"
+  //    (pure quantization noise; at $0.25 a tick is ≤4%, inside clamp
+  //    scale); (b) a day's return applies only with ≥ minContributors (3)
+  //    names, else the level CARRIES — on 1-2 name days the mover IS the
+  //    weighted median, so the clamp can't fire and raw single-name moves
+  //    pass through (the backtest's penny era showed -50% days ratcheting
+  //    the index to zero this way). Art (appraisal marks, single-grail
+  //    days normal) and liq (informational, not a fixing input) exempt.
+  // 2. SEASONING 30d → 365d: the case lifecycle is the commodity-contango
+  //    structure — measured decay: ann. log-return −1590% months 0-3,
+  //    −36% months 3-12, then the SIGN FLIPS (+7% yr 2, +41% yr 4+; drop
+  //    pool exit ≈ year one). 30d seasoning admitted cases mid-decay,
+  //    and volume weights concentrate on exactly those high-volume new
+  //    names → a structural short-tilt that compounded to −95% over the
+  //    backtest while equal-weight gained +2000%. At 365d the tilt is
+  //    gone (volume-weighted 4,446 vs equal 5,488 over 12y) and the
+  //    weighted/equal choice is back to a manipulation-resistance
+  //    decision, not a return bias. An item's supply-decay phase belongs
+  //    to the item, not the market.
+  // Today's live basket (42 grandfathered cases, all > $0.25, all
+  // contributing) is unaffected — these rules change no current published
+  // value; they close degenerate regimes and future-listing bias.
+  const INDEX_RULES = { version: "SMLX-6", adoption: "2026-07-25", seasoningDays: 365, clampLog: 0.05,
+    weightWindowDays: 60, weightMinObs: 5, weightCap: 0.10,
+    minPrice: 0.25, minContributors: 3 };
   function dayT(day) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day));
     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
@@ -477,13 +504,15 @@
           continue;
         }
         const prev = days[k - 1];
+        const strict = key === "case"; // SMLX-6 mark-quality floors: settlement family only
+        const floor = strict ? INDEX_RULES.minPrice : 0;
         const contrib = []; // [member, log-return]
         for (const m of fam[key]) {
           if (prev < m.includedFrom) continue; // both days must be post-inclusion
           const p0 = m.priceBy.get(prev), p1 = m.priceBy.get(day);
-          if (p0 > 0 && p1 > 0) contrib.push([m, Math.log(p1 / p0)]);
+          if (p0 > 0 && p1 > 0 && p0 >= floor && p1 >= floor) contrib.push([m, Math.log(p1 / p0)]);
         }
-        if (contrib.length) {
+        if (contrib.length && (!strict || contrib.length >= INDEX_RULES.minContributors)) {
           const cl = INDEX_RULES.clampLog;
           const wm = monthWeights(key, day.slice(0, 7));
           // clamp center = WEIGHT-weighted median (SMLX-5): seizing the center

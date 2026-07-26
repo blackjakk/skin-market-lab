@@ -66,9 +66,9 @@ backfill to the hosted dashboard, commit the resulting
 ## The market home (what the header numbers mean)
 
 - **Lab Case Index** — chained: each day's move is the volume-weighted
-  mean of tracked cases' daily returns, cumulated from 100 (SMLX-5 —
+  mean of tracked cases' daily returns, cumulated from 100 (SMLX-6 —
   weights are each case's median daily dollar volume over the prior
-  month-end's trailing 60 days, capped at 10%; new cases season 30 days
+  month-end's trailing 60 days, capped at 10%; new cases season 365 days
   and enter on a published calendar, return-neutrally; each day's returns
   are winsorized at ±5% around the day's *weight-weighted* median, so one
   pumped name can't move the index — and neither can a count-majority of
@@ -98,7 +98,7 @@ backfill to the hosted dashboard, commit the resulting
   regional demand mix — Chinese demand is this market's biggest swing
   factor.
 
-## Settlement fixings (SMLX-5)
+## Settlement fixings (SMLX-6)
 
 Dated settlement marks computed from the committed series by fixed rules —
 what a cash-settled future or scalar market would settle against:
@@ -126,6 +126,17 @@ out of the index by manipulating the thinner corroborating venue).
 Scheduled collector runs add random sampling jitter so reading instants
 can't be pinned. The home page shows the current state as a MARK INTEGRITY
 tile; the full flag table is on the methodology page.
+
+**Backtested.** The methodology's behavior through real history is
+measured, not asserted:
+[backtest.html](https://blackjakk.github.io/skin-market-lab/backtest.html)
+reconstructs the index 2014→now by running the exact shipped code over
+Steam's own daily aggregates — +4,346% (CAGR 37.5%), the CS2
+announcement (+92%/30d), the 2023–24 −53% drawdown, and per-variant
+proof of what each protection rule is worth. The reconstruction also
+caught two methodology defects (penny-mark quantization, seasoning far
+too short) that are now fixed as SMLX-6 — which is exactly what a
+backtest is for.
 
 **Don't trust me — witness it.** Fork this repo and enable Actions: your
 fork's `witness.yml` then independently verifies every publication — it
@@ -171,7 +182,7 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 122 checks, hermetic (fixture transport):
+- `npm run probe` — 129 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
 - `npm run probe:ui` — 35 real-Chromium checks across live AND static modes:
