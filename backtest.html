@@ -30,8 +30,8 @@
 </style>
 </head>
 <body>
-<div class="ds-topnav"><a href="./">← Skin Market Lab</a><a href="methodology.html">Methodology</a></div>
-<div class="doc">
+<nav class="ds-topnav" aria-label="Site"><a href="./">← Skin Market Lab</a><a href="methodology.html">Methodology</a></nav>
+<main class="doc">
   <h1>Backtest <span class="muted">·</span> the index, had it existed since 2014</h1>
   <p class="muted" id="stamp">Loading backtest/result.json…</p>
   <p>This is an <b>offline validation study</b>, not the live index. It reconstructs the Lab Case
@@ -42,7 +42,8 @@
   real market history is <i>measured</i>, not asserted.</p>
 
   <h2>1 · The reconstructed index (log scale)</h2>
-  <div class="ds-chartbox"><canvas id="mainChart"></canvas>
+  <div class="ds-chartbox"><canvas id="mainChart" role="img"
+      aria-label="Reconstructed Lab Case Index 2014–2026 on a log scale: reference run SMLX-6 with no-clamp, equal-weight and no-seasoning variants"></canvas>
     <div class="ds-legend" id="mainLegend"></div></div>
   <div class="ds-tiles" id="statTiles"></div>
 
@@ -96,7 +97,7 @@
     (mostly) honest history; the manipulation budget prices what the rules resist. Different
     questions, both published.</li>
   </ul>
-</div>
+</main>
 <script src="design-system/ds.js"></script>
 <script>
 (function () {

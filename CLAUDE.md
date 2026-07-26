@@ -297,7 +297,44 @@ bypass; judge by BARE exit code).
   (.claude/skills/design-system-review/SKILL.md) is the checklist for ANY
   UI diff — guard + escaping + frozen contracts + determinism + gates.
 
-## Gates (both in CI, run before every push)
+## Accessibility (hardened 2026-07-26 — keep it that way)
+
+Full record (issues → fixes → proof → residual risks): `A11Y.md`. Reviewer
+checklist for ANY UI diff: the `accessibility-review` skill
+(.claude/skills/accessibility-review/SKILL.md) — run it alongside
+design-system-review. Gate: `node tools/a11y-probe.js` (34 checks, in CI).
+Traps learned (do not re-learn):
+
+- Bare `1fr` grid tracks are `minmax(auto,1fr)` — min-content of a table or
+  a JS-sized canvas dictates PAGE width (home locked itself at 873px on
+  phones). Tracks around content-sized things must be `minmax(0,1fr)`, and
+  any canvas whose backing is set from JS must pin `cv.style.width` too.
+- Hover style ≠ focus style: reusing the bg-swap for `:focus-visible` +
+  `outline:none` made 64 tab stops invisible (1.09:1). House ring =
+  `2px solid var(--ds-focus)`, offset −2px inside rows/options.
+- innerHTML re-renders dump focus to `<body>`: any handler that re-renders
+  sets `pendingFocus` (applied by renderHome/renderItem). Use the function
+  form for ids — ds-guard's hex lexer reads the string `"#backBtn"` as a
+  color and trips the ratchet.
+- Modal discipline: opener captured INSIDE `openImport()` (open-path-
+  agnostic), one shared `closeImport()` restores it, Tab wraps while open,
+  Esc scoped + stopPropagation. `window.openImport/closeImport` stay
+  exposed — the a11y probe drives them (static mode has no import button).
+- Sort headers: real `<button class="thbtn">` inside the th (clicks bubble
+  to the legacy th listener; native key activation); `aria-sort` on the
+  active th only.
+- Touch targets live in `@media (pointer: coarse)` (44px buttons/toggles,
+  32px chips, ≥24px floor) — desktop metrics stay byte-identical.
+- Contrast tokens are measured values (`--text-muted #878a94`,
+  `--line-input #6a6e7a`, `--vol-bar #636a7a`); canvas paint READS
+  `--text-muted` (never hardcode a token copy in JS). Doc-page tables live
+  inside `.ds-scroll-x`.
+- Deliberately deferred (see A11Y.md): roving tabindex on market rows and
+  link-in-name-cell row semantics — both blocked by the frozen `.mrow
+  tabindex=0` probe contract; skip link + range-sized data tables are the
+  mitigations. Chart crosshair stays mouse-only by design.
+
+## Gates (all in CI, run before every push)
 
 - `node probe.js` — 133 checks: analytics units (incl. SMLX-3
   winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
@@ -307,8 +344,15 @@ bypass; judge by BARE exit code).
   seeding, the collector (manifest, import merge, dedupe, book store,
   integrity attestation).
 - `node tools/ds-guard.js` — DS no-bypass ratchet (exit 0 required).
-- `node tools/ds-component-test.js` — 72 checks, real Chromium: every DS
-  factory, escaping, aria-pressed toggles, keyboard activation.
+- `node tools/ds-component-test.js` — 77 checks, real Chromium: every DS
+  factory, escaping, aria-pressed toggles, keyboard activation, specTable
+  scroll wrapper + scope.
+- `node tools/a11y-probe.js` — 34 checks, real Chromium (~15s): viewport
+  sweeps (no horizontal scroll at 390/768/1000/1360), phone tap hit-test,
+  focus rings under real Tab, keyboard sort, modal trap/restore,
+  stale-search-Enter, WCAG contrast on computed styles, coarse-pointer
+  target sizes, ARIA/landmark batch, skip link, focus restore, zero page
+  errors.
 - `node client-probe.js` — 39 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the

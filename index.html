@@ -9,10 +9,12 @@
 <link rel="stylesheet" href="design-system/ds.css">
 </head>
 <body>
+<a class="skip-link" href="#mktPanel">Skip to market table</a>
 <header class="hdr">
   <h1>SKIN <span class="gold">MARKET</span> LAB</h1>
   <div class="tag">Counter-Strike skin market research — price history recorded around the clock</div>
-  <div class="net" id="netStatus">connecting…</div>
+  <nav class="hdrNav" aria-label="Site"><a href="methodology.html">Methodology</a> · <a href="backtest.html">Backtest</a></nav>
+  <div class="net" id="netStatus" role="status">connecting…</div>
 </header>
 <div class="disclaimer">
   Transparent heuristics over recorded market data — <b>not financial advice</b>. Skin prices are
@@ -20,13 +22,14 @@
   cash-outs carry fees and counterparty risk. Every signal itemizes its inputs so you can judge them.
 </div>
 
-<main class="grid">
+<main class="grid" id="main" tabindex="-1">
   <aside>
     <div class="ds-panel panel">
       <h2>FIND AN ITEM</h2>
       <div class="searchWrap">
         <input id="searchBox" placeholder="Search skins, cases, knives…" autocomplete="off"
-               aria-label="Search items to track">
+               aria-label="Search items to track" role="combobox" aria-controls="searchResults"
+               aria-autocomplete="list" aria-expanded="false">
         <div id="searchResults" role="listbox"></div>
       </div>
       <div class="btnrow">
@@ -40,8 +43,10 @@
       <div id="pfTotals" class="pfTotals"></div>
       <div style="overflow-x:auto"><table class="pf" id="pfTable"></table></div>
       <form class="lotForm" id="lotForm">
-        <input id="lotQty" type="number" min="1" step="1" placeholder="Qty" aria-label="Quantity">
-        <input id="lotCost" type="number" min="0" step="0.01" placeholder="Cost each $" aria-label="Unit cost in dollars">
+        <label for="lotQty">Qty</label>
+        <label for="lotCost">Cost each $</label>
+        <input id="lotQty" type="number" min="1" step="1" placeholder="Qty">
+        <input id="lotCost" type="number" min="0" step="0.01" placeholder="Cost each $">
         <div class="lotHint" id="lotHint">Adds a lot of the selected item at your buy price.</div>
         <button class="ds-btn primary btn" type="submit">＋ Add lot of selected item</button>
       </form>
@@ -67,8 +72,10 @@
       </ol>
       <p class="ds-hint hint">Alternatively set <code>STEAM_COOKIE</code> on the server and use ⚡ Bootstrap instead.</p>
     </div>
-    <textarea id="importText" placeholder='[["Dec 06 2013 01: +0", 4.297, "117"], …]'></textarea>
-    <div class="modalErr" id="importErr"></div>
+    <textarea id="importText" placeholder='[["Dec 06 2013 01: +0", 4.297, "117"], …]'
+      aria-label="Steam price history JSON (paste from the console snippet)"
+      aria-describedby="importErr"></textarea>
+    <div class="modalErr" id="importErr" role="alert"></div>
     <div class="btnrow">
       <button class="ds-btn primary btn" id="importGo">Import</button>
       <button class="ds-btn btn" id="importCancel">Cancel</button>

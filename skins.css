@@ -9,13 +9,14 @@
   --line: #2a2d36;
   --text-primary: #f2f2ef;
   --text-secondary: #b9bbc2;
-  --text-muted: #7c7f88;
+  --text-muted: #878a94;        /* ≥4.5:1 on every surface incl. --surface-2 tiles */
   --accent: #d4af37;            /* chrome accent only — never a data series */
   --series-price: #3987e5;
   --series-sma7: #199e70;
   --series-sma30: #d95926;
   --series-skinport: #9085e9;
-  --vol-bar: #4a4e5a;
+  --vol-bar: #636a7a;           /* ≥3:1 vs --surface-1 chart background */
+  --line-input: #6a6e7a;        /* input/textarea boundaries ONLY (≥3:1 vs panels); decorative hairlines keep --line */
   --status-good: #3fae6a;
   --status-bad: #e66767;
   --status-neutral: #9aa0a6;
@@ -26,19 +27,37 @@ html, body { margin: 0; padding: 0; background: var(--surface-0); color: var(--t
   font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
 a { color: var(--series-price); }
 
+/* skip link (a11y): visually hidden until keyboard focus, then a top-left pill */
+.skip-link { position: fixed; top: 8px; left: 8px; z-index: 300; padding: 10px 16px;
+  background: var(--surface-2); color: var(--text-primary); border: 1px solid var(--line-input);
+  border-radius: var(--radius); font-size: 13px; text-decoration: none; box-shadow: var(--ds-shadow);
+  transform: translateY(-300%); }
+.skip-link:focus-visible { transform: none; outline: 2px solid var(--ds-focus); outline-offset: 1px; }
+
+/* form placeholders: UA default fails 4.5:1 on the dark inputs */
+input::placeholder, textarea::placeholder { color: var(--text-muted); opacity: 1; }
+
 .hdr { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap;
   padding: 14px 20px 4px; }
 .hdr h1 { margin: 0; font-size: 22px; letter-spacing: 2.5px; font-weight: 800; }
 .hdr h1 .gold { color: var(--accent); }
 .hdr .tag { color: var(--text-muted); font-size: 12px; }
 .hdr .net { margin-left: auto; font-size: 12px; color: var(--text-muted); }
+.hdrNav { font-size: 12px; }
+.hdrNav a { color: var(--text-secondary); text-decoration: none; }
+.hdrNav a:hover { color: var(--text-primary); }
+.hdrNav a:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: 1px; }
 .disclaimer { margin: 6px 20px 14px; padding: 7px 12px; border: 1px solid var(--line);
   border-left: 3px solid var(--accent); border-radius: 6px; color: var(--text-secondary);
   font-size: 12px; background: var(--surface-1); }
 
-.grid { display: grid; grid-template-columns: 330px 1fr; gap: 16px; padding: 0 20px 40px;
+/* minmax(0,1fr): a bare 1fr is minmax(auto,1fr) — its automatic minimum absorbs
+   the widest content (min-width tables, JS-sized canvases) and locks the layout
+   wider than the viewport. The 0 floor lets the track shrink so .scrollX
+   containers actually scroll (A11y/responsive contract). */
+.grid { display: grid; grid-template-columns: 330px minmax(0, 1fr); gap: 16px; padding: 0 20px 40px;
   align-items: start; }
-@media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+@media (max-width: 900px) { .grid { grid-template-columns: minmax(0, 1fr); } }
 
 .panel { background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius);
   padding: 14px; margin-bottom: 16px; }
@@ -47,9 +66,10 @@ a { color: var(--series-price); }
 
 /* search */
 .searchWrap { position: relative; }
-#searchBox { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line);
-  background: var(--surface-2); color: var(--text-primary); font-size: 13px; outline: none; }
-#searchBox:focus-visible { border-color: var(--series-price); }
+#searchBox { width: 100%; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--line-input);
+  background: var(--surface-2); color: var(--text-primary); font-size: 13px; }
+#searchBox:focus-visible { border-color: var(--series-price);
+  outline: 2px solid var(--ds-focus); outline-offset: 1px; }
 #searchResults { position: absolute; z-index: 30; left: 0; right: 0; top: calc(100% + 4px);
   background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
   max-height: 320px; overflow: auto; display: none; box-shadow: var(--ds-shadow); }
@@ -57,7 +77,7 @@ a { color: var(--series-price); }
 .sr-row { display: flex; justify-content: space-between; gap: 8px; padding: 7px 10px;
   cursor: pointer; font-size: 12.5px; border: 0; width: 100%; text-align: left;
   background: none; color: var(--text-primary); }
-.sr-row:hover, .sr-row:focus-visible { background: var(--surface-1); outline: none; }
+.sr-row:hover { background: var(--surface-1); }  /* focus gets a ring, not the hover bg (see tr.mrow rule) */
 .sr-row .p { color: var(--text-muted); white-space: nowrap; }
 .sr-row .w { color: var(--accent); }
 
@@ -138,9 +158,12 @@ table.pf td { padding: 5px 6px; border-bottom: 1px solid var(--line);
 table.pf td.nm { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xbtn { background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: 13px; }
 .xbtn:hover { color: var(--status-bad); }
+.xbtn:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: 1px; }
 .lotForm { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.lotForm label { font-size: 11px; letter-spacing: .4px; color: var(--text-secondary);
+  margin-bottom: -3px; }
 .lotForm input { width: 100%; min-width: 0; padding: 7px 9px; border-radius: 8px;
-  border: 1px solid var(--line); background: var(--surface-2); color: var(--text-primary);
+  border: 1px solid var(--line-input); background: var(--surface-2); color: var(--text-primary);
   font-size: 12.5px; }
 .lotForm .btn { grid-column: 1 / -1; }
 .lotHint { grid-column: 1 / -1; font-size: 11px; color: var(--text-muted); }
@@ -163,7 +186,7 @@ table.dt th { color: var(--text-muted); }
   width: min(680px, 92vw); max-height: 86vh; overflow: auto; padding: 18px; }
 .modal h3 { margin: 0 0 8px; }
 .modal textarea { width: 100%; height: 180px; background: var(--surface-2); color: var(--text-primary);
-  border: 1px solid var(--line); border-radius: 8px; padding: 9px; font: 11.5px/1.4 ui-monospace, monospace; }
+  border: 1px solid var(--line-input); border-radius: 8px; padding: 9px; font: 11.5px/1.4 ui-monospace, monospace; }
 .modal code, .disclaimer code { background: var(--surface-2); border: 1px solid var(--line);
   border-radius: 4px; padding: 0 4px; font-size: 11px; word-break: break-all; }
 .modal .steps { color: var(--text-secondary); font-size: 12.5px; }
@@ -195,11 +218,21 @@ table.mkt th { text-align: left; color: var(--text-muted); font-weight: 600; fon
   letter-spacing: .8px; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
 table.mkt th.sortable { cursor: pointer; }
 table.mkt th.sortable:hover, table.mkt th.sortable.on { color: var(--text-primary); }
+/* sort-header button (keyboard sort): fills the th via padding + negative
+   margin so the hit area equals the header cell; inherits the th's look */
+.thbtn { background: none; border: 0; font: inherit; color: inherit; cursor: pointer;
+  text-align: inherit; letter-spacing: inherit; white-space: inherit;
+  padding: 6px 8px; margin: -6px -8px; }
+.thbtn:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: -2px; }
 table.mkt td { padding: 7px 8px; border-bottom: 1px solid var(--line); font-variant-numeric: tabular-nums; }
 table.mkt td.r { text-align: right; }
 table.mkt td.nm { max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 tr.mrow { cursor: pointer; }
-tr.mrow:hover, tr.mrow:focus-visible { background: var(--surface-2); outline: none; }
+tr.mrow:hover { background: var(--surface-2); }
+/* visible keyboard focus on the primary interaction surfaces (rows + search
+   options); inset offset renders reliably on <tr> without table clipping */
+tr.mrow:focus-visible, .sr-row:focus-visible {
+  outline: 2px solid var(--ds-focus); outline-offset: -2px; }
 .catChip { font-size: 9.5px; letter-spacing: 1px; text-transform: uppercase; color: var(--text-muted);
   border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; margin-left: 6px; vertical-align: 1px; }
 .sigMini { font-size: 10.5px; font-weight: 700; letter-spacing: .6px; color: var(--status-neutral); }
@@ -215,3 +248,17 @@ tr.mrow:hover, tr.mrow:focus-visible { background: var(--surface-2); outline: no
 .idxLegend a { color: var(--text-secondary); }
 .idxRangeRow { margin-left: auto; }  /* range chips owned by DS.rangeChips (.ds-range/.ds-btn.compact) */
 /* .ovToggle look owned by design-system/ds.css (.ds-toggle); the legacy hook rides alongside */
+
+/* setup-panel tracker-address input is inline-styled in skins.js — token
+   override so the input boundary meets the ≥3:1 non-text contrast floor */
+#apiAddr { border-color: var(--line-input) !important; }
+
+/* ── touch targets (coarse pointers only; desktop layout untouched) ──────── */
+@media (pointer: coarse) {
+  .xbtn { padding: 12px; }                                /* portfolio remove — real hit area */
+  summary { padding: 12px 0; }                            /* data-table disclosure */
+  .idxLegend a { display: inline-block; padding: 9px 4px; margin: -6px 0; }  /* backtest link */
+  .hdrNav a { display: inline-block; padding: 10px 6px; }
+  .thbtn { padding-top: 10px; padding-bottom: 10px; }     /* sort headers ≥32px */
+  .sr-row { min-height: 32px; }                           /* search options ≥32px */
+}

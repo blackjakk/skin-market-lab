@@ -84,12 +84,19 @@
 .ds-badge-v { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
 
 /* ── spec table (the doc pages' table.spec) ────────────────────────────── */
+/* .ds-scroll-x: horizontal-overflow container. DS.specTable emits it around
+   every table so wide tables scroll inside their own box on narrow viewports
+   instead of blowing the page out (same pattern as the app's .scrollX). */
+.ds-scroll-x { overflow-x: auto; }
 .ds-spec-table { width: 100%; border-collapse: collapse; font-size: var(--ds-fs-txt); }
 .ds-spec-table th { text-align: left; color: var(--ds-text-muted); font-weight: 600;
   padding: 6px 8px; border-bottom: 1px solid var(--ds-line); }
 .ds-spec-table td { padding: 7px 8px; border-bottom: 1px solid var(--ds-line);
   font-variant-numeric: tabular-nums; color: var(--ds-text-2); }
 .ds-spec-table td:first-child { color: var(--ds-text); }
+/* row-leader header cells (th scope="row") keep the first-column td look */
+.ds-spec-table th[scope="row"] { color: var(--ds-text); padding: 7px 8px;
+  font-variant-numeric: tabular-nums; }
 
 /* ── chart box ─────────────────────────────────────────────────────────── */
 .ds-chartbox { background: var(--ds-surface-2); border: 1px solid var(--ds-line);
@@ -106,3 +113,10 @@
 .ds-btn:focus-visible, .ds-chip:focus-visible, .ds-toggle:focus-visible,
 .ds-topnav a:focus-visible {
   outline: 2px solid var(--ds-focus); outline-offset: 1px; }
+
+/* ── touch targets (coarse pointers only; desktop metrics untouched) ───── */
+@media (pointer: coarse) {
+  .ds-btn:not(.compact), .ds-toggle { min-height: 44px; }
+  .ds-btn.compact, .ds-chip { min-height: 32px; }
+  .ds-topnav a { display: inline-block; padding: 10px 8px; }
+}

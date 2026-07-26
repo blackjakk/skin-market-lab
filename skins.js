@@ -16,7 +16,11 @@
     sma30: css.getPropertyValue("--series-sma30").trim() || "#d95926",
     skinport: css.getPropertyValue("--series-skinport").trim() || "#9085e9",
     vol: css.getPropertyValue("--vol-bar").trim() || "#4a4e5a",
-    grid: "#23252d", text: "#7c7f88", cross: "#5a5e6a",
+    grid: "#23252d",
+    // canvas text follows the CSS muted token (single source — A3-8);
+    // crosshair lifted to 3:1+ on the chart surface (A3-7).
+    text: css.getPropertyValue("--text-muted").trim() || "#878a94",
+    cross: "#6a6e7a",
   };
 
   // mode: "live"   — a tracker server answers (full read/write)
@@ -78,11 +82,15 @@
   let toastT = null;
   function toast(msg, bad) {
     const el = $("toast");
+    // errors get assertive announcement + a longer read window; the role is
+    // swapped BEFORE the write (so AT sees an alert insertion) and restored
+    // to the resting role="status" on hide (A3-17).
+    el.setAttribute("role", bad ? "alert" : "status");
     el.textContent = msg;
     el.className = bad ? "bad" : "";
     el.style.display = "block";
     clearTimeout(toastT);
-    toastT = setTimeout(() => { el.style.display = "none"; }, 3500);
+    toastT = setTimeout(() => { el.style.display = "none"; el.setAttribute("role", "status"); }, bad ? 8000 : 3500);
   }
 
   const fmt$ = (v) => v == null ? "—" : "$" + Number(v).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -93,6 +101,21 @@
     const m = Math.round((Date.now() - t) / 60000);
     return m < 1 ? "just now" : m < 60 ? m + "m ago" : m < 1440 ? Math.round(m / 60) + "h ago" : Math.round(m / 1440) + "d ago";
   };
+
+  // ── focus restore across innerHTML re-renders (A2-6) ─────────────────────
+  // Every render path rebuilds #itemView (or #pfTable) via innerHTML, which
+  // destroys the focused control and dumps keyboard users at <body>. Handlers
+  // set pendingFocus (a selector, or a function returning an element) BEFORE
+  // triggering a re-render; the renderers apply it at the end. "Not found"
+  // keeps it pending — a transition may pass through an interim render (e.g.
+  // search-pick re-renders home before the item view mounts the back button).
+  let pendingFocus = null;
+  function applyPendingFocus() {
+    if (!pendingFocus) return;
+    const t = typeof pendingFocus === "function" ? pendingFocus() : document.querySelector(pendingFocus);
+    if (t && t.focus) { pendingFocus = null; t.focus(); }
+  }
+  const focusBack = () => $("backBtn"); // item-view entry target (A2-6)
 
   // ── market home (the CoinGecko-shaped landing) ───────────────────────────
   async function loadWatch() {
@@ -207,7 +230,7 @@
     const playersVis = rebase(playersAll);
     const btcVis = rebase(btcAll);
     const hasIdxChart = idxVis.length >= 2 || reconVis.length >= 2 || playersVis.length >= 2 || btcVis.length >= 2;
-    const RECON_COL = "rgba(57,135,229,.45)", PLAYERS_COL = "#9085e9";
+    const RECON_COL = "rgba(57,135,229,.72)", PLAYERS_COL = "#9085e9"; // .45→.72: 3:1+ on the chart surface (A3-5)
     const hasPlayersData = (mac.players && mac.players.length) || series.some((s) => s.players != null);
     const hasBtcData = (mac.btc && mac.btc.length) || series.some((s) => s.btc != null);
     // ovChip → DS.toggle (aria-pressed + .on move together on re-render; the
@@ -243,7 +266,8 @@
               ? DS.rangeChips({ ranges: Object.keys(IDXR), active: state.idxRange, dataKey: "ir", cls: "idxRangeRow" })
               : '<span class="ds-hint hint">gap between the first two = wallet inflation / exit pressure</span>') +
           "</div>" +
-          '<canvas id="idxChart" height="130" aria-label="Lab case index over time, with backtest reconstruction and comparison overlays" role="img"></canvas>' : "") +
+          '<canvas id="idxChart" height="130" aria-label="Lab case index over time, with backtest reconstruction and comparison overlays" role="img"></canvas>' +
+          idxDataTableHtml(reconPts, idxRaw, idxCut) : "") +
       "</div>" +
       (gain.length || lose.length ?
         '<div class="ds-panel panel moversRow">' +
@@ -251,21 +275,28 @@
           (lose.length ? '<span class="ds-hint hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
         "</div>" : "") +
       (state.market && state.market.settlement ? settlementPanel(state.market.settlement, state.market.integrity) : "") +
-      '<div class="ds-panel panel"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
-        COLS.map((c) => "<th" + (c.nosort ? "" : ' class="sortable' + (state.sort.key === c.key ? " on" : "") + '" data-k="' + c.key + '"') +
-          (c.num ? ' style="text-align:right"' : "") + ">" + c.label +
-          (state.sort.key === c.key ? (state.sort.dir < 0 ? " ↓" : " ↑") : "") + "</th>").join("") +
+      '<div class="ds-panel panel" id="mktPanel" tabindex="-1"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
+        // sortable headers: a real <button class="thbtn"> inside the th gives
+        // native focus + Enter/Space activation (A2-1/A3-9); data-k stays on
+        // the th (probe contract) and rides on the button too; aria-sort only
+        // on the ACTIVE th. The th click listener still works — clicks bubble.
+        COLS.map((c) => "<th" + (c.nosort ? "" : ' class="sortable' + (state.sort.key === c.key ? " on" : "") + '" data-k="' + c.key + '"' +
+          (state.sort.key === c.key ? ' aria-sort="' + (state.sort.dir < 0 ? "descending" : "ascending") + '"' : "")) +
+          (c.num ? ' style="text-align:right"' : "") + ">" +
+          (c.nosort ? c.label
+            : '<button type="button" class="thbtn" data-k="' + c.key + '">' + c.label +
+              (state.sort.key === c.key ? (state.sort.dir < 0 ? " ↓" : " ↑") : "") + "</button>") + "</th>").join("") +
       "</tr></thead><tbody>" +
       rows.map((w, i) =>
         '<tr class="mrow" data-i="' + i + '" tabindex="0" aria-label="' + esc(w.name) + '">' +
         "<td>" + (i + 1) + "</td>" +
-        '<td class="nm">' + esc(w.name) + ((w.tier || w.cat) ? ' <span class="catChip">' + esc(w.tier === "art" ? "art" : w.cat) + "</span>" : "") + "</td>" +
+        '<td class="nm" title="' + esc(w.name) + '">' + esc(w.name) + ((w.tier || w.cat) ? ' <span class="catChip">' + esc(w.tier === "art" ? "art" : w.cat) + "</span>" : "") + "</td>" +
         '<td class="r">' + fmt$(w.latest) + "</td>" +
         '<td class="r chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</td>" +
         '<td class="r chg ' + cls(w.mom7) + '">' + fmtPct(w.mom7) + "</td>" +
         '<td class="r chg ' + cls(w.mom30) + '">' + fmtPct(w.mom30) + "</td>" +
         '<td class="r">' + fmtCompact(w.vol24h) + "</td>" +
-        '<td><canvas class="spark" width="90" height="26" data-i="' + i + '"></canvas></td>' +
+        '<td><canvas class="spark" width="90" height="26" data-i="' + i + '" aria-hidden="true"></canvas></td>' +
         '<td class="r">' + DS.badge({ label: w.verdict || "—", tone: w.score >= 12 ? "good" : w.score <= -12 ? "bad" : "", cls: "sigMini" }) + "</td>" +
         "</tr>").join("") +
       "</tbody></table></div>" +
@@ -276,16 +307,19 @@
       const k = th.dataset.k;
       if (!k) return;
       state.sort = { key: k, dir: state.sort.key === k ? -state.sort.dir : (k === "name" ? 1 : -1) };
+      pendingFocus = '.thbtn[data-k="' + k + '"]'; // keyboard sort keeps its header (A2-6)
       renderHome();
     }));
     $("itemView").querySelectorAll(".mrow").forEach((el) => {
-      const go = () => selectItem(rows[Number(el.dataset.i)].name);
+      const go = () => { pendingFocus = focusBack; selectItem(rows[Number(el.dataset.i)].name); };
       el.addEventListener("click", go);
       el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
     });
     $("itemView").querySelectorAll(".moverChip").forEach((b) =>
-      b.addEventListener("click", () => selectItem(b.dataset.name)));
+      b.addEventListener("click", () => { pendingFocus = focusBack; selectItem(b.dataset.name); }));
     rows.forEach((w, i) => drawSpark($("itemView").querySelector('.spark[data-i="' + i + '"]'), w.spark));
+    sparkRows = rows; // resize redraw source (A1-8)
+    idxChartArgs = null;
     if (hasIdxChart) {
       const lines = [];
       if (reconVis.length >= 2) lines.push({ pts: reconVis, col: RECON_COL, w: 1.5, dash: [4, 3] });
@@ -297,12 +331,23 @@
       // players range or 40x index range flattens to nothing on linear)
       const vals = lines.flatMap((l) => l.pts.map((p) => p.v)).filter((v) => v > 0);
       const useLog = vals.length && Math.max.apply(null, vals) / Math.min.apply(null, vals) > 6;
+      idxChartArgs = { lines, opts: { log: useLog } }; // resize redraw source (A1-8)
       drawIdxChart($("idxChart"), lines, { log: useLog });
       $("itemView").querySelectorAll("[data-ir]").forEach((b) =>
-        b.addEventListener("click", () => { state.idxRange = b.dataset.ir; renderHome(); }));
+        b.addEventListener("click", () => {
+          state.idxRange = b.dataset.ir;
+          pendingFocus = '[data-ir="' + b.dataset.ir + '"]';
+          renderHome();
+        }));
       $("itemView").querySelectorAll(".ovToggle").forEach((b) =>
-        b.addEventListener("click", () => { const k = b.dataset.ov; state.overlays[k] = !state.overlays[k]; renderHome(); }));
+        b.addEventListener("click", () => {
+          const k = b.dataset.ov;
+          state.overlays[k] = !state.overlays[k];
+          pendingFocus = '.ovToggle[data-ov="' + k + '"]';
+          renderHome();
+        }));
     }
+    applyPendingFocus();
   }
   function settlementPanel(st, integ) {
     const fx = st.fixings || {};
@@ -339,10 +384,44 @@
   const tile2 = (lb, v, sub, c) => DS.tile({ label: lb, value: v, sub: sub || null, tone: c || null });
   // moverChip → DS.chip{interactive}; keeps the .moverChip + data-name contract hooks.
   const moverChip = (w) => DS.chip({
-    interactive: true, cls: "moverChip", attrs: { "data-name": w.name },
+    interactive: true, cls: "moverChip", attrs: { "data-name": w.name, title: w.name },
     labelHtml: '<span class="nm">' + esc(shortName(w.name)) + '</span> <span class="chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</span>",
   });
   function shortName(n) { return n.replace(/ \((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$/, "").replace("Operation ", ""); }
+
+  // Text equivalent for the home index chart (A3-20): the index family
+  // (reconstruction + live), sliced to the selected range; month-end sampled
+  // when long, capped at 400 rows — the summary says what it shows.
+  function idxDataTableHtml(reconPts, idxRaw, idxCut) {
+    const fam = reconPts.map((p) => ({ t: p.t, v: p.v, recon: true }))
+      .concat(idxRaw.map((p) => ({ t: p.t, v: p.v, recon: false })))
+      .filter((p) => p.t >= idxCut && p.v > 0);
+    if (fam.length < 2) return "";
+    let rows = fam, how = "daily";
+    if (fam.length > 40) {
+      const byMonth = new Map(); // last sample of each month
+      for (const p of fam) byMonth.set(new Date(p.t).toISOString().slice(0, 7), p);
+      rows = Array.from(byMonth.values());
+      how = "month-end";
+    }
+    if (rows.length > 400) { rows = rows.slice(-400); how = "last 400 " + how + " rows"; }
+    const anyRecon = rows.some((p) => p.recon);
+    return '<details class="dataTable"><summary>Index data table (' + how + ", " + rows.length + " rows)</summary>" +
+      '<div class="scroll"><table class="dt"><tr><th>Day</th><th>Index</th></tr>' +
+      rows.map((p) => "<tr><td>" + new Date(p.t).toISOString().slice(0, 10) + (p.recon ? "*" : "") + "</td><td>" + p.v.toFixed(1) + "</td></tr>").join("") +
+      "</table></div>" +
+      (anyRecon ? '<div class="ds-hint hint">* backtest reconstruction, rebased to the live index</div>' : "") +
+      "</details>";
+  }
+
+  // Last-rendered home canvases, so a window resize can redraw them without
+  // a full (focus-destroying) re-render (A1-8).
+  let sparkRows = null, idxChartArgs = null;
+  function redrawHomeCanvases() {
+    if (state.view !== "home") return;
+    if (idxChartArgs && $("idxChart")) drawIdxChart($("idxChart"), idxChartArgs.lines, idxChartArgs.opts);
+    if (sparkRows) sparkRows.forEach((w, i) => drawSpark($("itemView").querySelector('.spark[data-i="' + i + '"]'), w.spark));
+  }
 
   function drawSpark(cv, prices) {
     if (!cv) return;
@@ -350,6 +429,7 @@
     if (pts.length < 2) return;
     const ctx = cv.getContext("2d");
     const W = cv.width, H = cv.height, pad = 2;
+    ctx.clearRect(0, 0, W, H); // idempotent redraws (resize hook)
     let lo = Math.min(...pts), hi = Math.max(...pts);
     if (hi === lo) { hi += 1e-9; }
     const x = (i) => pad + (i / (pts.length - 1)) * (W - 2 * pad);
@@ -361,12 +441,21 @@
   }
   // lines: [{pts:[{t,v}], col, w, dash?}] — all rebased to 100 so ONE axis
   // serves every series (never two scales on one chart)
+  const IDX_H = 130; // CSS height of #idxChart (matches the height="130" markup)
   function drawIdxChart(cv, lines, opts) {
     if (!cv || !lines.length) return;
     const log = !!(opts && opts.log);
-    cv.width = cv.parentElement.clientWidth - 8;
+    // Same dpr discipline as drawChart (A1-8): backing = CSS px × dpr,
+    // style.width/height pinned so the backing-store write can never feed
+    // back into layout (the A1-1 lock) and hiDPI stays crisp.
+    const cssW = Math.max(1, cv.parentElement.clientWidth - 8);
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(cssW * dpr); cv.height = Math.round(IDX_H * dpr);
+    cv.style.width = cssW + "px"; cv.style.height = IDX_H + "px";
     const ctx = cv.getContext("2d");
-    const W = cv.width, H = cv.height, L = 40, R = 8, T = 8, B = 16;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, cssW, IDX_H);
+    const W = cssW, H = IDX_H, L = 40, R = 8, T = 8, B = 16;
     const all = lines.flatMap((l) => l.pts).filter((p) => !log || p.v > 0);
     const tv = (v) => (log ? Math.log(v) : v);
     const t0 = Math.min(...all.map((p) => p.t)), t1 = Math.max(...all.map((p) => p.t)) || t0 + 1;
@@ -397,19 +486,61 @@
     }
   }
   function goHome() {
+    const prev = state.selected;
     state.selected = null; state.item = null;
+    // back-to-home puts the keyboard where the user came from: the item's
+    // market row when it exists, else the search box (A2-6)
+    pendingFocus = () => {
+      const row = prev && Array.from(document.querySelectorAll(".mrow"))
+        .find((r) => r.getAttribute("aria-label") === prev);
+      return row || $("searchBox");
+    };
     renderHome();
   }
 
   // ── search ───────────────────────────────────────────────────────────────
   let searchT = null, searchResults = [];
+  const searchWrap = document.querySelector(".searchWrap");
+  const searchOpen = () => $("searchResults").classList.contains("open");
   $("searchBox").addEventListener("input", () => {
     clearTimeout(searchT);
     searchT = setTimeout(runSearch, 180);
   });
+  // Enter only navigates while the dropdown is OPEN — Esc kills both the
+  // dropdown and the stale results array, so dismiss-then-Enter is dead (A2-7)
   $("searchBox").addEventListener("keydown", (e) => {
-    if (e.key === "Escape") closeSearch();
-    if (e.key === "Enter" && searchResults.length) { e.preventDefault(); pickResult(0); }
+    if (e.key === "Enter" && searchOpen() && searchResults.length) { e.preventDefault(); pickResult(0); }
+  });
+  // Esc anywhere in the search composite (box OR option rows) closes and
+  // returns focus to the box (A2-8); ArrowDown/ArrowUp walk box ⇄ options,
+  // Enter on an option picks it — the native button click does that (A2-9).
+  searchWrap.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      const wasOpen = searchOpen();
+      closeSearch();
+      if (wasOpen) { e.stopPropagation(); $("searchBox").focus(); }
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (!searchOpen()) return;
+    const opts = Array.from($("searchResults").querySelectorAll("button.sr-row"));
+    if (!opts.length) return;
+    const cur = opts.indexOf(document.activeElement);
+    if (e.key === "ArrowUp" && cur < 0) return; // already in the box
+    e.preventDefault();
+    const next = e.key === "ArrowDown"
+      ? (cur < 0 ? opts[0] : opts[Math.min(cur + 1, opts.length - 1)])
+      : (cur === 0 ? null : opts[cur - 1]); // null → back to the box
+    (next || $("searchBox")).focus();
+  });
+  // aria-selected follows focus through the options (Tab or arrows) (A3-18)
+  $("searchResults").addEventListener("focusin", (e) => {
+    $("searchResults").querySelectorAll("button.sr-row").forEach((o) =>
+      o.setAttribute("aria-selected", String(o === e.target)));
+  });
+  // moving focus out of the composite dismisses the dropdown (A2-8)
+  searchWrap.addEventListener("focusout", (e) => {
+    if (!searchWrap.contains(e.relatedTarget)) closeSearch();
   });
   document.addEventListener("click", (e) => { if (!e.target.closest(".searchWrap")) closeSearch(); });
   let seedCache = null; // static-mode search universe (seed.json + manifest)
@@ -433,27 +564,36 @@
     try {
       searchResults = state.mode === "static" ? await staticSearch(q)
         : (await api("/api/skins/search?q=" + encodeURIComponent(q))).results;
+      // user already left the composite while the debounce/fetch ran —
+      // don't pop a dropdown under nobody's focus
+      if (!searchWrap.contains(document.activeElement)) return;
       const box = $("searchResults");
       box.innerHTML = searchResults.map((r, i) =>
-        '<button class="sr-row" data-i="' + i + '" role="option"><span>' + esc(r.name) + '</span>' +
+        '<button class="sr-row" data-i="' + i + '" role="option" aria-selected="false"><span>' + esc(r.name) + '</span>' +
         '<span class="p">' + (r.watched ? '<span class="w">tracking</span> ' : "") + (r.price != null ? fmt$(r.price) : "") + "</span></button>").join("") ||
         '<div class="sr-row">No matches. Type the exact Steam market name to track anything.</div>';
       box.classList.add("open");
+      $("searchBox").setAttribute("aria-expanded", "true");
       box.querySelectorAll("button.sr-row").forEach((el) =>
         el.addEventListener("click", () => pickResult(Number(el.dataset.i))));
     } catch (e) { toast("search failed: " + e.message, true); }
   }
-  function closeSearch() { $("searchResults").classList.remove("open"); }
+  function closeSearch() {
+    $("searchResults").classList.remove("open");
+    $("searchBox").setAttribute("aria-expanded", "false");
+    searchResults = []; // stale results must never answer a later Enter (A2-7)
+  }
   async function pickResult(i) {
     const r = searchResults[i];
     if (!r) return;
     closeSearch();
     $("searchBox").value = "";
     if (state.mode === "static") {
-      if (r.watched) return selectItem(r.name);
+      if (r.watched) { pendingFocus = focusBack; return selectItem(r.name); } // item-view entry (A2-6)
       // read-only host: tracking an item = adding it to the repo's watchlist
       toast("Add \"" + r.name + "\" to watchlist.json on GitHub — the collector picks it up next run");
       window.open(ghEditWatchlistUrl(), "_blank", "noopener");
+      $("searchBox").focus(); // no navigation happened — keep the user in the search
       return;
     }
     if (!r.watched) {
@@ -461,6 +601,7 @@
       toast("Tracking " + r.name);
       refreshItem(r.name).catch(() => {});
     }
+    pendingFocus = focusBack; // survives the interim home render, lands on the item view
     await loadWatch();
     await selectItem(r.name);
   }
@@ -596,7 +737,9 @@
       "</div>" +
       '<div class="ds-panel panel">' +
         '<div class="chartHead"><div class="ds-legend legend" id="legend"></div><div class="ranges" id="ranges">' +
-          Object.keys(RANGES).map((r) => DS.btn({ label: r, cls: "compact btn" + (state.range === r ? " on" : ""), attrs: { "data-r": r } })).join("") +
+          // DS.rangeChips emits aria-pressed with the .on class (A3-22);
+          // the frozen `.ranges .btn` hook is re-added post-mount below.
+          DS.rangeChips({ ranges: Object.keys(RANGES), active: state.range, dataKey: "r" }) +
         "</div></div>" +
         '<div class="chartWrap"><canvas id="chart" role="img" aria-label="Price history chart for ' + esc(it.name) + '"></canvas></div>' +
         dataTableHtml(it) +
@@ -618,8 +761,14 @@
       "</div></div>";
 
     $("backBtn").addEventListener("click", goHome);
-    $("ranges").querySelectorAll("button").forEach((b) =>
-      b.addEventListener("click", () => { state.range = b.dataset.r; renderItem(); }));
+    $("ranges").querySelectorAll("[data-r]").forEach((b) => {
+      b.classList.add("btn"); // frozen probe contract: `.ranges .btn[data-r=…]`
+      b.addEventListener("click", () => {
+        state.range = b.dataset.r;
+        pendingFocus = '.ranges [data-r="' + b.dataset.r + '"]'; // chip keeps focus across re-render (A2-6)
+        renderItem();
+      });
+    });
     if (!ro) {
       $("snapBtn").addEventListener("click", () => { toast("Snapshotting…"); refreshItem(it.name); });
       if ($("bootBtn")) $("bootBtn").addEventListener("click", bootstrapItem);
@@ -632,6 +781,7 @@
       });
     }
     drawChart();
+    applyPendingFocus();
   }
   // Item-view / portfolio stat tile. DS.tile's fixed inner classes (.ds-tile-lb)
   // can't satisfy the frozen `.tile .lb` probe selector, so the legacy inner
@@ -644,9 +794,15 @@
       (extra ? '<div class="ds-hint hint" style="margin-top:4px">' + esc(extra) + "</div>" : "") + "</div>";
   }
   function dataTableHtml(it) {
-    const d = it.daily.slice(-30).reverse();
+    // text equivalent follows the SELECTED chart range (A3-20), newest first,
+    // capped at 400 rows — the summary states exactly what it shows
+    const vis = visibleDaily().rows;
+    const total = vis.length;
+    const d = vis.slice(-400).reverse();
     if (!d.length) return "";
-    return '<details class="dataTable"><summary>Data table (last 30 days)</summary><div class="scroll"><table class="dt">' +
+    const lbl = state.range === "ALL" ? "all history" : "last " + state.range;
+    const capNote = total > 400 ? " — latest 400 of " + total + " days" : " — " + total + " day" + (total === 1 ? "" : "s");
+    return '<details class="dataTable"><summary>Data table (' + lbl + capNote + ')</summary><div class="scroll"><table class="dt">' +
       "<tr><th>Day</th><th>Price</th><th>Volume</th></tr>" +
       d.map((r) => "<tr><td>" + r.day + "</td><td>" + fmt$(r.price) + "</td><td>" + (r.vol == null ? "—" : r.vol) + "</td></tr>").join("") +
       "</table></div></details>";
@@ -662,7 +818,14 @@
   }
 
   // ── import modal ─────────────────────────────────────────────────────────
+  // Dialog keyboard contract (A2-4/5/10, A3-12): the opener is captured on
+  // open and restored by ONE shared closeImport() that every close path
+  // (Cancel, backdrop, Esc, successful import) routes through; Tab/Shift+Tab
+  // wrap inside the dialog while it is open; Esc is scoped to the open modal
+  // so it can never fire as collateral of another Esc (search dropdown etc).
+  let importOpener = null;
   function openImport() {
+    importOpener = document.activeElement;
     const name = state.selected;
     $("importSnippet").textContent =
       'copy((await (await fetch("https://steamcommunity.com/market/pricehistory/?appid=730&market_hash_name=" + encodeURIComponent(' +
@@ -672,17 +835,50 @@
     $("importModal").classList.add("open");
     $("importText").focus();
   }
-  $("importCancel").addEventListener("click", () => $("importModal").classList.remove("open"));
-  $("importModal").addEventListener("click", (e) => { if (e.target === $("importModal")) $("importModal").classList.remove("open"); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("importModal").classList.remove("open"); });
+  function closeImport() {
+    if (!$("importModal").classList.contains("open")) return;
+    $("importModal").classList.remove("open");
+    if (importOpener && importOpener.focus && document.contains(importOpener)) importOpener.focus();
+    importOpener = null;
+  }
+  // exposed for programmatic drives: the opener button renders in
+  // live-tracker mode only, but the modal (and its keyboard contract) must
+  // work on any host — the a11y gate opens/closes it this way. The opener
+  // capture lives INSIDE openImport, so any open path restores correctly.
+  window.openImport = openImport;
+  window.closeImport = closeImport;
+  function trapImportTab(e) {
+    const dlg = $("importModal").querySelector(".modal");
+    const foci = Array.from(dlg.querySelectorAll('a[href], button, textarea, input, select, [tabindex]:not([tabindex="-1"])'))
+      .filter((el) => !el.disabled && el.getClientRects().length);
+    if (!foci.length) return;
+    const first = foci[0], last = foci[foci.length - 1];
+    const cur = document.activeElement;
+    if (e.shiftKey) {
+      if (cur === first || !dlg.contains(cur)) { e.preventDefault(); last.focus(); }
+    } else if (cur === last || !dlg.contains(cur)) { e.preventDefault(); first.focus(); }
+  }
+  $("importCancel").addEventListener("click", closeImport);
+  $("importModal").addEventListener("click", (e) => { if (e.target === $("importModal")) closeImport(); });
+  $("importModal").addEventListener("keydown", (e) => {
+    if (!$("importModal").classList.contains("open")) return;
+    if (e.key === "Tab") trapImportTab(e);
+    else if (e.key === "Escape") { e.stopPropagation(); closeImport(); }
+  });
+  // fallback for an Esc that never bubbled through the modal (focus outside
+  // it while open) — still guarded on the modal actually being open (A2-10)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && $("importModal").classList.contains("open")) closeImport();
+  });
   $("importGo").addEventListener("click", async () => {
     let rows;
     try { rows = JSON.parse($("importText").value); }
     catch (e) { $("importErr").textContent = "Not valid JSON — paste exactly what the console snippet copied."; return; }
     try {
       const r = await api("/api/skins/import", { name: state.selected, prices: rows });
-      $("importModal").classList.remove("open");
+      closeImport();
       toast("Imported " + r.rows + " rows → " + r.daily + " days of history");
+      pendingFocus = () => $("importBtn"); // the re-render destroys the restored opener — re-land on it
       selectItem(state.selected);
     } catch (e) { $("importErr").textContent = e.message; }
   });
@@ -857,6 +1053,13 @@
   });
   const tipRow = (lb, v, col) => '<div class="r"><span><span style="background:' + col + ';display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px"></span>' + lb + "</span><b>" + v + "</b></div>";
   window.addEventListener("resize", () => drawChart());
+  // home canvases (#idxChart + sparklines) adapt on resize too — debounced,
+  // canvas-only redraw (no re-render, so keyboard focus survives) (A1-8)
+  let homeRszT = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(homeRszT);
+    homeRszT = setTimeout(redrawHomeCanvases, 150);
+  });
 
   // ── portfolio ────────────────────────────────────────────────────────────
   // Static mode has no server to keep lots on — they live in THIS browser's
@@ -903,13 +1106,19 @@
         "<td class='chg " + cls(l.pl) + "'>" + fmt$(l.pl) + (l.plPct != null ? "<br><span class='ds-hint hint'>" + fmtPct(l.plPct / 100) + "</span>" : "") + "</td>" +
         "<td><button class='xbtn' data-i='" + i + "' title='Remove lot' aria-label='Remove lot'>✕</button></td></tr>").join("");
     tb.querySelectorAll(".xbtn").forEach((b) => b.addEventListener("click", async () => {
+      const idx = Number(b.dataset.i);
       if (state.mode === "static") {
-        saveLocalLots(localLots().filter((l) => l.id !== p.lots[Number(b.dataset.i)].id));
+        saveLocalLots(localLots().filter((l) => l.id !== p.lots[idx].id));
         state.portfolio = localPortfolioReport();
       } else {
-        state.portfolio = await api("/api/skins/lot", { remove: p.lots[Number(b.dataset.i)].id });
+        state.portfolio = await api("/api/skins/lot", { remove: p.lots[idx].id });
       }
       renderPortfolio();
+      // keyboard position survives the removal: next lot's ✕ (same index in
+      // the fresh list), else the last one, else back to the lot form (A2-6)
+      const btns = $("pfTable").querySelectorAll(".xbtn");
+      const next = btns[Math.min(idx, btns.length - 1)];
+      (next || $("lotQty")).focus();
     }));
   }
   $("lotForm").addEventListener("submit", async (e) => {

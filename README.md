@@ -186,19 +186,33 @@ All UI chrome (dashboard + doc pages) renders through one component
 library: `design-system/` — `--ds-*` tokens, `.ds-*` classes, and
 `window.DS` factories with escaping by default. A CI ratchet
 (`tools/ds-guard.js`) blocks any new hand-rolled component, color, or
-font bypass, and a 72-check real-Chromium component test covers every
+font bypass, and a 77-check real-Chromium component test covers every
 factory including keyboard and ARIA behavior. See
 [design-system/README.md](design-system/README.md).
+
+## Accessibility
+
+The app is built to be completable by keyboard alone, on phones, and at
+200% zoom: visible focus everywhere, focus preserved across re-renders, a
+focus-trapped import dialog, keyboard-sortable tables with `aria-sort`,
+WCAG-AA-measured contrast tokens, 44px touch targets on coarse pointers,
+landmarks + status regions, and range-sized data-table equivalents for
+every chart. A 34-check real-browser regression gate
+(`npm run probe:a11y`) enforces it in CI; the full issue → fix →
+residual-risk record is in [A11Y.md](A11Y.md).
 
 ## Gates
 
 - `npm run probe` — 133 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
-- `npm run probe:ui` — 35 real-Chromium checks across live AND static modes:
+- `npm run probe:a11y` — 34 real-Chromium accessibility checks: responsive
+  sweeps, keyboard operability, focus management, contrast, touch
+  targets, ARIA semantics.
+- `npm run probe:ui` — 39 real-Chromium checks across live AND static modes:
   chart pixels actually painted, crosshair tooltip, range switching,
   portfolio form, zero page errors. Screenshot → `/tmp/skin_lab.png`.
 
-Both run in CI on every push. The UI probe needs playwright
+All run in CI on every push. The UI probe needs playwright
 (`npm i --no-save playwright && npx playwright install chromium`, or set
 `PLAYWRIGHT_LIB` to an existing install).
