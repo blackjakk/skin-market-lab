@@ -8,6 +8,13 @@ keys (e.g. `caseIdx`), localStorage keys, and the repo name / URLs
 (`skin-market-lab`, blackjakk.github.io/skin-market-lab) until the GitHub
 repo itself is renamed.
 
+OFFLINE STUDIES pattern: `backtest.js` → `backtest/result.json` and
+`corr.js` → `backtest/corr.json` (Skindex × BTC × players correlation
+study, backtest.html §7; home VS-BITCOIN tile shows its 12y baseline).
+Studies are pure derivations of committed artifacts — no network, never
+inputs to the live index. Re-run `node corr.js` whenever the backtest
+artifacts refresh.
+
 CS skin market research tracker. Zero-dependency Node server (`server.js`,
 port 8790) + static dashboard (`index.html`), no build step. `npm start`.
 The dashboard deploys to GitHub Pages (pages.yml, gh-pages branch mirror)

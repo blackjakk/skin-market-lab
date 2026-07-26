@@ -24,6 +24,8 @@
   .doc .ds-chartbox { margin: 12px 0; }
   .doc .ds-tiles { margin: 12px 0; }
   #mainChart { height: 320px; }                 /* canvas needs a fixed height so drawChart reads clientHeight */
+  #corrChart { height: 260px; } #rollChart { height: 170px; } #scatChart { height: 220px; }
+  details.corrData { margin: 10px 0; } details.corrData summary { color: var(--text-muted); font-size: 12px; cursor: pointer; }
   #mainLegend { margin: 8px 2px 0; }
   .ds-spec-table td.up { color: var(--ds-good); }   /* colored return cells (page-specific over ds td color) */
   .ds-spec-table td.dn { color: var(--ds-bad); }
@@ -96,6 +98,37 @@
     <li><b>No manipulation in-sample (probably).</b> The reconstruction shows the rules under
     (mostly) honest history; the manipulation budget prices what the rules resist. Different
     questions, both published.</li>
+  </ul>
+
+  <h2>7 · Correlations — the Skindex × Bitcoin × players</h2>
+  <p>Same offline-study discipline: <code>node corr.js</code> derives
+  <code>backtest/corr.json</code> from the committed reconstruction plus the macro series
+  (blockchain.info BTC, ~4-day sampled; steamcharts monthly players). Headline:
+  <b id="corrHeadline">loading backtest/corr.json…</b></p>
+  <div class="ds-tiles" id="corrTiles"></div>
+  <div class="ds-chartbox"><canvas id="corrChart" role="img"
+      aria-label="Skindex and Bitcoin 2014 to 2026, both rebased to 100, log scale — both trend up for years but their wiggles rarely match"></canvas>
+    <div class="ds-legend" id="corrLegend"></div></div>
+  <div class="ds-chartbox"><canvas id="rollChart" role="img"
+      aria-label="Rolling 12-month correlation of monthly Skindex and Bitcoin returns: it swings between roughly minus 0.5 and plus 0.75 and spends most of its life inside the plus or minus 0.58 statistical noise band for 12 observations"></canvas></div>
+  <div class="ds-chartbox"><canvas id="scatChart" role="img"
+      aria-label="Scatter of monthly Bitcoin log returns against monthly Skindex log returns with a nearly flat fitted line, beta 0.13"></canvas></div>
+  <details class="corrData"><summary>Monthly data table (BTC return · Skindex return · rolling 12-month r)</summary>
+    <div id="corrTable"></div></details>
+  <div id="regimeTable"></div>
+  <p id="stressLine"></p>
+  <p id="signalLine"></p>
+  <ul>
+    <li><b>Levels lie.</b> Log-log level correlation is high for both BTC and players because
+    everything trended up for a decade — co-trending is not co-moving. All inference here is
+    on <i>returns</i>.</li>
+    <li><b>Correlation is regime-dependent</b> — highest in crypto bears (risk-off months
+    co-move), near zero in bulls — yet the <i>trend</i> decoupled in every bear so far
+    (see the stress line above). Don't count on zero correlation in exactly the months
+    you'd want it.</li>
+    <li><b>Measurement caveats.</b> Wallet-dollar Steam marks vs cash BTC; ~4-day BTC
+    sampling; rolling windows overlap (autocorrelated estimates); per-regime samples are
+    small (n = 12–44 months). Correlation ≠ causation.</li>
   </ul>
 </main>
 <script src="design-system/ds.js"></script>
@@ -217,6 +250,139 @@
       + (w.w * 100).toFixed(1) + "%"; }).join(" · ");
   }).catch(function (e) {
     document.getElementById("stamp").textContent = "backtest/result.json not found — run backfill.js then backtest.js.";
+  });
+
+  // ── §7 correlations study (backtest/corr.json, derived by corr.js) ────────
+  // Colors come from the DESIGN.md token layer (read, never restated).
+  fetch("backtest/corr.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (c) {
+    var cssv = getComputedStyle(document.documentElement);
+    var tok = function (n) { return cssv.getPropertyValue(n).trim(); };
+    var C = { idx: tok("--series-price"), btc: tok("--series-sma30"), gold: tok("--series-skinport"),
+      muted: tok("--text-muted"), line: tok("--line"), band: tok("--surface-1") };
+    var fr = function (v, n) { return v == null ? "—" : v.toFixed(n == null ? 2 : n); };
+    var sgn = function (v, n) { return v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(n == null ? 2 : n); };
+
+    document.getElementById("corrHeadline").textContent =
+      "monthly return correlation " + sgn(c.corr.monthly) + " ± " + fr(c.corr.monthlySe) +
+      " (n=" + c.corr.nMonths + ") — BTC explains " + (c.corr.r2Monthly * 100).toFixed(1) +
+      "% of the Skindex's monthly variance.";
+
+    var tile = function (lb, val, sub) { return DS.tile({ label: lb, value: val, sub: sub || null, cls: "big" }); };
+    document.getElementById("corrTiles").innerHTML =
+      tile("MONTHLY r", sgn(c.corr.monthly), "±" + fr(c.corr.monthlySe) + " · quarterly ~0") +
+      tile("BETA vs BTC", fr(c.corr.betaMonthly), "+10% BTC month → ≈ " + sgn(c.corr.betaMonthly * 10, 1) + "% skins") +
+      tile("R²", (c.corr.r2Monthly * 100).toFixed(1) + "%", "of monthly variance") +
+      tile("PLAYERS LEAD", sgn(c.players.lead[1]), "player Δ leads by 1m (fundamental)");
+
+    // panel 1: both rebased to 100 (log scale — reuses drawChart)
+    var m0 = c.monthly[0];
+    var runs = [
+      { col: C.btc, w: 1.2, pts: c.monthly.map(function (m) { return [m[0], Date.parse(m[0] + "-15"), m[2] / m0[2] * 100]; }) },
+      { col: C.idx, w: 2.2, pts: c.monthly.map(function (m) { return [m[0], Date.parse(m[0] + "-15"), m[1] / m0[1] * 100]; }) },
+    ];
+    drawChart(document.getElementById("corrChart"), runs);
+    var last = c.monthly[c.monthly.length - 1];
+    document.getElementById("corrLegend").innerHTML =
+      DS.legendItem({ swatch: C.idx, label: "Skindex (×" + Math.round(last[1] / m0[1]) + ")" }) +
+      DS.legendItem({ swatch: C.btc, label: "BTC (×" + Math.round(last[2] / m0[2]) + ") — levels co-trend (log-log " + fr(c.levelsLogLog.btc) + "), returns don't" });
+
+    // panel 2: rolling 12m correlation with the ±2se noise band
+    (function () {
+      var cv = document.getElementById("rollChart");
+      var dpr = Math.min(2, window.devicePixelRatio || 1);
+      var W = cv.clientWidth, H = cv.clientHeight;
+      cv.width = W * dpr; cv.height = H * dpr;
+      var ctx = cv.getContext("2d"); ctx.scale(dpr, dpr); ctx.font = "10px sans-serif";
+      var padL = 44, padR = 8, padT = 6, padB = 18;
+      var s = c.rolling12m.filter(function (p) { return p[1] != null; });
+      var t0 = Date.parse(s[0][0] + "-15"), t1 = Date.parse(s[s.length - 1][0] + "-15");
+      var X = function (t) { return padL + (t - t0) / (t1 - t0) * (W - padL - padR); };
+      var Y = function (v) { return padT + (1 - (v + 1) / 2) * (H - padT - padB); };
+      var se2 = 2 / Math.sqrt(12 - 3);
+      ctx.fillStyle = C.band; ctx.fillRect(padL, Y(se2), W - padL - padR, Y(-se2) - Y(se2));
+      ctx.strokeStyle = C.line;
+      [-0.5, 0.5].forEach(function (g) { ctx.beginPath(); ctx.moveTo(padL, Y(g)); ctx.lineTo(W - padR, Y(g)); ctx.stroke(); });
+      ctx.strokeStyle = C.muted; ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(W - padR, Y(0)); ctx.stroke();
+      ctx.fillStyle = C.muted;
+      [-1, -0.5, 0, 0.5, 1].forEach(function (g) { ctx.fillText(g.toFixed(1), 10, Y(g) + 3); });
+      for (var y = 2016; y <= 2026; y += 2) { var t = Date.UTC(y, 0, 1); if (t >= t0 && t <= t1) ctx.fillText(String(y), X(t) - 10, H - 5); }
+      ctx.fillText("rolling 12-month r · shaded = ±2se noise band", padL + 6, padT + 10);
+      ctx.strokeStyle = C.gold; ctx.lineWidth = 1.8; ctx.beginPath();
+      s.forEach(function (p, i) { var x = X(Date.parse(p[0] + "-15")), yv = Y(p[1]); if (i) ctx.lineTo(x, yv); else ctx.moveTo(x, yv); });
+      ctx.stroke();
+    })();
+
+    // panel 3: monthly-returns scatter + OLS fit
+    (function () {
+      var cv = document.getElementById("scatChart");
+      var dpr = Math.min(2, window.devicePixelRatio || 1);
+      var W = cv.clientWidth, H = cv.clientHeight;
+      cv.width = W * dpr; cv.height = H * dpr;
+      var ctx = cv.getContext("2d"); ctx.scale(dpr, dpr); ctx.font = "10px sans-serif";
+      var padL = 44, padR = 8, padT = 6, padB = 18;
+      var xs = c.monthlyReturns.map(function (p) { return p[1]; }), ys = c.monthlyReturns.map(function (p) { return p[2]; });
+      var lo = Math.min.apply(null, xs), hi = Math.max.apply(null, xs);
+      var lo2 = Math.min.apply(null, ys), hi2 = Math.max.apply(null, ys);
+      var X = function (v) { return padL + (v - lo) / (hi - lo) * (W - padL - padR); };
+      var Y = function (v) { return padT + (1 - (v - lo2) / (hi2 - lo2)) * (H - padT - padB); };
+      ctx.strokeStyle = C.line;
+      ctx.beginPath(); ctx.moveTo(X(0), padT); ctx.lineTo(X(0), H - padB); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(W - padR, Y(0)); ctx.stroke();
+      ctx.fillStyle = C.muted;
+      [-0.4, -0.2, 0, 0.2, 0.4].forEach(function (g) { if (g >= lo && g <= hi) ctx.fillText((g * 100) + "%", X(g) - 8, H - 5); });
+      [-0.2, 0, 0.2].forEach(function (g) { if (g >= lo2 && g <= hi2) ctx.fillText((g * 100) + "%", 10, Y(g) + 3); });
+      ctx.fillText("x: BTC monthly log-return · y: Skindex", padL + 6, padT + 10);
+      ctx.fillStyle = C.idx; ctx.globalAlpha = 0.55;
+      c.monthlyReturns.forEach(function (p) { ctx.beginPath(); ctx.arc(X(p[1]), Y(p[2]), 2.6, 0, 7); ctx.fill(); });
+      ctx.globalAlpha = 1;
+      var n = xs.length, mx = 0, my = 0, i;
+      for (i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; } mx /= n; my /= n;
+      var sxy = 0, sxx = 0;
+      for (i = 0; i < n; i++) { sxy += (xs[i] - mx) * (ys[i] - my); sxx += (xs[i] - mx) * (xs[i] - mx); }
+      var beta = sxy / sxx, a0 = my - beta * mx;
+      ctx.strokeStyle = C.gold; ctx.lineWidth = 1.6;
+      ctx.beginPath(); ctx.moveTo(X(lo), Y(a0 + beta * lo)); ctx.lineTo(X(hi), Y(a0 + beta * hi)); ctx.stroke();
+    })();
+
+    // data table (details), regimes, stress + signal prose
+    var roll = {}; c.rolling12m.forEach(function (p) { roll[p[0]] = p[1]; });
+    document.getElementById("corrTable").innerHTML = DS.specTable({
+      head: ["Month", "BTC", "Skindex", "rolling 12m r"],
+      rows: c.monthlyReturns.map(function (p) {
+        var b = (Math.exp(p[1]) - 1) * 100, s = (Math.exp(p[2]) - 1) * 100;
+        return [p[0],
+          { text: sgn(b, 1) + "%", cls: cls(b) },
+          { text: sgn(s, 1) + "%", cls: cls(s) },
+          roll[p[0]] != null ? fr(roll[p[0]]) : "—"];
+      }),
+    });
+    document.getElementById("regimeTable").innerHTML = DS.specTable({
+      head: ["BTC regime", "Span", "BTC", "Skindex", "monthly r", "n"],
+      rows: c.regimes.map(function (g) {
+        return [g.name, g.span,
+          { text: sgn(g.btcPct, 0) + "%", cls: cls(g.btcPct) },
+          { text: sgn(g.skindexPct, 0) + "%", cls: cls(g.skindexPct) },
+          fr(g.r), String(g.n)];
+      }),
+    });
+    var st = c.stress;
+    document.getElementById("stressLine").innerHTML =
+      "<b>Decoupling, both directions:</b> BTC's worst 12 months (" + st.btcWorst12m.span + ", "
+      + sgn(st.btcWorst12m.btcPct, 0) + "%) the Skindex did " + sgn(st.btcWorst12m.skindexPct, 0)
+      + "%; the Skindex's max drawdown (" + st.skindexMaxDD.span + ", " + sgn(st.skindexMaxDD.skindexPct, 0)
+      + "%) BTC did " + sgn(st.skindexMaxDD.btcPct, 0) + "%. Correlation is highest in crypto bears"
+      + " — but in every bear so far the Skindex's supply-driven trend won.";
+    var sg = c.signalTest;
+    document.getElementById("signalLine").innerHTML =
+      "<b>Is the players lead tradeable? No.</b> After a top-quartile monthly player jump the next"
+      + " month averaged " + sgn(sg.nextMonthTopPct, 1) + "% vs " + sgn(sg.nextMonthAllPct, 1)
+      + "% unconditionally — a " + sgn(sg.nextMonthTopPct - sg.nextMonthAllPct, 1)
+      + "pp tilt with t ≈ " + fr(sg.tStat, 1) + " (statistical noise; hit rate " + sg.hitTopPct
+      + "% vs " + sg.hitAllPct + "%), against ~" + sg.roundTripFeePct
+      + "% round-trip fees and wallet-locked Steam proceeds. The lead is a fundamental's fingerprint,"
+      + " not an edge.";
+  }).catch(function (e) {
+    document.getElementById("corrHeadline").textContent = "backtest/corr.json not found — run node corr.js.";
   });
 })();
 </script>
