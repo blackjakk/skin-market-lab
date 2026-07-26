@@ -131,13 +131,13 @@ const server = http.createServer((req, res) => {
 
   // buttons
   ok(await count("#g-btns .ds-btn") === 6, "DS.btn renders all 6 variants");
-  ok((await cs("#g-btns .ds-btn.primary", "color")) === "rgb(212, 175, 55)", "primary button → --ds-accent");
+  ok((await cs("#g-btns .ds-btn.primary", "color")) === "rgb(222, 155, 53)", "primary button → --ds-accent (CS2 orange, DESIGN.md)");
   ok((await cs("#g-btns .ds-btn.danger", "color")) === "rgb(230, 103, 103)", "danger button → --ds-bad");
   ok((await cs("#g-btns .ds-btn.compact", "fontSize")) === "11.5px" &&
      (await cs("#g-btns .ds-btn.compact", "paddingTop")) === "4px",
     "compact button → --ds-fs-lbl + tight padding");
   ok((await cs("#g-btns .ds-btn[disabled]", "opacity")) === "0.45", "disabled button dims to .45");
-  ok((await cs("#g-btns .ds-btn.on", "borderTopColor")) === "rgb(212, 175, 55)", "on button → accent border");
+  ok((await cs("#g-btns .ds-btn.on", "borderTopColor")) === "rgb(222, 155, 53)", "on button → accent border");
 
   // range chips
   console.log("range chips:");
@@ -171,8 +171,8 @@ const server = http.createServer((req, res) => {
   console.log("legend / panel / hint / warmup:");
   ok(await count("#g-legend .ds-legend-item") === 3 && await count("#g-legend .ds-sw") === 3,
     "DS.legendItem renders 3 entries with swatches");
-  ok((await cs("#g-legend .ds-legend-item .ds-sw", "backgroundColor")) === "rgb(57, 135, 229)",
-    "legend swatch resolves var(--ds-series-price)");
+  ok((await cs("#g-legend .ds-legend-item .ds-sw", "backgroundColor")) === "rgb(75, 105, 255)",
+    "legend swatch resolves var(--ds-series-price) (mil-spec, DESIGN.md)");
   ok(await page.$("#g-legend .ds-legend-item a") !== null, "legend TRUSTED html slot renders a real link");
 
   // panel / hint / warmup
@@ -181,7 +181,7 @@ const server = http.createServer((req, res) => {
   ok((await cs("#g-tiles", "backgroundColor")) === "rgb(21, 22, 26)", "panel surface = --ds-surface-1");
   ok((await cs("#g-hints .ds-hint", "color")) === "rgb(135, 138, 148)",
     "hint text = --ds-text-muted (#878a94, the ≥4.5:1 contrast value)");
-  ok((await cs("#g-warmup", "borderTopColor")) === "rgb(212, 175, 55)", "warmup pill = accent border");
+  ok((await cs("#g-warmup", "borderTopColor")) === "rgb(222, 155, 53)", "warmup pill = accent border");
 
   // badges
   console.log("badges / spec table / chartbox:");

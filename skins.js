@@ -11,10 +11,10 @@
   // series palette (kept in sync with skins.css — validated for the dark surface)
   const css = getComputedStyle(document.documentElement);
   const COL = {
-    price: css.getPropertyValue("--series-price").trim() || "#3987e5",
+    price: css.getPropertyValue("--series-price").trim() || "#4b69ff",
     sma7: css.getPropertyValue("--series-sma7").trim() || "#199e70",
-    sma30: css.getPropertyValue("--series-sma30").trim() || "#d95926",
-    skinport: css.getPropertyValue("--series-skinport").trim() || "#9085e9",
+    sma30: css.getPropertyValue("--series-sma30").trim() || "#8847ff",
+    skinport: css.getPropertyValue("--series-skinport").trim() || "#caab05",
     vol: css.getPropertyValue("--vol-bar").trim() || "#4a4e5a",
     grid: "#23252d",
     // canvas text follows the CSS muted token (single source — A3-8);
@@ -230,7 +230,7 @@
     const playersVis = rebase(playersAll);
     const btcVis = rebase(btcAll);
     const hasIdxChart = idxVis.length >= 2 || reconVis.length >= 2 || playersVis.length >= 2 || btcVis.length >= 2;
-    const RECON_COL = "rgba(57,135,229,.72)", PLAYERS_COL = "#9085e9"; // .45→.72: 3:1+ on the chart surface (A3-5)
+    const RECON_COL = "rgba(75,105,255,.85)", PLAYERS_COL = "#d32ce6"; // mil-spec ghost (.85 → 3.3:1 composited) + classified players line (DESIGN.md §2)
     const hasPlayersData = (mac.players && mac.players.length) || series.some((s) => s.players != null);
     const hasBtcData = (mac.btc && mac.btc.length) || series.some((s) => s.btc != null);
     // ovChip → DS.toggle (aria-pressed + .on move together on re-render; the

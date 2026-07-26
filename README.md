@@ -190,6 +190,12 @@ font bypass, and a 77-check real-Chromium component test covers every
 factory including keyboard and ARIA behavior. See
 [design-system/README.md](design-system/README.md).
 
+The visual contract — palette (CS2 identity: one action orange + the
+rarity ramp as data colors, all WCAG-validated), type scale, spacing,
+radius, elevation, and component rules — lives in
+[DESIGN.md](DESIGN.md); the token layer implements it and agents read it
+before any UI build.
+
 ## Accessibility
 
 The app is built to be completable by keyboard alone, on phones, and at
