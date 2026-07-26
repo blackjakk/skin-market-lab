@@ -254,11 +254,18 @@
           dev: r3(e), detail: e < 0 ? "steam-rich vs its own cash-ratio baseline" : "steam-lean vs its own cash-ratio baseline (or skinport leg moved)" });
       }
     }
-    // book lane: quote vs standing order book (second read path)
+    // book lane: quote vs standing order book (second read path).
+    // COMMODITY (case) items ONLY: identical units → one true book, quote
+    // must sit near its bid/ask. UNIQUE items (skins/knives with floats)
+    // are bucketed by Steam's UI and their buy orders sit on PREMIUM
+    // variants (low floats, rare patterns) legitimately far above the
+    // generic sale median — bracket-checking them cries wolf (found live
+    // 2026-07-26: six false "below the bid wall" alerts, Redline quote $42
+    // vs a $197 variant bid). Their books are still recorded as evidence.
     let bookCorroborated = 0, bookEligible = 0;
     for (const it of items || []) {
       const b = it.book;
-      if (it.tier === "art" || it.steamPrice == null) continue;
+      if (it.tier === "art" || it.cat !== "case" || it.steamPrice == null) continue;
       bookEligible++;
       if (!b || b.bid == null || b.ask == null || (now && now - b.t > R.bookMaxAgeH * 3600000)) continue;
       bookCorroborated++;

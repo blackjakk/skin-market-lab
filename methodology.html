@@ -190,9 +190,12 @@
     <tr><td><b>book</b></td><td>Steam's last-sale median vs Steam's <b>standing order book</b> (a
       second, structurally different read path: wash trades can fake prints, but the book is committed
       capital that can get filled)</td><td>the quote escapes its own bid/ask bracket by &gt;15%
-      (watch) / &gt;30% (alert). Book readings (best bid/ask, ±5% depth, total resting units) rotate
-      ~10 items/run into <code>data/book.json</code>, extracted from the listing page's embedded
-      order-book payload.</td></tr>
+      (watch) / &gt;30% (alert). <b>Commodity (case) items only</b>: unique items' buy orders sit on
+      premium variants (low floats, rare patterns) legitimately far above the generic sale median, so
+      bracket-checking them would cry wolf — their books are recorded as evidence but never flagged.
+      Book readings (best bid/ask, ±5% depth, total resting units) rotate ~10 items/run into
+      <code>data/book.json</code>, extracted from the listing page's embedded order-book
+      payload.</td></tr>
     <tr><td><b>art-evidence</b></td><td>the sale count behind each appraisal mark</td><td>fewer than 3
       realized sales in the 30-day marking window — thin evidence is published, not hidden.</td></tr>
     <tr><td><b>staleness</b></td><td>data-source liveness</td><td>fewer than half the steam-marked

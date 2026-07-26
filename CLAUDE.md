@@ -127,7 +127,10 @@ dashboard from the collector's committed files), or the setup panel
   median-relative gate as the index clamp, so market-wide ratio shifts
   never flag; "steam-rich" = pump suspect), book (steam last-sale median
   vs the STANDING order book — the second read path; wash trades fake
-  prints, not committed capital; flags when the quote escapes its bid/ask
+  prints, not committed capital; COMMODITY/case items ONLY — unique
+  items' buy orders sit on premium float/pattern variants far above the
+  generic median (live false-alarm 2026-07-26: Redline quote $42 vs a
+  $197 variant bid → 6 bogus alerts); flags when the quote escapes its bid/ask
   bracket ±15%/±30%), art-evidence (<3 realized sales behind an appraisal
   mark), staleness (<50% fresh steam quotes = venue-loss alert). Output:
   manifest.market.integrity + the settlement record's integrity field +
@@ -198,7 +201,7 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 121 checks: analytics units (incl. SMLX-3
+- `node probe.js` — 122 checks: analytics units (incl. SMLX-3
   winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
   clamp, concentrated/center-capture budget arithmetic, INTEG-1 lane
   pins, order-book fetcher parsing), full API flow, snapshot dedupe,

@@ -299,6 +299,15 @@ const bookFlags = gBook.flags.filter((f) => f.lane === "book");
 ok(bookFlags.length === 1 && bookFlags[0].name === "B1 Case" && bookFlags[0].severity === "alert"
   && /above the standing ask/.test(bookFlags[0].detail) && gBook.summary.bookCorroborated === "2/2",
   "INTEG-1 book lane: quote 44% above the standing ask wall → ALERT; in-bracket quote clean");
+// UNIQUE items (floats/patterns) are excluded from the bracket check: their
+// buy orders sit on premium variants far above the generic sale median —
+// that's collectors bidding, not manipulation (live false-alarm, 2026-07-26)
+const gUnique = S.assessIntegrity([
+  { name: "AK Skin", cat: "skin", tier: null, steamPrice: 42, quoteT: NOWI, salesT: NOWI, sales30: 20,
+    ratioDays: rdFlat(0.8), book: { t: NOWI, bid: 197, ask: 208, mid: 202.5 } },
+], { now: NOWI });
+ok(gUnique.flags.filter((f) => f.lane === "book").length === 0 && gUnique.summary.bookCorroborated === "0/0",
+  "INTEG-1 book lane is COMMODITY-only: a premium-variant bid wall on a unique skin never false-alarms");
 // art-evidence lane: thin appraisal evidence is published, unknown is not fabricated
 const gArt = S.assessIntegrity([
   { name: "Grail A", tier: "art", sales30: 1, ratioDays: [], book: null },
@@ -604,8 +613,8 @@ async function fixtureTransport(url, headers) {
     "collector publishes order-book readings (data/book.json + manifest item.book)");
   const cInteg = c1.manifest.market.integrity;
   ok(cInteg && cInteg.version === "INTEG-1" && cInteg.flags.length === 0
-    && cInteg.summary.bookCorroborated === "3/3" && cInteg.summary.artEvidenced === "1/1",
-    "collector publishes INTEG-1: fixture marks corroborate clean (book 3/3, art evidenced, 0 flags)");
+    && cInteg.summary.bookCorroborated === "1/1" && cInteg.summary.artEvidenced === "1/1",
+    "collector publishes INTEG-1: fixture marks corroborate clean (book 1/1 — commodity-only, art evidenced, 0 flags)");
   ok(setPub.latest.integrity && setPub.latest.integrity.version === "INTEG-1",
     "settlement record carries the integrity attestation alongside the fixings");
   const c2 = await collect({ root: CROOT });
