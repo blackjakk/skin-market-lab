@@ -1,11 +1,11 @@
-// ─── settlement.js — SMLX-4 settlement fixings + manipulation budget ────────
+// ─── settlement.js — SMLX-5 settlement fixings + manipulation budget ────────
 // UMD, pure, deterministic — shared by the collector (Node), the live
 // tracker, and the methodology page (browser: window.SkinSettlement).
 //
 // A FIXING is a dated settlement value computed from the committed market
 // series by published rules, so any counterparty re-derives it bit-exactly
 // from the repo's own data files. This is what a cash-settled future or a
-// scalar market would settle against. Methodology id: SMLX-4 (any rule
+// scalar market would settle against. Methodology id: SMLX-5 (any rule
 // change bumps the id — a fixing is meaningless without its rulebook).
 //
 //   SETTLE-CASE-7D   — mean of the last ≤7 daily Lab Case Index values (min 3)
@@ -29,7 +29,7 @@
 })(typeof self !== "undefined" ? self : this, function () {
   "use strict";
 
-  const METHODOLOGY = "SMLX-4";
+  const METHODOLOGY = "SMLX-5";
   const FIXINGS = [
     { name: "SETTLE-CASE-7D", key: "caseIdx", window: 7, minDays: 3, decimals: 2 },
     { name: "SETTLE-CASE-30D", key: "caseIdx", window: 30, minDays: 10, decimals: 2 },
@@ -110,32 +110,54 @@
       }
     }
     const perDayCase = washFraction * caseDollarVol * feeSteam;
-    // Cheapest weight-accumulation attack (the honest MINIMUM): greedy by
-    // fee-burn per unit of index weight until targetMove/clampLog of total
-    // weight is controlled.
-    let concentrated = null;
+    // Greedy weight-accumulation: cheapest fee-burn per unit of index weight
+    // until `targetWeight` of total weight is controlled. Both attacks below
+    // reduce to buying weight — under SMLX-4 volume weights that means real
+    // traded dollars everywhere, so no thin-name cheap corner survives.
+    let concentrated = null, centerCapture = null;
     if (caseMenu.length) {
-      const weightNeeded = targetMove / clampLog;
       const anyW = caseMenu.some((c) => c.w != null);
       const menu = caseMenu
         .map((c) => ({ dv: c.dv, w: c.w != null ? c.w : 1 / caseTotal }))
         .sort((a, b) => (a.dv / Math.max(a.w, 1e-12)) - (b.dv / Math.max(b.w, 1e-12)));
-      let cumW = 0, cost = 0, k = 0;
-      for (const c of menu) {
-        if (cumW >= weightNeeded - 1e-12) break;
-        cumW += c.w; cost += washFraction * c.dv * feeSteam; k++;
-      }
+      const accumulate = (targetWeight) => {
+        let cumW = 0, cost = 0, k = 0;
+        for (const c of menu) {
+          if (cumW >= targetWeight - 1e-12) break;
+          cumW += c.w; cost += washFraction * c.dv * feeSteam; k++;
+        }
+        return { k: k, cost: cost, cumW: cumW };
+      };
+      // (1) BOUNDED move: the clamp caps one name's pull at weight×clampLog,
+      // so a targetMove needs control of targetMove/clampLog of index weight.
+      const weightNeeded = targetMove / clampLog;
+      const a1 = accumulate(weightNeeded);
       concentrated = {
-        kMin: k,
+        kMin: a1.k,
         weightNeeded: weightNeeded,
         weighted: anyW,
-        costMove1pctDay: Math.round(cost),
-        costMove1pctFix7d: Math.round(cost * 7),
-        costMove1pctFix30d: Math.round(cost * 30),
+        costMove1pctDay: Math.round(a1.cost),
+        costMove1pctFix7d: Math.round(a1.cost * 7),
+        costMove1pctFix30d: Math.round(a1.cost * 30),
         note: (anyW ? "cheapest weight-accumulation attack" : "cheapest-k attack (equal-weight fallback)")
           + ": clamp caps one name's pull at weight×" + clampLog + " — a "
           + (targetMove * 100) + "% move needs ≥" + Math.round(weightNeeded * 100)
-          + "% of index weight (" + k + " names here)",
+          + "% of index weight (" + a1.k + " names here)",
+      };
+      // (2) UNBOUNDED control (SMLX-5): the clamp center is the WEIGHT-weighted
+      // median, so seizing >50% of index weight captures the center and lets
+      // the attacker move the index arbitrarily. This is the price of control,
+      // not of a 1% nudge — the number an instrument's OI cap must respect.
+      const a2 = accumulate(0.5);
+      centerCapture = {
+        kMin: a2.k,
+        weightNeeded: 0.5,
+        weighted: anyW,
+        costPerDay: Math.round(a2.cost),
+        costFix7d: Math.round(a2.cost * 7),
+        costFix30d: Math.round(a2.cost * 30),
+        note: "seize >50% of index weight → control the weighted-median clamp center → UNBOUNDED move ("
+          + a2.k + " heaviest names here)",
       };
     }
     const ratioBurn30d = washFraction * ratioLegDollarVol30d * feeCash;
@@ -151,6 +173,7 @@
         costMove1pctFix30d: r2(perDayCase * 30),
         coverage: caseCovered + "/" + caseTotal + " constituents priced",
         concentrated: concentrated,
+        centerCapture: centerCapture,
       },
       cashRatio: {
         thinLegDollarVolume30d: r2(ratioLegDollarVol30d),

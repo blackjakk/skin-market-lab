@@ -140,7 +140,7 @@ async function collect(opts) {
   // per-run macro readings (CS2 players, BTC/ETH — the correlation
   // benchmarks) appended raw to market.jsonl and daily-bucketed here
   manifest.market = A.marketOverview(marketItems);
-  // attach each name's published index weight (SMLX-4) so the manipulation
+  // attach each name's published index weight (SMLX-4/5) so the manipulation
   // budget prices the attack on the real weights and the site can show them
   const wCase = (manifest.market.weights && manifest.market.weights.case) || {};
   const wLiq = (manifest.market.weights && manifest.market.weights.liq) || {};
@@ -194,7 +194,7 @@ async function collect(opts) {
     cnus: latest.cnus != null ? latest.cnus : null,
   });
 
-  // settlement fixings (SMLX-3): computed from the published series and
+  // settlement fixings (SMLX-5): computed from the published series and
   // hashed — the auditable, re-derivable marks a dated instrument would
   // settle against. Appended every run; readers take last-per-day.
   const detail = S.computeAll(manifest.market.series);

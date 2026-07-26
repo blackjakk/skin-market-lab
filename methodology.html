@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SMLX-4 — Skin Market Lab Index &amp; Settlement Methodology</title>
+<title>SMLX-5 — Skin Market Lab Index &amp; Settlement Methodology</title>
 <link rel="stylesheet" href="skins.css">
 <style>
   .doc { max-width: 880px; margin: 0 auto; padding: 0 20px 60px; }
@@ -32,8 +32,8 @@
 <body>
 <div class="topnav"><a href="./">← Skin Market Lab</a></div>
 <div class="doc">
-  <h1>SMLX-4 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
-  <p class="muted">Skin Market Lab · methodology version SMLX-4 · any rule change bumps the version — a
+  <h1>SMLX-5 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
+  <p class="muted">Skin Market Lab · methodology version SMLX-5 · any rule change bumps the version — a
   fixing is meaningless without its rulebook. <b>This document describes a measurement, not an offer,
   solicitation, or operation of any financial instrument.</b> Derivatives referencing game items may be
   regulated products in most jurisdictions; nothing here is legal advice.</p>
@@ -52,10 +52,11 @@
       <td>Steam Market daily median price</td><td rowspan="2">CHAINED, WINSORIZED &amp; VOLUME-WEIGHTED:
       each day's index return is the <b>volume-weighted</b> mean of constituents' daily log-returns
       (items present and included on both days), after clamping each return to within ±0.05 log (≈5%)
-      of the day's <b>cross-sectional median</b> return (the clamp center stays unweighted); levels
-      cumulate from 100. Weights per §2a. Constituent changes are return-neutral at entry/exit.
-      Because the clamp is median-relative, market-wide moves (crashes, patch shocks) pass through
-      untouched — only single-name deviations from the day's consensus are capped</td></tr>
+      of the day's <b>weight-weighted median</b> return (SMLX-5 — the clamp center is itself
+      volume-weighted, so seizing it needs &gt;50% of index weight, not a count majority of thin
+      names); levels cumulate from 100. Weights per §2a. Constituent changes are return-neutral at
+      entry/exit. Because the clamp is median-relative, market-wide moves (crashes, patch shocks) pass
+      through untouched — only single-name deviations from the day's consensus are capped</td></tr>
     <tr><td>Liquids Index</td><td>Non-case items with ≥5 median units sold/day (self-gating — “liquids”
       must be liquid)</td><td>Steam Market daily median</td></tr>
     <tr><td>Art Index</td><td>Curated grail basket (<code>watchlist.json → art[]</code>)</td>
@@ -88,6 +89,14 @@
     never volume-weighted because appraisal marks have no meaningful volume.</li>
     <li>The current month's weights are published in <code>data/index.json → market.weights</code> and
     on each manifest item (<code>weight</code>).</li>
+    <li><b>The clamp center uses these same weights</b> (SMLX-5). The winsorization center is the
+    weight-weighted median of the day's returns, not the plain one. Under SMLX-4's plain median an
+    attacker who held a <i>count</i> majority of thin names could pump them, drag the median to the
+    fake consensus so the pump sat unclamped, and the clamp would then pull honest names toward the
+    fake move — a cheap attack because thin names are cheap. Weighting the center means moving it
+    requires a &gt;50%-<i>weight</i> coalition, i.e. real traded dollars. A single name is capped at
+    10%, so no one name can ever control the center. Under equal weights the weighted median equals
+    the plain median exactly, so inception months and fallbacks are unchanged.</li>
   </ul>
 
   <h2>3 · Settlement fixings</h2>
@@ -154,9 +163,16 @@
     that greedy basket against the published weights. Because SMLX-4 weights are proportional to real
     traded dollars, cost scales with weight everywhere — the attack can no longer hide in thin names.
     This is the headline number on the dashboard — always quote the cheaper attack.</li>
+    <li><b>Center capture (unbounded control)</b> — a different <i>kind</i> of attack, priced
+    separately (SMLX-5). The clamp center is the weight-weighted median, so an attacker who controls
+    <b>&gt;50% of index weight</b> owns the center and can then move the index <i>arbitrarily</i>, not
+    just 1%. The budget greedily accumulates that half-weight at the lowest fee-burn per unit of
+    weight — this is the price of <i>control</i>, and it is the number an instrument's open-interest
+    cap must respect, because above it the index is no longer a market measurement.</li>
   </ul>
   <p>An N-day fixing multiplies either burn by N. Any credible instrument must cap open interest well
-  below the concentrated figure below.</p>
+  below the concentrated figure — and its total notional well below the center-capture figure —
+  below.</p>
   <div id="budgetOut"><p class="muted">Loading live budget from data/settlement.json…</p></div>
 
   <h2>6 · Verification — check the operator</h2>
@@ -199,6 +215,14 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       SMLX-3's clamp alone left open (nine near-dead cases could still move the fixing for ~$8k). The
       budget's concentrated model becomes cheapest weight-accumulation against the published weights.
       Art stays equal-weight. Prior records retain their stamp.</td></tr>
+    <tr><td>SMLX-5</td><td>2026-07-26</td><td>Weight-weighted clamp center: the winsorization center is
+      the volume-weighted median of the day's returns, not the plain one. Closes the median-capture
+      attack SMLX-4 left open (a count majority of thin names could seize the unweighted center and
+      drag honest names toward a fake move); seizing the center now costs a &gt;50%-weight coalition,
+      and a single name is capped at 10% so none can control it alone. Equal weights reduce the
+      weighted median to the plain median exactly, so no equal-weight behavior changes. Manipulation
+      budget adds the center-capture model (price of unbounded control). Prior records retain their
+      stamp.</td></tr>
   </table>
 
   <h2>9 · Disclaimers</h2>
@@ -219,13 +243,18 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
 
   function budgetHtml(b) {
     if (!b) return "<p class='muted'>No budget published yet.</p>";
-    var c = b.caseIndex, r = b.cashRatio, k = c.concentrated;
+    var c = b.caseIndex, r = b.cashRatio, k = c.concentrated, cc = c.centerCapture;
     var kRows = "";
     if (k) {
       kRows =
         "<tr><td>Concentrated attack: cheapest " + esc(k.kMin) + " names, 1 day</td><td>" + money(k.costMove1pctDay) + "</td><td>" + esc(k.note || "") + "</td></tr>" +
         "<tr><td><b>Move SETTLE-CASE-7D 1% (concentrated floor)</b></td><td><b>" + money(k.costMove1pctFix7d) + "</b></td><td></td></tr>" +
         "<tr><td>Move SETTLE-CASE-30D 1% (concentrated floor)</td><td>" + money(k.costMove1pctFix30d) + "</td><td></td></tr>";
+    }
+    var ccRows = "";
+    if (cc) {
+      ccRows =
+        "<tr><td><b>Center capture: seize &gt;50% of index weight</b></td><td><b>" + money(cc.costPerDay) + "/day</b></td><td>" + esc(cc.note || "") + "</td></tr>";
     }
     return "<table class='spec'>" +
       "<tr><th>Quantity</th><th>Value</th><th>Coverage</th></tr>" +
@@ -234,6 +263,7 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       "<tr><td>Move SETTLE-CASE-7D 1% (uniform)</td><td>" + money(c.costMove1pctFix7d) + "</td><td></td></tr>" +
       "<tr><td>Move SETTLE-CASE-30D 1% (uniform)</td><td>" + money(c.costMove1pctFix30d) + "</td><td></td></tr>" +
       kRows +
+      ccRows +
       "<tr><td>Cash-ratio thin-leg 30d $ volume</td><td>" + money(r.thinLegDollarVolume30d) + "</td><td>" + esc(r.coverage) + "</td></tr>" +
       "<tr><td>Move SETTLE-RATIO-30D 1%</td><td>" + money(r.costMove1pctFix30d) + "</td><td></td></tr>" +
       "</table><p class='muted'>Model: wash fraction " + b.model.washFraction + ", Steam fee " + b.model.feeSteam +

@@ -57,6 +57,24 @@
     const m = s.length >> 1;
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
   }
+  // Weight-weighted median of [value, weight] pairs. Reduces EXACTLY to the
+  // plain median when all weights are equal (so equal-weight paths are
+  // unchanged): the value where cumulative weight reaches half the total; if
+  // the partition falls exactly between two values, their average.
+  function weightedMedian(pairs) {
+    if (!pairs.length) return null;
+    const s = pairs.slice().sort((a, b) => a[0] - b[0]);
+    const W = s.reduce((a, p) => a + p[1], 0);
+    if (!(W > 0)) return median(s.map((p) => p[0]));
+    const half = W / 2;
+    let cum = 0;
+    for (let i = 0; i < s.length; i++) {
+      cum += s[i][1];
+      if (Math.abs(cum - half) <= 1e-12) return (s[i][0] + (i + 1 < s.length ? s[i + 1][0] : s[i][0])) / 2;
+      if (cum > half) return s[i][0];
+    }
+    return s[s.length - 1][0];
+  }
 
   // ── daily bucketing ──────────────────────────────────────────────────────
   // points → one bucket per UTC day. price = median of the day's readings.
@@ -334,13 +352,23 @@
   // by the budget model. Names without weightMinObs observations in the
   // window take the MEDIAN weight of observed names (absence is neutral);
   // a month with no observed names (index inception) is equal-weight. Art
-  // has no volume by construction → always equal-weight. The clamp median
-  // stays UNWEIGHTED (a weighted clamp center would let heavy names steer
-  // it). Net effect on the attack surface: influence is proportional to
-  // real traded dollars, so the cheapest concentrated attack must buy
-  // ≥ targetMove/clampLog of total index WEIGHT — there is no thin-name
-  // cheap corner anymore.
-  const INDEX_RULES = { version: "SMLX-4", adoption: "2026-07-25", seasoningDays: 30, clampLog: 0.05,
+  // has no volume by construction → always equal-weight. Net effect on the
+  // attack surface: influence is proportional to real traded dollars, so
+  // the cheapest concentrated attack must buy ≥ targetMove/clampLog of
+  // total index WEIGHT — there is no thin-name cheap corner.
+  // WEIGHTED-MEDIAN CLAMP CENTER (SMLX-5): the clamp is centered on the
+  // WEIGHT-weighted median of the day's returns, not the unweighted one.
+  // SMLX-4's unweighted center was a one-name-one-vote election: an attacker
+  // holding a COUNT majority of thin names could pump them, drag the median
+  // to the fake consensus (so the pump sits AT the center, unclamped), and
+  // the clamp would then drag honest names TOWARD the fake move. Weighting
+  // the center means seizing it costs a >50% WEIGHT coalition — real traded
+  // dollars, the same expensive resource, priced by the budget's
+  // centerCapture model. Under equal weights the weighted median reduces
+  // EXACTLY to the plain median, so the inception month and all
+  // equal-weight fallbacks are unchanged. A single name (capped at
+  // weightCap 0.10) can never be >50% → no one name controls the center.
+  const INDEX_RULES = { version: "SMLX-5", adoption: "2026-07-25", seasoningDays: 30, clampLog: 0.05,
     weightWindowDays: 60, weightMinObs: 5, weightCap: 0.10 };
   function dayT(day) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day));
@@ -456,9 +484,12 @@
           if (p0 > 0 && p1 > 0) contrib.push([m, Math.log(p1 / p0)]);
         }
         if (contrib.length) {
-          const med = median(contrib.map((c) => c[1])); // clamp center stays UNWEIGHTED
           const cl = INDEX_RULES.clampLog;
           const wm = monthWeights(key, day.slice(0, 7));
+          // clamp center = WEIGHT-weighted median (SMLX-5): seizing the center
+          // now costs a >50% weight coalition, not a count majority of thin
+          // names (equal weights → reduces to the plain median, paths unchanged)
+          const med = weightedMedian(contrib.map((c) => [c[1], wm ? wm.get(c[0]) : 1]));
           let wsum = 0, acc = 0, eqAcc = 0;
           for (const c of contrib) {
             const adjR = med + Math.max(-cl, Math.min(cl, c[1] - med));

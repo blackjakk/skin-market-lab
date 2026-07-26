@@ -66,12 +66,14 @@ backfill to the hosted dashboard, commit the resulting
 ## The market home (what the header numbers mean)
 
 - **Lab Case Index** — chained: each day's move is the volume-weighted
-  mean of tracked cases' daily returns, cumulated from 100 (SMLX-4 —
+  mean of tracked cases' daily returns, cumulated from 100 (SMLX-5 —
   weights are each case's median daily dollar volume over the prior
   month-end's trailing 60 days, capped at 10%; new cases season 30 days
   and enter on a published calendar, return-neutrally; each day's returns
-  are winsorized at ±5% around the day's median, so one pumped name can't
-  move the index but market-wide moves pass through). Cases are the
+  are winsorized at ±5% around the day's *weight-weighted* median, so one
+  pumped name can't move the index — and neither can a count-majority of
+  thin names, since seizing the clamp center now costs >50% of index
+  weight — while market-wide moves still pass through). Cases are the
   market's commodity layer: the de facto "S&P of skins".
 - **Cash ratio** — median (third-party realized sale ÷ Steam price).
   ~70–85% is normal; climbing toward 100% = strong real-money demand,
@@ -96,7 +98,7 @@ backfill to the hosted dashboard, commit the resulting
   regional demand mix — Chinese demand is this market's biggest swing
   factor.
 
-## Settlement fixings (SMLX-4)
+## Settlement fixings (SMLX-5)
 
 Dated settlement marks computed from the committed series by fixed rules —
 what a cash-settled future or scalar market would settle against:
@@ -106,8 +108,9 @@ SHA-256 hash over its canonical form so any counterparty re-derives it
 bit-exactly from `data/`; fixings show "accruing" until their minimum day
 count exists and are never backfilled. The full rulebook — mark
 construction, patch-event policy, the live **manipulation budget**
-(fee-burn floor to move a fixing 1%, priced for both the uniform and the
-cheapest-k concentrated attack), and one-click in-browser
+(fee-burn floor to move a fixing 1%, priced for the uniform, the
+cheapest weight-accumulation, and the >50%-weight center-capture
+attack), and one-click in-browser
 verification — is on the site at
 [methodology.html](https://blackjakk.github.io/skin-market-lab/methodology.html).
 A measurement, not an offer of any instrument.
@@ -144,7 +147,7 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 104 checks, hermetic (fixture transport):
+- `npm run probe` — 106 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
 - `npm run probe:ui` — 35 real-Chromium checks across live AND static modes:

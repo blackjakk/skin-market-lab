@@ -203,10 +203,31 @@ ok(near(wmo.series[wmo.series.length - 1].caseIdx, 100 * Math.exp(0.10 * 0.04), 
 ok(wmo.weights && near(wmo.weights.case["N1 Case"], 0.10, 1e-6) && near(wmo.weights.case["N2 Case"], 0.9 / 11, 1e-4),
   "published weights: raw 2/13 clipped to the 0.10 cap, excess redistributed pro-rata");
 
+// ── SMLX-5 weighted-median clamp center: defeats median capture ────────────
+// An attacker owns a COUNT majority of thin names (11 of 20) and pumps them
+// +50% on one day, trying to drag the clamp center to the fake consensus —
+// which under an UNWEIGHTED median center would sit the pump AT the center
+// (unclamped) AND clamp the honest names toward it (~+43% index move). With
+// the WEIGHT-weighted median center, the 9 heavy honest names hold the center
+// at 0, the pump is clamped to +5%, and the index moves only ~0.5%.
+const capItems = [], CJ = Date.UTC(2026, 0, 20); // Jan 20+ for the Feb weight window
+for (let n = 0; n < 20; n++) {
+  const honest = n < 9, vol = honest ? 1000 : 10; // honest names heavy → >50% weight
+  const daily = [];
+  for (let i = 0; i < 6; i++) daily.push(dcase(CJ + i * D, 10, vol)); // Jan 20-25 ≥ minObs
+  daily.push(dcase(TF1, 10, vol));                                    // Feb 1
+  daily.push(dcase(TF2, honest ? 10 : 10 * Math.exp(0.405), vol));    // Feb 2: thin pump +50%
+  capItems.push({ name: "K" + n + " Case", cat: "case", daily: daily, skinportDaily: [] });
+}
+const capMo = A.marketOverview(capItems);
+const capLast = capMo.series[capMo.series.length - 1].caseIdx;
+ok(capLast < 101 && near(capLast, 100.5, 0.2),
+  "SMLX-5 weighted-median clamp: a count-majority thin pump (+50% on 11 of 20 names) moves the index <1% — heavy honest names hold the center (unweighted would print ~+43%)");
+
 // ── settlement fixings (SMLX-3) ────────────────────────────────────────────
 const setSeries = Array.from({ length: 7 }, (_, i) => ({ day: A.dayKey(T0 + i * D), t: T0 + i * D, caseIdx: 100 + i, cashRatio: 0.65 }));
 const fx7 = S.computeFixing(setSeries, S.FIXINGS[0]);
-ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-4",
+ok(fx7.value === 103 && fx7.days.length === 7 && fx7.methodology === "SMLX-5",
   "SETTLE-CASE-7D = mean of last 7 daily index values (100..106 → 103)");
 const fxShallow = S.computeFixing(setSeries.slice(0, 2), S.FIXINGS[0]);
 ok(fxShallow.value === null && /2\/3/.test(fxShallow.accruing),
@@ -242,6 +263,9 @@ const wbud = S.manipulationBudget(
 ok(wbud.caseIndex.concentrated.weighted === true && wbud.caseIndex.concentrated.kMin === 4
   && wbud.caseIndex.concentrated.costMove1pctDay === 12150,
   "SMLX-4 weighted budget: attack must buy real weight — 4 heavyweight names, $12,150/day (thin names useless)");
+ok(wbud.caseIndex.centerCapture && wbud.caseIndex.centerCapture.weighted === true
+  && wbud.caseIndex.centerCapture.kMin === 9 && wbud.caseIndex.centerCapture.costPerDay === 25650,
+  "SMLX-5 center-capture budget: seizing >50% of index weight (9 heaviest names, $25,650/day) is the price of UNBOUNDED control");
 
 const up = A.signal({ mom7: 0.05, mom30: 0.25, slope30: 0.008, rsi14: 60, curDD: 0.1, vol30: 0.4, liq30: 50 });
 ok(up.score > 12 && /BUY/.test(up.verdict), "signal: sustained uptrend → BUY (" + up.score + ")");
@@ -322,6 +346,21 @@ async function fixtureTransport(url, headers) {
   const NAME = "AK-47 | Redline (Field-Tested)";
   const KNIFE = "★ Karambit | Doppler (Factory New)";
 
+  // Founding-cohort seeding (time-stable index base tests). In production the
+  // real basket was first observed on the adoption date, so those cases are
+  // grandfathered and index from 100. A case created FRESH in a probe temp dir
+  // is first-seen "today", which is now past the adoption cutoff → it correctly
+  // SEASONS OUT (caseIdx null) instead of basing at 100. Seed a launch-day mark
+  // so the tested items match the real basket's grandfathered status; the
+  // series is then exactly {launch-day, today} = 2 flat marks → index 100, and
+  // stays 2 marks no matter how far "today" drifts (no interpolated days).
+  const ADOPT_T = Date.UTC(2026, 6, 25, 12); // 2026-07-25 — dayKey ≤ INDEX_RULES.adoption
+  const seedFounding = (dir, name, line) => {
+    const hd = path.join(dir, "history");
+    fs.mkdirSync(hd, { recursive: true });
+    fs.appendFileSync(path.join(hd, slug(name) + ".jsonl"), JSON.stringify(Object.assign({ t: ADOPT_T }, line)) + "\n");
+  };
+
   const h = await api("/api/skins/health");
   ok(h.status === 200 && h.body.ok === 1 && h.body.steamCookie === true, "health up (fixture cookie visible)");
 
@@ -401,14 +440,15 @@ async function fixtureTransport(url, headers) {
   ok(bs2.status === 400, "bootstrap without STEAM_COOKIE fails with guidance");
 
   await api("/api/skins/watch", { name: "Fracture Case" });
+  seedFounding(DATA, "Fracture Case", { src: "steam", price: 23, lowest: 22.1, vol: 57 }); // launch mark FIRST (chronological)
   await api("/api/skins/refresh", { name: "Fracture Case" });
   const mkt = await api("/api/skins/market");
   ok(mkt.status === 200 && mkt.body.today && mkt.body.today.caseIdx === 100,
-    "live /api/skins/market: case index at base 100 on day one");
-  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-4"
+    "live /api/skins/market: grandfathered case indexes at base 100 (launch + today, flat)");
+  ok(mkt.body.settlement && mkt.body.settlement.methodology === "SMLX-5"
     && mkt.body.settlement.fixings["SETTLE-CASE-7D"]
     && /^[0-9a-f]{64}$/.test(mkt.body.settlement.fixings["SETTLE-CASE-7D"].hash),
-    "live market serves SMLX-4 fixings with 64-hex canonical hashes");
+    "live market serves SMLX-5 fixings with 64-hex canonical hashes");
   ok(near(mkt.body.today.cashRatio, 0.87, 0.001) && mkt.body.today.players === 1534000,
     "live market: cash ratio + live player count");
   ok(mkt.body.today.btc === 60000 && mkt.body.today.eth === 1800,
@@ -449,6 +489,10 @@ async function fixtureTransport(url, headers) {
   fs.writeFileSync(path.join(CROOT, "data", "market.jsonl"),
     JSON.stringify({ t: mkT(11, 17), players: 5000000 }) + "\n" +
     JSON.stringify({ t: mkT(23, 17), players: 4000000 }) + "\n");
+  // grandfather the case + art grail (see seedFounding note) so the index
+  // bases at 100 instead of seasoning out now that "today" > adoption date
+  seedFounding(path.join(CROOT, "data"), "Fracture Case", { src: "steam", price: 23, lowest: 22.1, vol: 57 });
+  seedFounding(path.join(CROOT, "data"), "M4A4 | Howl (Field-Tested)", { src: "skinport", price: 20, vol: 21, sp30: 20 });
   const c1 = await collect({ root: CROOT });
   ok(c1.steamOk === 3 && c1.manifest.items.length === 4 && c1.manifest.errors.length === 0,
     "collect: art item with no steam quote is NOT an error (marks to sales)");
@@ -478,7 +522,7 @@ async function fixtureTransport(url, headers) {
     "skinport sales store + rotation cursor persisted (8-per-run budget)");
   const setPub = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "settlement.json"), "utf8"));
   const fxPub = setPub.latest.fixings["SETTLE-CASE-7D"];
-  ok(fxPub && fxPub.value === null && /1\/3/.test(fxPub.accruing)
+  ok(fxPub && fxPub.value === null && /2\/3/.test(fxPub.accruing)
     && fxPub.hash === crypto.createHash("sha256").update(S.canonical(setPub.detail["SETTLE-CASE-7D"])).digest("hex"),
     "collector publishes settlement.json; hash re-derives from canonical detail");
   ok(fs.existsSync(path.join(CROOT, "data", "settlements.jsonl"))
