@@ -1,0 +1,108 @@
+/* design-system/ds.css — Skin Market Lab DS component classes.
+   TOKEN-ONLY styling: every color is a var(--ds-*) reference (no raw hex —
+   the one deliberate exception is `border: 1px solid` with no color on
+   .ds-badge.card, which inherits currentColor by spec, exactly like the
+   legacy .sigBadge). Load order: skins.css → tokens.css → this file.
+   Components mirror the app's proven shapes (.tile/.tile2, .ovToggle,
+   .moverChip, .btn/.ranges, .sigMini/.sigBadge, table.spec, .chartBox,
+   .topnav) so migrated UI keeps its look. Legacy / probe-contract classes
+   ride alongside via the factories' `cls` option — never restyled here. */
+
+/* ── panel ─────────────────────────────────────────────────────────────── */
+.ds-panel { background: var(--ds-surface-1); border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-lg); padding: var(--ds-space-4); margin-bottom: 16px; }
+.ds-panel-h { margin: 0 0 var(--ds-space-3); font-size: 12px; letter-spacing: 1.8px;
+  color: var(--ds-text-2); font-weight: 700; }
+
+/* ── tiles (stat tile: label / value / sub) ────────────────────────────── */
+.ds-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
+  gap: var(--ds-space-3); }
+.ds-tiles.strip { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+.ds-tile { background: var(--ds-surface-2); border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-md); padding: 9px 11px; }
+.ds-tile-lb { font-size: var(--ds-fs-cap); letter-spacing: 1.2px; color: var(--ds-text-muted); }
+.ds-tile-v { font-size: var(--ds-fs-val); font-weight: 700; font-variant-numeric: tabular-nums;
+  margin-top: 2px; color: var(--ds-text); overflow-wrap: anywhere; }
+.ds-tile-sub { font-size: var(--ds-fs-cap); color: var(--ds-text-muted); margin-top: 2px; }
+.ds-tile.big .ds-tile-v { font-size: var(--ds-fs-val-lg); }        /* doc-page .tile2 scale */
+.ds-tile.up .ds-tile-v, .ds-tile.good .ds-tile-v { color: var(--ds-good); }
+.ds-tile.dn .ds-tile-v, .ds-tile.bad .ds-tile-v { color: var(--ds-bad); }
+
+/* ── chip (pill; + interactive button variant) ─────────────────────────── */
+.ds-chip { display: inline-flex; gap: 7px; align-items: center; padding: 5px 11px;
+  border-radius: var(--ds-radius-pill); border: 1px solid var(--ds-line);
+  background: var(--ds-surface-2); color: var(--ds-text); font-size: 12px;
+  font-family: inherit; }
+.ds-chip.interactive { cursor: pointer; }
+.ds-chip.interactive:hover { border-color: var(--ds-text-muted); }
+
+/* ── toggle (swatch + label button; state = aria-pressed + .on together) ─ */
+.ds-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px;
+  border-radius: var(--ds-radius-sm); border: 1px solid var(--ds-line);
+  background: var(--ds-surface-2); color: var(--ds-text); font-size: var(--ds-fs-cap);
+  font-family: inherit; cursor: pointer; }
+.ds-toggle:hover { border-color: var(--ds-text-muted); }
+.ds-toggle.on, .ds-toggle[aria-pressed="true"] { border-color: var(--ds-accent); }
+.ds-toggle[aria-pressed="false"] .ds-sw { opacity: .35; }
+
+/* ── button ────────────────────────────────────────────────────────────── */
+.ds-btn { display: inline-block; padding: 7px 12px; border-radius: var(--ds-radius-md);
+  border: 1px solid var(--ds-line); background: var(--ds-surface-2); color: var(--ds-text);
+  font-size: var(--ds-fs-txt); font-family: inherit; cursor: pointer; text-decoration: none; }
+.ds-btn:hover { border-color: var(--ds-text-muted); }
+.ds-btn.primary { border-color: var(--ds-accent); color: var(--ds-accent); font-weight: 700; }
+.ds-btn.danger { color: var(--ds-bad); }
+.ds-btn.compact { padding: 4px 9px; font-size: var(--ds-fs-lbl); }
+.ds-btn.on { border-color: var(--ds-accent); color: var(--ds-accent); }
+.ds-btn[disabled] { opacity: .45; cursor: default; }
+
+/* ── range chip row ────────────────────────────────────────────────────── */
+.ds-range { display: inline-flex; gap: var(--ds-space-1); }
+
+/* ── hint / warmup ─────────────────────────────────────────────────────── */
+.ds-hint { color: var(--ds-text-muted); font-size: 12px; }
+.ds-warmup { display: inline-block; padding: 5px 11px; border-radius: var(--ds-radius-pill);
+  border: 1px solid var(--ds-accent); color: var(--ds-accent); font-size: var(--ds-fs-lbl);
+  letter-spacing: .3px; }
+
+/* ── legend + swatch ───────────────────────────────────────────────────── */
+.ds-legend { display: flex; gap: var(--ds-space-4); flex-wrap: wrap; align-items: center;
+  font-size: 12px; color: var(--ds-text-2); }
+.ds-legend a { color: var(--ds-text-2); }
+.ds-legend-item { display: inline-flex; align-items: center; }
+.ds-sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px;
+  vertical-align: middle; margin-right: 5px; }
+
+/* ── badge (verdict text; .card = boxed sigBadge scale) ────────────────── */
+.ds-badge { font-size: var(--ds-fs-cap); font-weight: 700; letter-spacing: .6px;
+  color: var(--ds-neutral); }
+.ds-badge.good { color: var(--ds-good); }
+.ds-badge.bad { color: var(--ds-bad); }
+.ds-badge.card { display: inline-block; min-width: 120px; text-align: center;
+  padding: 10px 12px; border-radius: var(--ds-radius-md); border: 1px solid;
+  font-weight: 800; letter-spacing: 1px; font-size: inherit; }
+.ds-badge-v { display: block; font-size: 22px; font-variant-numeric: tabular-nums; }
+
+/* ── spec table (the doc pages' table.spec) ────────────────────────────── */
+.ds-spec-table { width: 100%; border-collapse: collapse; font-size: var(--ds-fs-txt); }
+.ds-spec-table th { text-align: left; color: var(--ds-text-muted); font-weight: 600;
+  padding: 6px 8px; border-bottom: 1px solid var(--ds-line); }
+.ds-spec-table td { padding: 7px 8px; border-bottom: 1px solid var(--ds-line);
+  font-variant-numeric: tabular-nums; color: var(--ds-text-2); }
+.ds-spec-table td:first-child { color: var(--ds-text); }
+
+/* ── chart box ─────────────────────────────────────────────────────────── */
+.ds-chartbox { background: var(--ds-surface-2); border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-lg); padding: 12px; }
+.ds-chartbox canvas { width: 100%; display: block; }
+
+/* ── top nav (doc pages) ───────────────────────────────────────────────── */
+.ds-topnav { padding: var(--ds-space-4) var(--ds-space-5); }
+.ds-topnav a { color: var(--ds-text-2); text-decoration: none; font-size: 13px;
+  margin-right: var(--ds-space-4); }
+.ds-topnav a:hover { color: var(--ds-text); }
+
+/* ── keyboard focus (matches the app's .btn:focus-visible ring) ────────── */
+.ds-btn:focus-visible, .ds-chip:focus-visible, .ds-toggle:focus-visible,
+.ds-topnav a:focus-visible {
+  outline: 2px solid var(--ds-focus); outline-offset: 1px; }

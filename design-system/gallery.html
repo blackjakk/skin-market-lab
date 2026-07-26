@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Design System Gallery — Skin Market Lab</title>
+<link rel="stylesheet" href="../skins.css">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="ds.css">
+<style>
+  /* gallery-only demo chrome (layout scaffolding, token-only) */
+  .g-wrap { max-width: 980px; margin: 0 auto; padding: 0 var(--ds-space-5) 60px; }
+  .g-row { display: flex; gap: var(--ds-space-2); flex-wrap: wrap; align-items: center;
+    margin-bottom: var(--ds-space-2); }
+  .g-mrow { padding: 7px 10px; border-radius: var(--ds-radius-md); cursor: pointer;
+    font-size: var(--ds-fs-txt); }
+  .g-mrow:hover { background: var(--ds-surface-2); }
+  .g-mrow:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: 1px;
+    background: var(--ds-surface-2); }
+</style>
+</head>
+<body>
+<div class="ds-topnav" id="g-topnav">
+  <a href="../index.html">← Skin Market Lab</a>
+  <a href="../methodology.html">Methodology</a>
+  <a href="../backtest.html">Backtest</a>
+</div>
+<div class="hdr">
+  <h1>DESIGN <span class="gold">SYSTEM</span></h1>
+  <span class="tag">gallery — every DS.* factory, every state</span>
+</div>
+<div class="g-wrap" id="gallery"></div>
+
+<script src="ds.js"></script>
+<script>
+"use strict";
+(function () {
+  const D = window.DS;
+  // attacker-shaped strings — must render as TEXT everywhere they pass
+  // through a plain field (never execute, never inject markup)
+  const XSS = "<script>alert('xss')<\/script>";
+  const IMG = '<img src=x onerror="document.title=\'pwned\'">';
+
+  const state = { range: "ALL", ranges: ["1Y", "5Y", "ALL"] };
+
+  document.getElementById("gallery").innerHTML =
+    // ── tiles ──
+    D.panel({ title: "TILES — DS.tile + DS.tiles", attrs: { id: "g-tiles" }, body:
+      D.tiles(
+        D.tile({ label: "LAB CASE INDEX", value: "112.4", sub: "+1.2% 24h · +3.4% 7d", tone: "up" }) +
+        D.tile({ label: "CASH RATIO", value: "71%", sub: "cash sale vs steam price" }) +
+        D.tile({ label: "7D", value: "−4.2%", tone: "dn" }) +
+        D.tile({ label: "MARK INTEGRITY", value: "✓ CLEAN", sub: "ratio 12/14 · book 8/10 corroborated", tone: "good" }) +
+        D.tile({ label: "ALERTS", value: "⚠ 2 FLAGS", tone: "bad" }) +
+        D.tile({ label: "END LEVEL", value: "+4,346%", sub: "CAGR 37.5% · doc-page big scale", cls: "big" }),
+      "strip") }) +
+
+    // ── chips ──
+    D.panel({ title: "CHIPS — DS.chip", attrs: { id: "g-chips" }, body:
+      '<div class="g-row">' +
+        D.chip({ label: "wallet funds only" }) +
+        D.chip({ label: "CASE", cls: "g-cat" }) +
+        D.chip({ label: "AK-47 | Redline", interactive: true,
+          attrs: { "data-name": "AK-47 | Redline (Field-Tested)" },
+          labelHtml: '<span>AK-47 | Redline</span> ' + D.badge({ label: "+2.1%", tone: "good" }) }) +
+      "</div>" +
+      D.hint({ html: 'last chip click: <b id="g-chip-out">—</b>' }) }) +
+
+    // ── toggles ──
+    D.panel({ title: "TOGGLES — DS.toggle (aria-pressed + .on move together)", attrs: { id: "g-toggles" }, body:
+      '<div class="g-row">' +
+        D.toggle({ label: "CS players", swatch: "var(--ds-series-skinport)", on: true, data: { ov: "players" } }) +
+        D.toggle({ label: "BTC", swatch: "var(--ds-series-sma30)", on: false, data: { ov: "btc" } }) +
+      "</div>" }) +
+
+    // ── buttons ──
+    D.panel({ title: "BUTTONS — DS.btn", attrs: { id: "g-btns" }, body:
+      '<div class="g-row">' +
+        D.btn({ label: "⟳ Snapshot now" }) +
+        D.btn({ label: "✎ Edit tracked items", primary: true }) +
+        D.btn({ label: "✕ Stop tracking", cls: "danger" }) +
+        D.btn({ label: "1Y", cls: "compact" }) +
+        D.btn({ label: "ALL", cls: "compact on" }) +
+        D.btn({ label: "Disabled", attrs: { disabled: true } }) +
+      "</div>" }) +
+
+    // ── range chips ──
+    D.panel({ title: "RANGE CHIPS — DS.rangeChips", attrs: { id: "g-range" }, body:
+      D.rangeChips({ ranges: state.ranges, active: state.range, dataKey: "ir" }) }) +
+
+    // ── keyActivate rows ──
+    D.panel({ title: "KEYACTIVATE — DS.keyActivate (focusable-row pattern)", attrs: { id: "g-activate" }, body:
+      '<div class="g-mrow" tabindex="0" role="button" data-name="Kilowatt Case">Kilowatt Case — click / Enter / Space</div>' +
+      '<div class="g-mrow" tabindex="0" role="button" data-name="Fracture Case">Fracture Case — click / Enter / Space</div>' +
+      D.hint({ html: 'activations: <b id="g-activate-count">0</b> · last: <span id="g-activate-last">—</span>' }) }) +
+
+    // ── legend ──
+    D.panel({ title: "LEGEND — DS.legendItem + .ds-sw", attrs: { id: "g-legend" }, body:
+      '<div class="ds-legend">' +
+        D.legendItem({ swatch: "var(--ds-series-price)", label: "Lab Index (wallet $)" }) +
+        D.legendItem({ swatch: "var(--ds-series-sma7)", label: "Cash-adjusted (real $)" }) +
+        D.legendItem({ swatch: "var(--ds-series-sma30)",
+          html: '2014→ reconstruction (<a href="../backtest.html">backtest</a>, rebased)' }) +
+      "</div>" }) +
+
+    // ── hint + warmup ──
+    D.panel({ title: "HINT + WARMUP — DS.hint / .ds-warmup", attrs: { id: "g-hints" }, body:
+      D.hint("Some items are still warming up — momentum fills in as the collector accrues data.") +
+      '<div class="g-row" style="margin-top:8px">' +
+        '<span class="ds-warmup" id="g-warmup">day 12 of 30 — trend signals warm up as history builds</span>' +
+      "</div>" }) +
+
+    // ── badges ──
+    D.panel({ title: "BADGES — DS.badge (sigMini scale + card scale)", attrs: { id: "g-badges" }, body:
+      '<div class="g-row">' +
+        D.badge({ label: "BUY", tone: "good" }) +
+        D.badge({ label: "AVOID", tone: "bad" }) +
+        D.badge({ label: "HOLD" }) +
+      "</div>" +
+      '<div class="g-row">' +
+        D.badge({ label: "ACCUMULATE", tone: "good", cls: "card", value: "+34" }) +
+        D.badge({ label: "NEUTRAL", tone: "neutral", cls: "card", value: "0" }) +
+      "</div>" }) +
+
+    // ── spec table ──
+    D.panel({ title: "SPEC TABLE — DS.specTable", attrs: { id: "g-spec" }, body:
+      D.specTable({
+        head: ["Fixing", "Definition", "Window", "Min days"],
+        rows: [
+          ["SETTLE-CASE-7D", "Mean of daily Lab Case Index", "≤7 days", "3"],
+          ["SETTLE-RATIO-30D", { html: "Mean of daily <b>cash ratio</b> (trusted-cell demo)" }, "≤30 days", "7"],
+          [XSS, "attacker string in a plain cell — renders as text", "—", "—"],
+        ] }) }) +
+
+    // ── chart box ──
+    D.panel({ title: "CHART BOX — .ds-chartbox", attrs: { id: "g-chartbox" }, body:
+      '<div class="ds-chartbox"><canvas id="g-chart" width="600" height="120"></canvas>' +
+      '<div class="ds-legend">' + D.legendItem({ swatch: "var(--ds-series-price)", label: "demo series" }) + "</div></div>" }) +
+
+    // ── escaping demo ──
+    D.panel({ title: "ESCAPED BY DEFAULT — plain fields never execute", attrs: { id: "g-esc" }, body:
+      D.tiles(D.tile({ label: XSS, value: IMG, sub: "label + value above are attacker strings, rendered as TEXT", cls: "g-esc-tile" })) +
+      D.hint({ html: 'TRUSTED slot demo (html/labelHtml/body/…): <b id="g-trusted">this bold tag is intentional</b>' }) });
+
+  // ── bindings (house style: addEventListener after innerHTML) ──
+  document.querySelectorAll("#g-toggles .ds-toggle").forEach(function (b) {
+    b.addEventListener("click", function () {
+      const on = b.getAttribute("aria-pressed") === "true";
+      b.setAttribute("aria-pressed", String(!on));
+      b.classList.toggle("on", !on);
+    });
+  });
+  document.querySelector("#g-chips .ds-chip.interactive").addEventListener("click", function () {
+    document.getElementById("g-chip-out").textContent = this.dataset.name;
+  });
+  function bindRange() {
+    document.querySelectorAll("#g-range [data-ir]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.range = b.dataset.ir;
+        document.querySelector("#g-range .ds-range").outerHTML =
+          D.rangeChips({ ranges: state.ranges, active: state.range, dataKey: "ir" });
+        bindRange();
+      });
+    });
+  }
+  bindRange();
+  let activations = 0;
+  D.keyActivate(document.getElementById("g-activate"), ".g-mrow", function (e, el) {
+    activations++;
+    document.getElementById("g-activate-count").textContent = String(activations);
+    document.getElementById("g-activate-last").textContent = el.dataset.name;
+  });
+
+  // paint the chart-box demo canvas (deterministic sine — display only)
+  const cv = document.getElementById("g-chart");
+  const ctx = cv.getContext("2d");
+  ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue("--ds-series-price").trim() ||
+    getComputedStyle(document.documentElement).getPropertyValue("--series-price").trim();
+  ctx.lineWidth = 2; ctx.lineJoin = "round"; ctx.beginPath();
+  for (let i = 0; i <= 60; i++) {
+    const x = 5 + (i / 60) * 590, y = 60 - Math.sin(i / 6) * 40;
+    if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+  }
+  ctx.stroke();
+})();
+</script>
+</body>
+</html>

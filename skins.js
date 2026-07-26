@@ -4,6 +4,7 @@
 "use strict";
 (function () {
   const A = window.SkinAnalytics;
+  const DS = window.DS;
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
@@ -209,9 +210,10 @@
     const RECON_COL = "rgba(57,135,229,.45)", PLAYERS_COL = "#9085e9";
     const hasPlayersData = (mac.players && mac.players.length) || series.some((s) => s.players != null);
     const hasBtcData = (mac.btc && mac.btc.length) || series.some((s) => s.btc != null);
+    // ovChip → DS.toggle (aria-pressed + .on move together on re-render; the
+    // ds.css `[aria-pressed="false"] .ds-sw` rule dims the off swatch).
     const ovChip = (key, label, col, avail) => !avail ? "" :
-      '<button class="ovToggle btn' + (state.overlays[key] ? " on" : "") + '" data-ov="' + key + '" aria-pressed="' + !!state.overlays[key] + '">' +
-      '<span class="sw" style="background:' + col + (state.overlays[key] ? "" : ";opacity:.35") + '"></span>' + label + "</button>";
+      DS.toggle({ label: label, swatch: col, on: !!state.overlays[key], data: { ov: key }, cls: "ovToggle" });
     const strip =
       tile2("LAB CASE INDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
         t && t.idx1 != null ? fmtPct(t.idx1) + " 24h" + (t.idx7 != null ? " · " + fmtPct(t.idx7) + " 7d" : "") : "base 100 at first collection",
@@ -229,28 +231,27 @@
         (t && t.btc != null ? " · BTC $" + fmtCompact(t.btc) : ""), "") +
       tile2("TRACKED", String(state.watch.length), state.mode === "static" && state.manifest ? "updated " + ago(state.manifest.generatedAt) : "live tracker", "");
     $("itemView").innerHTML =
-      '<div class="panel"><div class="tiles strip">' + strip + "</div>" +
+      '<div class="ds-panel panel"><div class="tiles strip">' + strip + "</div>" +
         (hasIdxChart ?
-          '<div class="idxLegend">' +
-            (reconPts.length >= 2 ? '<span><span class="sw" style="background:' + RECON_COL + '"></span>2014→ reconstruction (<a href="backtest.html">backtest</a>, rebased)</span>' : "") +
-            '<span><span class="sw" style="background:' + COL.price + '"></span>Lab Index (wallet $)</span>' +
-            '<span><span class="sw" style="background:' + COL.sma7 + '"></span>Cash-adjusted (real $)</span>' +
+          '<div class="ds-legend idxLegend">' +
+            (reconPts.length >= 2 ? DS.legendItem({ swatch: RECON_COL, html: '2014→ reconstruction (<a href="backtest.html">backtest</a>, rebased)' }) : "") +
+            DS.legendItem({ swatch: COL.price, label: "Lab Index (wallet $)" }) +
+            DS.legendItem({ swatch: COL.sma7, label: "Cash-adjusted (real $)" }) +
             ovChip("players", "CS players", PLAYERS_COL, hasPlayersData) +
             ovChip("btc", "BTC", COL.sma30, hasBtcData) +
             (reconPts.length >= 2
-              ? '<span class="idxRangeRow">' + Object.keys(IDXR).map((r) =>
-                  '<button class="btn' + (state.idxRange === r ? " on" : "") + '" data-ir="' + r + '">' + r + "</button>").join("") + "</span>"
-              : '<span class="hint">gap between the first two = wallet inflation / exit pressure</span>') +
+              ? DS.rangeChips({ ranges: Object.keys(IDXR), active: state.idxRange, dataKey: "ir", cls: "idxRangeRow" })
+              : '<span class="ds-hint hint">gap between the first two = wallet inflation / exit pressure</span>') +
           "</div>" +
           '<canvas id="idxChart" height="130" aria-label="Lab case index over time, with backtest reconstruction and comparison overlays" role="img"></canvas>' : "") +
       "</div>" +
       (gain.length || lose.length ?
-        '<div class="panel moversRow">' +
-          (gain.length ? '<span class="hint">24h gainers</span>' + gain.map(moverChip).join("") : "") +
-          (lose.length ? '<span class="hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
+        '<div class="ds-panel panel moversRow">' +
+          (gain.length ? '<span class="ds-hint hint">24h gainers</span>' + gain.map(moverChip).join("") : "") +
+          (lose.length ? '<span class="ds-hint hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
         "</div>" : "") +
       (state.market && state.market.settlement ? settlementPanel(state.market.settlement, state.market.integrity) : "") +
-      '<div class="panel"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
+      '<div class="ds-panel panel"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
         COLS.map((c) => "<th" + (c.nosort ? "" : ' class="sortable' + (state.sort.key === c.key ? " on" : "") + '" data-k="' + c.key + '"') +
           (c.num ? ' style="text-align:right"' : "") + ">" + c.label +
           (state.sort.key === c.key ? (state.sort.dir < 0 ? " ↓" : " ↑") : "") + "</th>").join("") +
@@ -265,11 +266,11 @@
         '<td class="r chg ' + cls(w.mom30) + '">' + fmtPct(w.mom30) + "</td>" +
         '<td class="r">' + fmtCompact(w.vol24h) + "</td>" +
         '<td><canvas class="spark" width="90" height="26" data-i="' + i + '"></canvas></td>' +
-        '<td class="r"><span class="sigMini ' + (w.score >= 12 ? "good" : w.score <= -12 ? "bad" : "") + '">' + esc(w.verdict || "—") + "</span></td>" +
+        '<td class="r">' + DS.badge({ label: w.verdict || "—", tone: w.score >= 12 ? "good" : w.score <= -12 ? "bad" : "", cls: "sigMini" }) + "</td>" +
         "</tr>").join("") +
       "</tbody></table></div>" +
       (state.watch.some((w) => w.days < 30)
-        ? '<div class="hint" style="margin-top:8px">Some items are still warming up (under 30 days of history) — momentum fills in as the collector accrues data.</div>' : "") +
+        ? '<div class="ds-hint hint" style="margin-top:8px">Some items are still warming up (under 30 days of history) — momentum fills in as the collector accrues data.</div>' : "") +
       "</div>";
     $("itemView").querySelectorAll("th.sortable, th[data-k]").forEach((th) => th.addEventListener("click", () => {
       const k = th.dataset.k;
@@ -318,11 +319,11 @@
       integTile = tile2("MARK INTEGRITY",
         n === 0 ? "✓ CLEAN" : "⚠ " + n + " FLAG" + (n > 1 ? "S" : ""),
         n === 0
-          ? "ratio " + esc(sm.ratioCorroborated) + " · book " + esc(sm.bookCorroborated) + " corroborated"
-          : esc((integ.flags || []).slice(0, 3).map((f) => f.severity + " " + f.lane + ": " + shortName(f.name)).join(" · ")),
+          ? "ratio " + sm.ratioCorroborated + " · book " + sm.bookCorroborated + " corroborated"
+          : (integ.flags || []).slice(0, 3).map((f) => f.severity + " " + f.lane + ": " + shortName(f.name)).join(" · "),
         n === 0 ? "up" : (sm.alert ? "dn" : ""));
     }
-    return '<div class="panel"><h2>SETTLEMENT FIXINGS · ' + esc(st.methodology) + "</h2>" +
+    return '<div class="ds-panel panel"><h2>SETTLEMENT FIXINGS · ' + esc(st.methodology) + "</h2>" +
       '<div class="tiles">' +
       ft("SETTLE-CASE-7D", "SETTLE-CASE-7D") +
       ft("SETTLE-CASE-30D", "SETTLE-CASE-30D") +
@@ -331,14 +332,16 @@
         "cheapest-attack fee-burn floor to move the 7d fixing 1%", "") : "") +
       integTile +
       "</div>" +
-      '<div class="hint">Dated settlement marks, re-derivable bit-exactly from the committed data — ' +
+      '<div class="ds-hint hint">Dated settlement marks, re-derivable bit-exactly from the committed data — ' +
       '<a href="methodology.html">methodology &amp; verification</a>. A measurement, not an offer of any instrument.</div></div>';
   }
-  const tile2 = (lb, v, sub, c) =>
-    '<div class="tile"><div class="lb">' + lb + '</div><div class="v ' + c + '">' + v + '</div>' +
-    (sub ? '<div class="sub2">' + sub + "</div>" : "") + "</div>";
-  const moverChip = (w) =>
-    '<button class="moverChip" data-name="' + esc(w.name) + '"><span class="nm">' + esc(shortName(w.name)) + '</span> <span class="chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</span></button>";
+  // tile2 → DS.tile (home strip + settlement; read by TEXT only, no .lb hook needed).
+  const tile2 = (lb, v, sub, c) => DS.tile({ label: lb, value: v, sub: sub || null, tone: c || null });
+  // moverChip → DS.chip{interactive}; keeps the .moverChip + data-name contract hooks.
+  const moverChip = (w) => DS.chip({
+    interactive: true, cls: "moverChip", attrs: { "data-name": w.name },
+    labelHtml: '<span class="nm">' + esc(shortName(w.name)) + '</span> <span class="chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</span>",
+  });
   function shortName(n) { return n.replace(/ \((Factory New|Minimal Wear|Field-Tested|Well-Worn|Battle-Scarred)\)$/, "").replace("Operation ", ""); }
 
   function drawSpark(cv, prices) {
@@ -557,10 +560,10 @@
       return tile(label, "—", "");
     };
     $("itemView").innerHTML =
-      '<div class="panel">' +
-        '<button class="btn backBtn" id="backBtn">← Market</button>' +
+      '<div class="ds-panel panel">' +
+        '<button class="ds-btn btn backBtn" id="backBtn">← Market</button>' +
         '<div class="itemTitle"><h2>' + esc(it.name) + '</h2>' +
-        '<span class="hint">' + (it.quote ? "quote " + ago(it.quote.t) : "no snapshot yet") +
+        '<span class="ds-hint hint">' + (it.quote ? "quote " + ago(it.quote.t) : "no snapshot yet") +
         " · " + an.days + " days of history" + (it.imported ? " (incl. imported)" : "") +
         (ro ? " · collector updates every 6h" : "") + "</span></div>" +
         '<div class="quoteRow">' +
@@ -579,39 +582,39 @@
           tile("OFF PEAK", an.curDD == null ? "—" : "−" + (an.curDD * 100).toFixed(1) + "%", "") +
           tile("SOLD/DAY (30D)", an.liq30 == null ? "—" : Math.round(an.liq30), "") +
         "</div>" +
-        (usedAgg ? '<div class="hint" style="margin:-6px 0 12px">* from Skinport realized-sale medians — an instant read while price history builds</div>' : "") +
-        (it.deepDays > 0 ? '<div class="hint" style="margin:-4px 0 12px">Chart &amp; analytics include ' + it.deepDays.toLocaleString("en-US") +
+        (usedAgg ? '<div class="ds-hint hint" style="margin:-6px 0 12px">* from Skinport realized-sale medians — an instant read while price history builds</div>' : "") +
+        (it.deepDays > 0 ? '<div class="ds-hint hint" style="margin:-4px 0 12px">Chart &amp; analytics include ' + it.deepDays.toLocaleString("en-US") +
           " days of backfilled Steam daily aggregates (display only — the <a href=\"methodology.html\">live index</a> starts at its adoption date and is never backfilled)</div>" : "") +
-        (an.days < 30 ? '<div class="warmup">day ' + an.days + " of 30 — trend signals warm up as history builds" +
+        (an.days < 30 ? '<div class="ds-warmup warmup">day ' + an.days + " of 30 — trend signals warm up as history builds" +
           (ro ? " (the collector records every 6 hours)" : "; Import/Bootstrap full Steam history for instant depth") + "</div>" : "") +
         '<div class="sigCard">' +
-          '<div class="sigBadge ' + sigCls + '"><span class="sc">' + (sig.score > 0 ? "+" : "") + sig.score + "</span>" + esc(sig.verdict) + "</div>" +
+          DS.badge({ label: sig.verdict, value: (sig.score > 0 ? "+" : "") + sig.score, cls: "card sigBadge " + sigCls }) +
           '<div><ul class="sigReasons">' + sig.reasons.map((r) => "<li>" + esc(r) + "</li>").join("") +
           (sig.reasons.length ? "" : "<li>Not enough history yet — snapshots accrue daily.</li>") + "</ul>" +
           '<div class="sigNote">Heuristic score in [−100, +100] built only from the inputs above — not financial advice.</div></div>' +
         "</div>" +
       "</div>" +
-      '<div class="panel">' +
-        '<div class="chartHead"><div class="legend" id="legend"></div><div class="ranges" id="ranges">' +
-          Object.keys(RANGES).map((r) => '<button class="btn' + (state.range === r ? " on" : "") + '" data-r="' + r + '">' + r + "</button>").join("") +
+      '<div class="ds-panel panel">' +
+        '<div class="chartHead"><div class="ds-legend legend" id="legend"></div><div class="ranges" id="ranges">' +
+          Object.keys(RANGES).map((r) => DS.btn({ label: r, cls: "compact btn" + (state.range === r ? " on" : ""), attrs: { "data-r": r } })).join("") +
         "</div></div>" +
         '<div class="chartWrap"><canvas id="chart" role="img" aria-label="Price history chart for ' + esc(it.name) + '"></canvas></div>' +
         dataTableHtml(it) +
       "</div>" +
-      '<div class="panel"><h2>WHERE TO SELL — NET PROCEEDS</h2><div class="cmpGrid">' +
+      '<div class="ds-panel panel"><h2>WHERE TO SELL — NET PROCEEDS</h2><div class="cmpGrid">' +
         cmpBox("STEAM MARKET", it.compare.steam, "wallet funds only") +
         cmpBox("SKINPORT (REALIZED SALES)", it.compare.skinport, "cash out",
           spSales ? "median of actual sales · " + ((sp.sales.last24h && sp.sales.last24h.volume) || 0) + " sold in 24h" : "no sales data cached yet") +
       "</div></div>" +
-      '<div class="panel"><div class="btnrow">' +
+      '<div class="ds-panel panel"><div class="btnrow">' +
         (ro
-          ? '<a class="btn primary" target="_blank" rel="noopener" href="' + ghEditWatchlistUrl() + '">✎ Edit tracked items (GitHub)</a>' +
-            '<a class="btn" target="_blank" rel="noopener" href="' + ghRunCollectorUrl() + '" title="Actions → Run workflow = snapshot now">⚡ Run collector now</a>'
-          : '<button class="btn" id="snapBtn">⟳ Snapshot now</button>' +
-            (cookieOn ? '<button class="btn" id="bootBtn" title="Pull full multi-year history from Steam using the configured cookie">⚡ Bootstrap full history</button>' : "") +
-            '<button class="btn" id="importBtn">📋 Import history (paste)</button>') +
-        '<a class="btn" target="_blank" rel="noopener" href="https://steamcommunity.com/market/listings/730/' + encodeURIComponent(it.name) + '">Steam page ↗</a>' +
-        (ro ? "" : '<button class="btn danger" id="unwatchBtn">✕ Stop tracking</button>') +
+          ? '<a class="ds-btn primary btn" target="_blank" rel="noopener" href="' + ghEditWatchlistUrl() + '">✎ Edit tracked items (GitHub)</a>' +
+            '<a class="ds-btn btn" target="_blank" rel="noopener" href="' + ghRunCollectorUrl() + '" title="Actions → Run workflow = snapshot now">⚡ Run collector now</a>'
+          : '<button class="ds-btn btn" id="snapBtn">⟳ Snapshot now</button>' +
+            (cookieOn ? '<button class="ds-btn btn" id="bootBtn" title="Pull full multi-year history from Steam using the configured cookie">⚡ Bootstrap full history</button>' : "") +
+            '<button class="ds-btn btn" id="importBtn">📋 Import history (paste)</button>') +
+        '<a class="ds-btn btn" target="_blank" rel="noopener" href="https://steamcommunity.com/market/listings/730/' + encodeURIComponent(it.name) + '">Steam page ↗</a>' +
+        (ro ? "" : '<button class="ds-btn danger btn" id="unwatchBtn">✕ Stop tracking</button>') +
       "</div></div>";
 
     $("backBtn").addEventListener("click", goHome);
@@ -630,12 +633,15 @@
     }
     drawChart();
   }
-  const tile = (lb, v, c) => '<div class="tile"><div class="lb">' + lb + '</div><div class="v ' + c + '">' + v + "</div></div>";
+  // Item-view / portfolio stat tile. DS.tile's fixed inner classes (.ds-tile-lb)
+  // can't satisfy the frozen `.tile .lb` probe selector, so the legacy inner
+  // hooks ride alongside an added `ds-tile` (guard sees a migrated component).
+  const tile = (lb, v, c) => '<div class="ds-tile tile"><div class="lb">' + lb + '</div><div class="v ' + c + '">' + v + "</div></div>";
   function cmpBox(title, c, cashNote, extra) {
     return '<div class="cmpBox"><h3>' + title + ' <span class="cash">' + cashNote + "</span></h3>" +
       '<div class="row"><span>Sale price</span><b>' + fmt$(c.gross) + "</b></div>" +
       '<div class="row"><span>You receive (after fees)</span><b>' + fmt$(c.net) + "</b></div>" +
-      (extra ? '<div class="hint" style="margin-top:4px">' + esc(extra) + "</div>" : "") + "</div>";
+      (extra ? '<div class="ds-hint hint" style="margin-top:4px">' + esc(extra) + "</div>" : "") + "</div>";
   }
   function dataTableHtml(it) {
     const d = it.daily.slice(-30).reverse();
@@ -808,10 +814,10 @@
   }
   function renderLegend(hasSp) {
     $("legend").innerHTML =
-      '<span><span class="sw" style="background:' + COL.price + '"></span>Steam price</span>' +
-      '<span><span class="sw" style="background:' + COL.sma7 + '"></span>SMA 7</span>' +
-      '<span><span class="sw" style="background:' + COL.sma30 + '"></span>SMA 30</span>' +
-      (hasSp ? '<span><span class="sw" style="background:' + COL.skinport + '"></span>Skinport sold (median)</span>' : "");
+      DS.legendItem({ swatch: COL.price, label: "Steam price" }) +
+      DS.legendItem({ swatch: COL.sma7, label: "SMA 7" }) +
+      DS.legendItem({ swatch: COL.sma30, label: "SMA 30" }) +
+      (hasSp ? DS.legendItem({ swatch: COL.skinport, label: "Skinport sold (median)" }) : "");
   }
 
   document.addEventListener("mousemove", (e) => {
@@ -849,7 +855,7 @@
     tip.style.left = Math.min(window.innerWidth - tw - 12, e.clientX + 16) + "px";
     tip.style.top = Math.max(8, e.clientY - 10) + "px";
   });
-  const tipRow = (lb, v, col) => '<div class="r"><span><span class="sw" style="background:' + col + ';display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px"></span>' + lb + "</span><b>" + v + "</b></div>";
+  const tipRow = (lb, v, col) => '<div class="r"><span><span style="background:' + col + ';display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px"></span>' + lb + "</span><b>" + v + "</b></div>";
   window.addEventListener("resize", () => drawChart());
 
   // ── portfolio ────────────────────────────────────────────────────────────
@@ -894,7 +900,7 @@
     tb.innerHTML = "<tr><th>Item</th><th>Qty</th><th>Cost</th><th>Now</th><th>P/L</th><th></th></tr>" +
       p.lots.map((l, i) => "<tr><td class='nm' title='" + esc(l.name) + "'>" + esc(l.name) + "</td>" +
         "<td>" + l.qty + "</td><td>" + fmt$(l.unitCost) + "</td><td>" + fmt$(l.latest) + "</td>" +
-        "<td class='chg " + cls(l.pl) + "'>" + fmt$(l.pl) + (l.plPct != null ? "<br><span class='hint'>" + fmtPct(l.plPct / 100) + "</span>" : "") + "</td>" +
+        "<td class='chg " + cls(l.pl) + "'>" + fmt$(l.pl) + (l.plPct != null ? "<br><span class='ds-hint hint'>" + fmtPct(l.plPct / 100) + "</span>" : "") + "</td>" +
         "<td><button class='xbtn' data-i='" + i + "' title='Remove lot' aria-label='Remove lot'>✕</button></td></tr>").join("");
     tb.querySelectorAll(".xbtn").forEach((b) => b.addEventListener("click", async () => {
       if (state.mode === "static") {
@@ -949,7 +955,7 @@
   function renderSetup() {
     $("netStatus").textContent = "tracker offline";
     $("itemView").innerHTML =
-      '<div class="panel"><h2>CONNECT YOUR TRACKER</h2>' +
+      '<div class="ds-panel panel"><h2>CONNECT YOUR TRACKER</h2>' +
       '<div class="steps" style="color:var(--text-secondary);font-size:13px">' +
       "<p>This dashboard is a static page — prices are recorded by a tiny local tracker that keeps" +
       " your history and portfolio on <b>your</b> machine (Steam/Skinport block direct browser calls).</p>" +
@@ -960,7 +966,7 @@
       " (History accrues while it runs; it also serves this same dashboard at" +
       ' <code>http://localhost:8790</code> if your browser blocks the cross-origin hop.)</li>' +
       "</ol></div>" +
-      '<div class="btnrow"><button class="btn primary" id="retryBtn">⟳ Retry connection</button>' +
+      '<div class="btnrow"><button class="ds-btn primary btn" id="retryBtn">⟳ Retry connection</button>' +
       '<input id="apiAddr" placeholder="Custom tracker address (e.g. http://192.168.1.20:8790)" ' +
       'aria-label="Custom tracker address" style="flex:1;min-width:240px;padding:7px 10px;border-radius:8px;' +
       'border:1px solid var(--line);background:var(--surface-2);color:var(--text-primary)"></div></div>';

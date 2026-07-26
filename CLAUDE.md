@@ -258,6 +258,45 @@ dashboard from the collector's committed files), or the setup panel
   (`setTransport`) — that's what makes both gates hermetic. Any new data
   source goes through it, never a bare fetch.
 
+## Design System (all DOM/UI chrome) — route ALL new UI through it
+
+The dashboard + doc pages render their chrome through ONE Design System in
+`design-system/` (tokens.css → --ds-* aliases over the skins.css :root
+palette + spacing/radius/type scales; ds.css → .ds-* component classes,
+token-only; ds.js → UMD `window.DS` HTML-string factories, analytics.js
+pattern). **Non-negotiable: all NEW UI goes through DS.* factories /
+.ds-* classes / --ds-* tokens — never hand-roll.** Enforced by
+`node tools/ds-guard.js` (no-bypass ratchet, in gates.yml; baseline
+tools/ds-guard-baseline.json, debt locked at 20 post-migration — lower is
+fine, `--update-baseline` ONLY to lock a verified gain, never to admit a
+bypass; judge by BARE exit code).
+- Factories: DS.tile/tiles/chip/toggle/btn/rangeChips/legendItem/panel/
+  hint/badge/specTable + helpers esc/cx/attrs/keyActivate. Text escaped by
+  default; TRUSTED slots are html/labelHtml/valueHtml/subHtml/body +
+  specTable {html} cells. No inline handlers — factories emit data-* hooks,
+  consumers bind addEventListener after innerHTML; DS.keyActivate binds
+  click+Enter+Space (the .mrow pattern). Docs: design-system/README.md,
+  rules: CONTRACT.md, live demo: gallery.html, gate:
+  `node tools/ds-component-test.js` (72 checks, real Chromium, port 5410).
+- PROBE CONTRACTS RIDE ALONGSIDE: legacy classes/ids asserted by
+  probe.js/client-probe.js (.mrow, .tile .lb, .ranges .btn[data-r],
+  .ovToggle, .moverChip, .sigCard, .warmup, table.mkt, a.btn, …) are kept
+  NEXT TO the .ds-* classes via the cls slot — never rename/remove them.
+  Two spots deliberately keep hand structure + ds- outer class because a
+  frozen INNER selector can't be produced by the factory: item-view stat
+  tiles (`.tile .lb`) and item-view range chips (`.ranges .btn[data-r]`).
+- DETERMINISM FIREWALL: DS is DOM-only. analytics.js / settlement.js /
+  collect.js / witness.js / backtest.js / server-side math never import or
+  depend on it; index + fixings stayed byte-identical through the
+  migration (probe 133 pins it).
+- KNOWN survivors (in baseline, legitimate): canvas stroke/fill literals
+  in skins.js + backtest.html chart scripts (canvas needs literal color
+  strings; getComputedStyle resolves the vars at runtime) and the modal
+  backdrop rgba (no scrim token yet).
+- Review: the `design-system-review` skill
+  (.claude/skills/design-system-review/SKILL.md) is the checklist for ANY
+  UI diff — guard + escaping + frozen contracts + determinism + gates.
+
 ## Gates (both in CI, run before every push)
 
 - `node probe.js` — 133 checks: analytics units (incl. SMLX-3
@@ -267,6 +306,9 @@ dashboard from the collector's committed files), or the setup panel
   import/bootstrap, portfolio P/L, restart persistence, watchlist
   seeding, the collector (manifest, import merge, dedupe, book store,
   integrity attestation).
+- `node tools/ds-guard.js` — DS no-bypass ratchet (exit 0 required).
+- `node tools/ds-component-test.js` — 72 checks, real Chromium: every DS
+  factory, escaping, aria-pressed toggles, keyboard activation.
 - `node client-probe.js` — 39 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
