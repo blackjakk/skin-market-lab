@@ -120,6 +120,39 @@ dashboard from the collector's committed files), or the setup panel
   re-derivation → ✓ VERIFIED badges. Rule changes bump the methodology id.
   This is a published MEASUREMENT — never present it as operating an
   instrument.
+- MARK INTEGRITY (INTEG-1, assessIntegrity in settlement.js — pure,
+  probe-pinned): the tamper DETECTOR over the single-venue marks. Four
+  lanes: ratio (item's daily skinport÷steam ratio vs its OWN trailing 30d
+  median, then vs the day's cross-sectional median deviation — same
+  median-relative gate as the index clamp, so market-wide ratio shifts
+  never flag; "steam-rich" = pump suspect), book (steam last-sale median
+  vs the STANDING order book — the second read path; wash trades fake
+  prints, not committed capital; flags when the quote escapes its bid/ask
+  bracket ±15%/±30%), art-evidence (<3 realized sales behind an appraisal
+  mark), staleness (<50% fresh steam quotes = venue-loss alert). Output:
+  manifest.market.integrity + the settlement record's integrity field +
+  the home MARK INTEGRITY tile + methodology §5a (#integOut). FLAG-ONLY —
+  NEVER auto-reject a mark: rejection would let an attacker manipulate the
+  THIN venue (skinport) to force honest steam marks out and surgically
+  break return pairs. Flags change no fixing computation, so INTEG does
+  NOT bump SMLX (a version bump without a computation change would
+  falsely signal a rules change to hash verifiers) — INTEG versions
+  independently. Thresholds live in INTEG_RULES, published in every
+  record. Server parity: /api/skins/market serves the lanes it has
+  (ratio+staleness; book/sales are collector-fed) — coverage strings stay
+  honest. Sampling jitter: scheduled collect.yml runs sleep 0-10min
+  (schedule-only guard, so probes/manual runs never wait) — reading
+  instants can't be pinned; CN/US windows tolerate the shift.
+- ORDER-BOOK LANE plumbing: item_nameids scraped ONCE from the public
+  listing page (Market_LoadOrderSpread regex) → data/steam-nameids.json
+  (committed, auditable); readings rotate BOOK_BUDGET=10 steam-marked
+  items/run (data/book-cursor.json) → data/book.json + manifest
+  item.book. NEVER write book lines into history jsonl — assembleSeries
+  would fold an extra src into daily price marks. Art items are excluded
+  (the ~$1,800 listing cap distorts grail asks). TRAPS (live payload):
+  highest_buy_order/lowest_sell_order are STRING CENTS ("2250"=$22.50);
+  buy/sell_order_graph rows are [price_DOLLARS, CUMULATIVE qty, label].
+  On HTTP 4xx for a cached nameid, drop it (renamed item) → re-resolve.
 - HOME-FIRST UI: boot lands on renderHome (strip + movers + ranked sortable
   table + sparklines); item detail is one click deep with a ← Market back
   button. The watchlist is ~all cases (the index basket) + a few blue-chip
@@ -133,12 +166,14 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 106 checks: analytics units (incl. SMLX-3
-  winsorization, SMLX-4 volume weights/cap, concentrated-budget
-  arithmetic), full API flow, snapshot dedupe, import/bootstrap,
-  portfolio P/L, restart persistence, watchlist seeding, the collector
-  (manifest, import merge, dedupe).
-- `node client-probe.js` — 35 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node probe.js` — 119 checks: analytics units (incl. SMLX-3
+  winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
+  clamp, concentrated/center-capture budget arithmetic, INTEG-1 lane
+  pins, order-book fetcher parsing), full API flow, snapshot dedupe,
+  import/bootstrap, portfolio P/L, restart persistence, watchlist
+  seeding, the collector (manifest, import merge, dedupe, book store,
+  integrity attestation).
+- `node client-probe.js` — 36 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback

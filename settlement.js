@@ -183,6 +183,135 @@
     };
   }
 
+  // ── mark integrity (INTEG-1) — surveillance, NOT settlement rules ────────
+  // A published tamper DETECTOR over the marks feeding the index. Three
+  // corroboration lanes + a staleness lane, every threshold published:
+  //
+  //   ratio — each item's daily (skinport realized ÷ steam) ratio vs its OWN
+  //     trailing median, then vs the day's CROSS-SECTIONAL median deviation
+  //     (the same median-relative logic as the index clamp: a market-wide
+  //     move shifts every item's ratio together and is NOT flagged; one name
+  //     whose steam price escaped its cash comparable is). "steam-rich" =
+  //     steam price high vs realized cash (pump suspect); "steam-lean" =
+  //     low (or the skinport leg was pumped — that matters too: art marks
+  //     to skinport).
+  //   book — last-sale median vs the STANDING order book (second read path;
+  //     wash trades fake prints, not committed capital): flagged when the
+  //     quote escapes its own bid/ask bracket by the published margin.
+  //   art-evidence — appraisal marks need sales: fewer than artMinSales30
+  //     realized sales in the 30d marking window is published, not hidden.
+  //   staleness — venue loss surfaces as an alert instead of the site
+  //     silently serving carried-forward prices.
+  //
+  // FLAG-ONLY BY DESIGN — flags NEVER remove a mark or reroute the index.
+  // Auto-rejection would hand an attacker a cheaper lever: manipulate the
+  // THIN venue (skinport) to force honest steam marks out of the index and
+  // surgically break return pairs. Detection is published; consumers of the
+  // fixings decide their own halt rules (methodology §4). Because flags
+  // change no fixing computation, this layer does NOT bump SMLX — bumping
+  // the id without a computation change would falsely signal a rules change
+  // to every hash verifier. INTEG versions independently.
+  const INTEG_RULES = {
+    version: "INTEG-1",
+    ratioWindow: 30, ratioMinDays: 5, ratioDevWatch: 0.25, ratioDevAlert: 0.5,
+    bookBracketWatch: 0.15, bookBracketAlert: 0.30, bookMaxAgeH: 48,
+    artMinSales30: 3, quoteFreshH: 12, staleAlertFrac: 0.5,
+  };
+  function medianOf(vals) {
+    if (!vals.length) return null;
+    const s = vals.slice().sort((a, b) => a - b);
+    const m = s.length >> 1;
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+  // items: [{ name, cat, tier, steamPrice, quoteT, salesT, sales30,
+  //           ratioDays: [{day, r}], book: {t,bid,ask,mid,...}|null }]
+  // opts: { now } — pure function of its inputs, probe-pinned.
+  function assessIntegrity(items, opts) {
+    opts = opts || {};
+    const now = opts.now != null ? opts.now : 0;
+    const R = INTEG_RULES;
+    const flags = [];
+    const r3 = (v) => Math.round(v * 1000) / 1000;
+    // ratio lane: per-item deviation from OWN baseline, then market-gated
+    const devs = [];
+    let ratioCorroborated = 0, ratioEligible = 0;
+    for (const it of items || []) {
+      if (it.tier === "art") continue;
+      ratioEligible++;
+      const rd = (it.ratioDays || []).filter((d) => d && d.r > 0).slice(-(R.ratioWindow + 1));
+      if (rd.length < R.ratioMinDays + 1) continue;
+      const base = medianOf(rd.slice(0, -1).map((d) => d.r));
+      const last = rd[rd.length - 1].r;
+      if (!(base > 0) || !(last > 0)) continue;
+      devs.push({ it: it, d: Math.log(last / base) });
+      ratioCorroborated++;
+    }
+    const xMed = medianOf(devs.map((x) => x.d)) || 0; // market-move gate
+    for (const x of devs) {
+      const e = x.d - xMed;
+      if (Math.abs(e) >= R.ratioDevWatch) {
+        flags.push({ name: x.it.name, lane: "ratio", severity: Math.abs(e) >= R.ratioDevAlert ? "alert" : "watch",
+          dev: r3(e), detail: e < 0 ? "steam-rich vs its own cash-ratio baseline" : "steam-lean vs its own cash-ratio baseline (or skinport leg moved)" });
+      }
+    }
+    // book lane: quote vs standing order book (second read path)
+    let bookCorroborated = 0, bookEligible = 0;
+    for (const it of items || []) {
+      const b = it.book;
+      if (it.tier === "art" || it.steamPrice == null) continue;
+      bookEligible++;
+      if (!b || b.bid == null || b.ask == null || (now && now - b.t > R.bookMaxAgeH * 3600000)) continue;
+      bookCorroborated++;
+      const hi = b.ask * (1 + R.bookBracketWatch), lo = b.bid * (1 - R.bookBracketWatch);
+      if (it.steamPrice > hi || it.steamPrice < lo) {
+        const over = it.steamPrice > hi;
+        const margin = over ? it.steamPrice / b.ask - 1 : 1 - it.steamPrice / b.bid;
+        flags.push({ name: it.name, lane: "book", severity: margin >= R.bookBracketAlert ? "alert" : "watch",
+          dev: r3(margin), detail: over ? "last-sale median above the standing ask wall" : "last-sale median below the standing bid wall" });
+      }
+    }
+    // art evidence lane: appraisal marks need visible sales
+    let artEvidenced = 0, artTotal = 0;
+    for (const it of items || []) {
+      if (it.tier !== "art") continue;
+      artTotal++;
+      if (it.sales30 == null) continue; // unknown ≠ thin — never fabricate
+      if (it.sales30 >= R.artMinSales30) artEvidenced++;
+      else flags.push({ name: it.name, lane: "art-evidence", severity: "watch",
+        dev: it.sales30, detail: it.sales30 + " realized sales in the 30d marking window" });
+    }
+    // staleness lane: venue loss must surface loudly
+    let steamFresh = 0, steamExpected = 0, oldestSalesAgeDays = null;
+    for (const it of items || []) {
+      if (it.tier !== "art") {
+        steamExpected++;
+        if (it.quoteT != null && now && now - it.quoteT <= R.quoteFreshH * 3600000) steamFresh++;
+      }
+      if (it.salesT != null && now) {
+        const age = Math.round((now - it.salesT) / 86400000 * 10) / 10;
+        if (oldestSalesAgeDays == null || age > oldestSalesAgeDays) oldestSalesAgeDays = age;
+      }
+    }
+    if (steamExpected && steamFresh / steamExpected < R.staleAlertFrac) {
+      flags.push({ name: "(market)", lane: "staleness", severity: "alert", dev: r3(steamFresh / steamExpected),
+        detail: "only " + steamFresh + "/" + steamExpected + " items have a fresh steam quote — possible venue loss" });
+    }
+    return {
+      version: R.version, t: now, rules: R, flags: flags,
+      summary: {
+        itemsAssessed: (items || []).length,
+        ratioCorroborated: ratioCorroborated + "/" + ratioEligible,
+        bookCorroborated: bookCorroborated + "/" + bookEligible,
+        steamFresh: steamFresh + "/" + steamExpected,
+        artEvidenced: artEvidenced + "/" + artTotal,
+        oldestSalesAgeDays: oldestSalesAgeDays,
+        watch: flags.filter((f) => f.severity === "watch").length,
+        alert: flags.filter((f) => f.severity === "alert").length,
+      },
+    };
+  }
+
   return { METHODOLOGY: METHODOLOGY, FIXINGS: FIXINGS, computeFixing: computeFixing,
-    computeAll: computeAll, canonical: canonical, manipulationBudget: manipulationBudget };
+    computeAll: computeAll, canonical: canonical, manipulationBudget: manipulationBudget,
+    INTEG_RULES: INTEG_RULES, assessIntegrity: assessIntegrity };
 });

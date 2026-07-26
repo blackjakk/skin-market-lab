@@ -115,6 +115,18 @@ verification — is on the site at
 [methodology.html](https://blackjakk.github.io/skin-market-lab/methodology.html).
 A measurement, not an offer of any instrument.
 
+**Mark integrity (INTEG-1)** — because every mark is single-venue at its
+source, each collector run also publishes a tamper report: every Steam
+price is corroborated against the item's own realized-cash ratio history
+*and* against Steam's standing order book (a second read path wash trades
+can't cheaply fake), art marks publish their sale-count evidence, and
+venue loss raises a loud staleness alert. Divergences are **flagged, never
+auto-rejected** (auto-rejection would let an attacker knock honest marks
+out of the index by manipulating the thinner corroborating venue).
+Scheduled collector runs add random sampling jitter so reading instants
+can't be pinned. The home page shows the current state as a MARK INTEGRITY
+tile; the full flag table is on the methodology page.
+
 ## What the analytics mean
 
 All computed in `analytics.js` (shared verbatim by server and
@@ -139,6 +151,7 @@ browser; unit-pinned by the probe):
 |---|---|---|
 | Steam `priceoverview` | live median/lowest + 24h volume | none |
 | Steam `pricehistory` | full multi-year daily history | login cookie (or paste) |
+| Steam `itemordershistogram` | standing order book (bid/ask/depth — the INTEG-1 second read path) | none |
 | Skinport `/v1/items` | full item dump → search + ask prices | none (brotli) |
 | Skinport `/v1/sales/history` | realized-sale medians 24h/7d/30d/90d | none (brotli) |
 
@@ -147,7 +160,7 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 106 checks, hermetic (fixture transport):
+- `npm run probe` — 119 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
 - `npm run probe:ui` — 35 real-Chromium checks across live AND static modes:

@@ -175,6 +175,41 @@
   below.</p>
   <div id="budgetOut"><p class="muted">Loading live budget from data/settlement.json…</p></div>
 
+  <h2>5a · Mark integrity (INTEG-1) — the tamper detector</h2>
+  <p>The fixings above prove the <i>computation</i>; this layer surveils the <i>inputs</i>. Every mark
+  feeding the index is single-venue at its source, so INTEG-1 corroborates each one against
+  independent evidence and publishes divergence flags with every collector run. Lanes:</p>
+  <table class="spec">
+    <tr><th>Lane</th><th>Corroborates</th><th>Flags when</th></tr>
+    <tr><td><b>ratio</b></td><td>Steam price vs the item's own realized-cash comparable (its daily
+      Skinport÷Steam ratio vs its trailing 30-day median)</td><td>the deviation, measured relative to
+      the day's <b>cross-sectional median deviation</b> (same median-relative logic as the index
+      clamp — a market-wide move shifts every ratio together and is never flagged), exceeds ±0.25 log
+      (watch) / ±0.5 (alert). “steam-rich” = pump suspect on Steam; “steam-lean” = Steam low, or the
+      Skinport leg moved — which matters too, since art marks to Skinport.</td></tr>
+    <tr><td><b>book</b></td><td>Steam's last-sale median vs Steam's <b>standing order book</b> (a
+      second, structurally different read path: wash trades can fake prints, but the book is committed
+      capital that can get filled)</td><td>the quote escapes its own bid/ask bracket by &gt;15%
+      (watch) / &gt;30% (alert). Book readings rotate ~10 items/run
+      (<code>data/book.json</code>; item_nameids cached in
+      <code>data/steam-nameids.json</code>).</td></tr>
+    <tr><td><b>art-evidence</b></td><td>the sale count behind each appraisal mark</td><td>fewer than 3
+      realized sales in the 30-day marking window — thin evidence is published, not hidden.</td></tr>
+    <tr><td><b>staleness</b></td><td>data-source liveness</td><td>fewer than half the steam-marked
+      items have a fresh quote — venue loss surfaces as an alert instead of the site silently serving
+      carried-forward prices.</td></tr>
+  </table>
+  <p><b>Flag-only, by design.</b> Flags never remove a mark or reroute the index. Automatic rejection
+  would hand an attacker a <i>cheaper</i> lever: manipulate the thin corroborating venue (Skinport) to
+  force honest Steam marks out of the index and surgically break return pairs. Detection is published;
+  consumers of the fixings define their own halt rules (§4). And because flags change no fixing
+  computation, this layer does <b>not</b> bump the SMLX version — bumping the id without a computation
+  change would falsely signal a rules change to every hash verifier. The integrity layer versions
+  independently (INTEG-1), and its thresholds are published in every integrity record. Sampling is
+  also jittered: scheduled collector runs add 0–10 min of random delay on top of GitHub's own
+  scheduling noise, so the reading instants are not predictable enough to pin a fake price against.</p>
+  <div id="integOut"><p class="muted">Loading live integrity state…</p></div>
+
   <h2>6 · Verification — check the operator</h2>
   <p>Every fixing publishes a SHA-256 hash over its canonical form
   (<code>{methodology, name, window, days, values, value}</code>). The button below re-derives the
@@ -277,13 +312,30 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
     });
   }
 
+  function integHtml(g) {
+    if (!g) return "<p class='muted'>No integrity record published yet (older collector run).</p>";
+    var sm = g.summary || {};
+    var head = "<p><b>" + esc(g.version) + "</b> · " + esc(sm.itemsAssessed) + " items · ratio " +
+      esc(sm.ratioCorroborated) + " · book " + esc(sm.bookCorroborated) + " · steam fresh " +
+      esc(sm.steamFresh) + " · art evidenced " + esc(sm.artEvidenced) + "</p>";
+    var fl = g.flags || [];
+    if (!fl.length) return head + "<p><span class='ok'>✓ NO FLAGS</span> — every corroborated mark agreed with its independent evidence this run.</p>";
+    return head + "<table class='spec'><tr><th>Severity</th><th>Lane</th><th>Item</th><th>Detail</th></tr>" +
+      fl.map(function (f) {
+        return "<tr><td>" + (f.severity === "alert" ? "<span class='bad'>ALERT</span>" : "watch") + "</td><td>" +
+          esc(f.lane) + "</td><td>" + esc(f.name) + "</td><td>" + esc(f.detail) + (f.dev != null ? " (" + esc(f.dev) + ")" : "") + "</td></tr>";
+      }).join("") + "</table>";
+  }
+
   var settlement = null;
   fetch("data/settlement.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
     settlement = j;
     document.getElementById("budgetOut").innerHTML = budgetHtml(j.latest && j.latest.budget);
     document.getElementById("budgetStamp").textContent = j.latest ? "· as of " + j.latest.day : "";
+    document.getElementById("integOut").innerHTML = integHtml(j.latest && j.latest.integrity);
   }).catch(function () {
     document.getElementById("budgetOut").innerHTML = "<p class='muted'>data/settlement.json not published yet (first collector run pending).</p>";
+    document.getElementById("integOut").innerHTML = "<p class='muted'>No integrity record yet.</p>";
   });
 
   fetch("data/settlements.jsonl", { cache: "no-store" }).then(function (r) { return r.text(); }).then(function (txt) {

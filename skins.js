@@ -185,7 +185,7 @@
           (gain.length ? '<span class="hint">24h gainers</span>' + gain.map(moverChip).join("") : "") +
           (lose.length ? '<span class="hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
         "</div>" : "") +
-      (state.market && state.market.settlement ? settlementPanel(state.market.settlement) : "") +
+      (state.market && state.market.settlement ? settlementPanel(state.market.settlement, state.market.integrity) : "") +
       '<div class="panel"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
         COLS.map((c) => "<th" + (c.nosort ? "" : ' class="sortable' + (state.sort.key === c.key ? " on" : "") + '" data-k="' + c.key + '"') +
           (c.num ? ' style="text-align:right"' : "") + ">" + c.label +
@@ -232,7 +232,7 @@
       drawIdxChart($("idxChart"), lines);
     }
   }
-  function settlementPanel(st) {
+  function settlementPanel(st, integ) {
     const fx = st.fixings || {};
     const ft = (name, label) => {
       const f = fx[name];
@@ -241,6 +241,16 @@
         f.value != null ? "hash " + (f.hash || "").slice(0, 12) + "…" : "accruing — " + (f.accruing || ""), "");
     };
     const b = st.budget && st.budget.caseIndex;
+    let integTile = "";
+    if (integ && integ.summary) {
+      const sm = integ.summary, n = (sm.watch || 0) + (sm.alert || 0);
+      integTile = tile2("MARK INTEGRITY",
+        n === 0 ? "✓ CLEAN" : "⚠ " + n + " FLAG" + (n > 1 ? "S" : ""),
+        n === 0
+          ? "ratio " + esc(sm.ratioCorroborated) + " · book " + esc(sm.bookCorroborated) + " corroborated"
+          : esc((integ.flags || []).slice(0, 3).map((f) => f.severity + " " + f.lane + ": " + shortName(f.name)).join(" · ")),
+        n === 0 ? "up" : (sm.alert ? "dn" : ""));
+    }
     return '<div class="panel"><h2>SETTLEMENT FIXINGS · ' + esc(st.methodology) + "</h2>" +
       '<div class="tiles">' +
       ft("SETTLE-CASE-7D", "SETTLE-CASE-7D") +
@@ -248,6 +258,7 @@
       ft("SETTLE-RATIO-30D", "SETTLE-RATIO-30D") +
       (b ? tile2("MANIP BUDGET (7D FIX)", "$" + fmtCompact(b.concentrated ? b.concentrated.costMove1pctFix7d : b.costMove1pctFix7d),
         "cheapest-attack fee-burn floor to move the 7d fixing 1%", "") : "") +
+      integTile +
       "</div>" +
       '<div class="hint">Dated settlement marks, re-derivable bit-exactly from the committed data — ' +
       '<a href="methodology.html">methodology &amp; verification</a>. A measurement, not an offer of any instrument.</div></div>';

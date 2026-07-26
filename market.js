@@ -84,6 +84,60 @@ async function steamPriceOverview(name, A) {
   };
 }
 
+// ── Steam order book (the SECOND read path — INTEG-1 corroboration) ────────
+// Wash trades can fake the last-sale median (priceoverview), but the STANDING
+// order book is committed capital: faking it means posting real buy/sell
+// orders that can get filled. Reading both paths forces a manipulator to move
+// them consistently. The histogram endpoint needs Steam's internal item_nameid
+// (NOT the market_hash_name) — scraped once from the public listing page and
+// cached forever (data/steam-nameids.json).
+//
+// TRAPS (learned from the live payload shape — keep these):
+//   highest_buy_order / lowest_sell_order are STRING CENTS ("5342" = $53.42);
+//   buy_order_graph / sell_order_graph rows are [price_DOLLARS, CUMULATIVE
+//   qty, label] — dollars, not cents, and cumulative, not per-level.
+async function steamItemNameId(name) {
+  const url = "https://steamcommunity.com/market/listings/" + APP_ID + "/" + enc(name);
+  const res = await polite(url);
+  if (res.status !== 200) throw new Error("steam listing page HTTP " + res.status);
+  const m = /Market_LoadOrderSpread\(\s*(\d+)\s*\)/.exec(res.body) || /item_nameid=(\d+)/.exec(res.body);
+  return m ? Number(m[1]) : null;
+}
+
+// → { t, bid, ask, mid, spreadPct, bidQty5, askQty5, bidUsd5, askUsd5 } | null
+// Depth = cumulative units within ±5% of mid; usd ≈ qty × mid (approximation,
+// published as surveillance evidence — never a settlement input).
+async function steamOrderBook(nameId) {
+  const url = "https://steamcommunity.com/market/itemordershistogram?country=US&language=english" +
+    "&currency=1&item_nameid=" + nameId + "&two_factor=0";
+  const res = await polite(url);
+  if (res.status !== 200) throw new Error("steam histogram HTTP " + res.status);
+  const j = JSON.parse(res.body);
+  if (!j || j.success !== 1) return null;
+  const cents = (v) => { const n = parseInt(v, 10); return isFinite(n) && n > 0 ? n / 100 : null; };
+  const bid = cents(j.highest_buy_order), ask = cents(j.lowest_sell_order);
+  if (bid == null && ask == null) return null;
+  const mid = bid != null && ask != null ? (bid + ask) / 2 : (bid != null ? bid : ask);
+  const depth = (graph, side) => {
+    if (!Array.isArray(graph)) return null;
+    let q = null;
+    for (const row of graph) {
+      if (!Array.isArray(row) || !isFinite(row[0]) || !isFinite(row[1])) continue;
+      const inRange = side === "buy" ? row[0] >= mid * 0.95 : row[0] <= mid * 1.05;
+      if (inRange) q = Math.max(q || 0, row[1]); // cumulative → deepest in-range row wins
+    }
+    return q;
+  };
+  const bidQty5 = depth(j.buy_order_graph, "buy"), askQty5 = depth(j.sell_order_graph, "sell");
+  return {
+    t: Date.now(), bid: bid, ask: ask, mid: Math.round(mid * 100) / 100,
+    spreadPct: bid != null && ask != null && mid > 0 ? Math.round(((ask - bid) / mid) * 1000) / 10 : null,
+    bidQty5: bidQty5, askQty5: askQty5,
+    bidUsd5: bidQty5 != null ? Math.round(bidQty5 * mid) : null,
+    askUsd5: askQty5 != null ? Math.round(askQty5 * mid) : null,
+  };
+}
+
 // "Dec 06 2013 01: +0" → ms epoch (UTC)
 const MONTHS = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
 function parseSteamDate(s) {
@@ -185,5 +239,6 @@ async function steamPlayers() {
 module.exports = {
   APP_ID, setTransport, httpGet,
   steamPriceOverview, steamPriceHistory, parseSteamDate, normalizeHistoryRows,
+  steamItemNameId, steamOrderBook,
   skinportItems, skinportSalesHistory, steamPlayers, cryptoPrices,
 };

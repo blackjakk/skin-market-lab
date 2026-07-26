@@ -246,6 +246,20 @@ function startServer(opts) {
         artDaily: tier ? artDailyFor(name) : [] };
     });
     const mkt = A.marketOverview(items);
+    // INTEG-1 parity (assessIntegrity — one function, all surfaces): the live
+    // tracker feeds the lanes it has — ratio + staleness; the book and sales-
+    // evidence lanes are collector-fed, so coverage strings honestly read 0/n
+    mkt.integrity = S.assessIntegrity(items.map((it) => {
+      const spBy = new Map(it.skinportDaily.map((d) => [d.day, d.price]));
+      const last = latestSteam(it.name);
+      return {
+        name: it.name, cat: it.cat, tier: it.tier,
+        steamPrice: last ? last.price : null, quoteT: last ? last.t : null,
+        salesT: null, sales30: null, book: null,
+        ratioDays: it.daily.filter((d) => d.price > 0 && spBy.get(d.day) > 0)
+          .map((d) => ({ day: d.day, r: spBy.get(d.day) / d.price })),
+      };
+    }), { now: Date.now() });
     const pf = path.join(DATA, "cache", "macro.json");
     let rec = readJson(pf, null);
     if (!rec || Date.now() - rec.t > 30 * 60 * 1000) {

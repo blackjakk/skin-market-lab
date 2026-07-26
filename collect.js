@@ -72,6 +72,24 @@ async function collect(opts) {
   const fetchSet = new Set(Array.from({ length: Math.min(SALES_BUDGET, names.length) },
     (_, k) => names[(cursor + k) % names.length]));
 
+  // Order-book lane (INTEG-1 second read path): a rotating window of steam-
+  // marked items gets a fresh book reading per run. item_nameids are scraped
+  // once from the public listing page and cached forever in
+  // data/steam-nameids.json (committed = a transparent, auditable id map).
+  // Book readings live in data/book.json — NEVER in the history jsonl, where
+  // an extra src line would pollute assembleSeries' daily marks.
+  const BOOK_BUDGET = 10;
+  const nameidFile = path.join(dataDir, "steam-nameids.json");
+  const nameids = readJson(nameidFile, {});
+  const bookFile = path.join(dataDir, "book.json");
+  const bookStore = readJson(bookFile, {});
+  const bookCursorFile = path.join(dataDir, "book-cursor.json");
+  const steamNames = names.filter((n) => !artSet.has(n)); // grail asks are cap-distorted — book lane is for steam-marked families
+  const bCursor = readJson(bookCursorFile, { i: 0 }).i % Math.max(1, steamNames.length || 1);
+  const bookSet = new Set(Array.from({ length: Math.min(BOOK_BUDGET, steamNames.length) },
+    (_, k) => steamNames[(bCursor + k) % steamNames.length]));
+  const integItems = [];
+
   for (const name of names) {
     const s = slug(name);
     const hf = path.join(dataDir, "history", s + ".jsonl");
@@ -107,6 +125,19 @@ async function collect(opts) {
         }
       } catch (e) { console.log("[collect] skinport " + name + ": " + e.message); }
     }
+    if (bookSet.has(name)) {
+      try {
+        let nid = nameids[s];
+        if (nid == null) { nid = await M.steamItemNameId(name); if (nid != null) nameids[s] = nid; }
+        if (nid != null) {
+          const book = await M.steamOrderBook(nid);
+          if (book) bookStore[s] = book;
+        }
+      } catch (e) {
+        console.log("[collect] book " + name + ": " + e.message);
+        if (/HTTP 4/.test(String(e.message))) delete nameids[s]; // stale id (renamed?) → re-resolve next turn
+      }
+    }
     const sales = salesStore[s] ? salesStore[s].data : null;
     // art grails (and anything above the ~$1,800 steam listing cap) have NO
     // steam quote by nature — only flag items with no data from EITHER side
@@ -125,6 +156,19 @@ async function collect(opts) {
       .map((l) => ({ t: l.t, price: l.sp30 })), { volMode: "max" }) : [];
     const m30latest = (sales && sales.last30d && sales.last30d.median) || null;
     marketItems.push({ name, cat, tier, daily: series.daily, skinportDaily: series.skinportDaily, artDaily });
+    // per-item daily (skinport realized ÷ steam) ratios feed the INTEG-1
+    // ratio lane — each item corroborated against its OWN baseline
+    const spByDay = new Map(series.skinportDaily.map((d) => [d.day, d.price]));
+    const ratioDays = series.daily
+      .filter((d) => d.price > 0 && spByDay.get(d.day) > 0)
+      .map((d) => ({ day: d.day, r: spByDay.get(d.day) / d.price }));
+    integItems.push({
+      name, cat, tier,
+      steamPrice: quote ? quote.price : null, quoteT: quote ? quote.t : null,
+      salesT: salesStore[s] ? salesStore[s].t : null,
+      sales30: sales && sales.last30d ? sales.last30d.volume : null,
+      ratioDays, book: bookStore[s] || null,
+    });
     manifest.items.push({
       name, slug: s, cat, tier,
       quote, skinport: sales, imported: !!imported,
@@ -133,8 +177,12 @@ async function collect(opts) {
       vol24h: quote ? quote.vol : null,
       spark: series.daily.slice(-14).map((d) => d.price),
       verdict: an.signal.verdict, score: an.signal.score,
+      book: bookStore[s] || null,
     });
   }
+  writeJson(nameidFile, nameids);
+  writeJson(bookFile, bookStore);
+  if (steamNames.length) writeJson(bookCursorFile, { i: (bCursor + Math.min(BOOK_BUDGET, steamNames.length)) % steamNames.length });
 
   // market overview: the Lab Case Index + cash ratio + total volume, plus
   // per-run macro readings (CS2 players, BTC/ETH — the correlation
@@ -148,6 +196,13 @@ async function collect(opts) {
     const w = wCase[it.name] != null ? wCase[it.name] : wLiq[it.name];
     if (w != null) it.weight = w;
   }
+  // INTEG-1 mark integrity: cross-venue ratio + order-book + art-evidence +
+  // staleness surveillance. FLAG-ONLY — never removes a mark (see the
+  // assessIntegrity comment for why auto-rejection would be a new attack lever)
+  manifest.market.integrity = S.assessIntegrity(integItems, { now: Date.now() });
+  if (manifest.market.integrity.flags.length)
+    console.log("[collect] INTEGRITY FLAGS: " + manifest.market.integrity.flags
+      .map((f) => f.severity + " " + f.lane + " " + f.name).join("; "));
   const macroFile = path.join(dataDir, "market.jsonl");
   const reading = { t: Date.now() };
   try { const p = await M.steamPlayers(); if (p != null) reading.players = p; }
@@ -198,7 +253,10 @@ async function collect(opts) {
   // hashed — the auditable, re-derivable marks a dated instrument would
   // settle against. Appended every run; readers take last-per-day.
   const detail = S.computeAll(manifest.market.series);
-  const fix = { t: Date.now(), day: A.dayKey(Date.now()), methodology: S.METHODOLOGY, fixings: {}, budget: S.manipulationBudget(manifest.items) };
+  const integ = manifest.market.integrity;
+  const fix = { t: Date.now(), day: A.dayKey(Date.now()), methodology: S.METHODOLOGY, fixings: {},
+    budget: S.manipulationBudget(manifest.items),
+    integrity: integ ? { version: integ.version, summary: integ.summary, flags: integ.flags } : null };
   for (const name of Object.keys(detail)) {
     const f = detail[name];
     fix.fixings[name] = { value: f.value, accruing: f.accruing || null,

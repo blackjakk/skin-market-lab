@@ -267,6 +267,55 @@ ok(wbud.caseIndex.centerCapture && wbud.caseIndex.centerCapture.weighted === tru
   && wbud.caseIndex.centerCapture.kMin === 9 && wbud.caseIndex.centerCapture.costPerDay === 25650,
   "SMLX-5 center-capture budget: seizing >50% of index weight (9 heaviest names, $25,650/day) is the price of UNBOUNDED control");
 
+// ── INTEG-1 mark integrity: the tamper detector (flag-only) ────────────────
+const NOWI = Date.UTC(2026, 6, 20, 12);
+const rdFlat = (last) => Array.from({ length: 11 }, (_, i) => ({ day: "d" + i, r: i === 10 ? last : 0.8 }));
+const integBase = (name, last) => ({ name: name, cat: "case", tier: null, steamPrice: 10, quoteT: NOWI,
+  salesT: NOWI - 86400000, sales30: 20, ratioDays: rdFlat(last), book: null });
+// one item's steam price pumped → its cash ratio craters vs its OWN baseline
+// while the cohort holds → steam-rich alert (median-relative, so only the
+// outlier flags)
+const gPump = S.assessIntegrity([
+  integBase("P Case", 0.45), integBase("H1 Case", 0.8), integBase("H2 Case", 0.8),
+  integBase("H3 Case", 0.8), integBase("H4 Case", 0.8),
+], { now: NOWI });
+ok(gPump.flags.length === 1 && gPump.flags[0].name === "P Case" && gPump.flags[0].lane === "ratio"
+  && gPump.flags[0].severity === "alert" && /steam-rich/.test(gPump.flags[0].detail),
+  "INTEG-1 ratio lane: a pumped steam price craters its own cash ratio → steam-rich ALERT (cohort clean)");
+// market-wide ratio shift (steam-wallet premium moves) → NOT manipulation →
+// zero flags (the cross-sectional gate absorbs it, like the index clamp)
+const gWide = S.assessIntegrity(
+  ["A", "B", "C", "D"].map((n) => integBase(n + " Case", 0.6)), { now: NOWI });
+ok(gWide.flags.length === 0 && gWide.summary.ratioCorroborated === "4/4",
+  "INTEG-1 ratio lane: a market-wide ratio shift flags NOTHING (median-relative gate)");
+// book lane: last-sale median escaping the standing bid/ask bracket
+const bookOk = { t: NOWI, bid: 9.5, ask: 10.4, mid: 9.95 };
+const gBook = S.assessIntegrity([
+  Object.assign(integBase("B1 Case", 0.8), { steamPrice: 15, book: { t: NOWI, bid: 9.5, ask: 10.4, mid: 9.95 } }),
+  Object.assign(integBase("B2 Case", 0.8), { steamPrice: 10, book: bookOk }),
+], { now: NOWI });
+const bookFlags = gBook.flags.filter((f) => f.lane === "book");
+ok(bookFlags.length === 1 && bookFlags[0].name === "B1 Case" && bookFlags[0].severity === "alert"
+  && /above the standing ask/.test(bookFlags[0].detail) && gBook.summary.bookCorroborated === "2/2",
+  "INTEG-1 book lane: quote 44% above the standing ask wall → ALERT; in-bracket quote clean");
+// art-evidence lane: thin appraisal evidence is published, unknown is not fabricated
+const gArt = S.assessIntegrity([
+  { name: "Grail A", tier: "art", sales30: 1, ratioDays: [], book: null },
+  { name: "Grail B", tier: "art", sales30: 8, ratioDays: [], book: null },
+  { name: "Grail C", tier: "art", sales30: null, ratioDays: [], book: null },
+], { now: NOWI });
+ok(gArt.flags.length === 1 && gArt.flags[0].lane === "art-evidence" && gArt.flags[0].name === "Grail A"
+  && gArt.summary.artEvidenced === "1/3",
+  "INTEG-1 art lane: 1 sale in the 30d marking window flagged; unknown evidence never fabricated");
+// staleness lane: majority-stale steam quotes = possible venue loss → alert
+const gStale = S.assessIntegrity([
+  Object.assign(integBase("S1 Case", 0.8), { quoteT: NOWI - 3 * 86400000 }),
+  Object.assign(integBase("S2 Case", 0.8), { quoteT: NOWI - 3 * 86400000 }),
+  integBase("S3 Case", 0.8),
+], { now: NOWI });
+ok(gStale.flags.some((f) => f.lane === "staleness" && f.severity === "alert"),
+  "INTEG-1 staleness lane: 2/3 quotes stale → venue-loss ALERT surfaces loudly");
+
 const up = A.signal({ mom7: 0.05, mom30: 0.25, slope30: 0.008, rsi14: 60, curDD: 0.1, vol30: 0.4, liq30: 50 });
 ok(up.score > 12 && /BUY/.test(up.verdict), "signal: sustained uptrend → BUY (" + up.score + ")");
 const crash = A.signal({ mom7: -0.1, mom30: -0.3, slope30: -0.01, rsi14: 40, curDD: 0.35, vol30: 0.4, liq30: 50 });
@@ -295,6 +344,12 @@ async function fixtureTransport(url, headers) {
     const prices = Array.from({ length: 40 }, (_, i) => [steamDateStr(now - (40 - i) * D), 4 + i * 0.1, "" + (50 + i)]);
     return { status: 200, body: JSON.stringify({ success: true, price_prefix: "$", prices }) };
   }
+  if (url.includes("/market/listings/")) // public listing page (nameid scrape)
+    return { status: 200, body: "<div>Market_LoadOrderSpread( 176321160 );</div>" };
+  if (url.includes("/market/itemordershistogram")) // TRAPS: bid/ask = STRING CENTS, graphs = dollars+cumulative
+    return { status: 200, body: JSON.stringify({ success: 1, highest_buy_order: "2250", lowest_sell_order: "2350",
+      buy_order_graph: [[22.5, 5, ""], [22.0, 20, ""], [20.0, 60, ""]],
+      sell_order_graph: [[23.5, 4, ""], [24.0, 15, ""], [30.0, 90, ""]] }) };
   if (url.includes("api.steampowered.com/ISteamUserStats")) {
     return { status: 200, body: JSON.stringify({ response: { player_count: 1534000, result: 1 } }) };
   }
@@ -326,6 +381,14 @@ async function fixtureTransport(url, headers) {
   ok(zeroed.last30d.median === null && zeroed.last24h.volume === 0,
     "skinport zero-medians (never sold) map to null — a $0 price is never a mark");
   M.setTransport(fixtureTransport);
+  // order-book fetchers (INTEG-1 second read path) against the fixture
+  const nid = await M.steamItemNameId("Fracture Case");
+  ok(nid === 176321160, "steamItemNameId scrapes the internal id from the public listing page");
+  const book = await M.steamOrderBook(nid);
+  ok(book.bid === 22.5 && book.ask === 23.5 && book.mid === 23 && book.spreadPct === 4.3,
+    "steamOrderBook: cents-string bid/ask parsed (2250 → $22.50), mid + spread derived");
+  ok(book.bidQty5 === 20 && book.askQty5 === 15 && book.bidUsd5 === 460 && book.askUsd5 === 345,
+    "steamOrderBook: ±5%-of-mid depth from the cumulative dollar graphs");
   const DATA = path.join(os.tmpdir(), "hh-skin-probe-" + Date.now());
   // pre-write an EMPTY watchlist so the first-boot auto-seed (from the
   // repo's committed watchlist.json) doesn't inject items under this test;
@@ -449,6 +512,8 @@ async function fixtureTransport(url, headers) {
     && mkt.body.settlement.fixings["SETTLE-CASE-7D"]
     && /^[0-9a-f]{64}$/.test(mkt.body.settlement.fixings["SETTLE-CASE-7D"].hash),
     "live market serves SMLX-5 fixings with 64-hex canonical hashes");
+  ok(mkt.body.integrity && mkt.body.integrity.version === "INTEG-1" && mkt.body.integrity.summary,
+    "live market serves the INTEG-1 block (assessIntegrity — one function, all surfaces)");
   ok(near(mkt.body.today.cashRatio, 0.87, 0.001) && mkt.body.today.players === 1534000,
     "live market: cash ratio + live player count");
   ok(mkt.body.today.btc === 60000 && mkt.body.today.eth === 1800,
@@ -534,6 +599,19 @@ async function fixtureTransport(url, headers) {
   const frW = c1.manifest.items.find((i) => /Fracture/.test(i.name));
   ok(frW && frW.weight === 1 && cCon.weighted === true,
     "manifest items carry the published index weight; the budget prices on it (single case → weight 1)");
+  // INTEG-1 through the collector: nameid cache, book store, clean attestation
+  const nids = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "steam-nameids.json"), "utf8"));
+  ok(nids[slug("Fracture Case")] === 176321160,
+    "collector caches scraped item_nameids (data/steam-nameids.json — committed, auditable)");
+  const bookPub = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "book.json"), "utf8"));
+  ok(bookPub[slug("Fracture Case")] && bookPub[slug("Fracture Case")].mid === 23 && frW.book && frW.book.mid === 23,
+    "collector publishes order-book readings (data/book.json + manifest item.book)");
+  const cInteg = c1.manifest.market.integrity;
+  ok(cInteg && cInteg.version === "INTEG-1" && cInteg.flags.length === 0
+    && cInteg.summary.bookCorroborated === "3/3" && cInteg.summary.artEvidenced === "1/1",
+    "collector publishes INTEG-1: fixture marks corroborate clean (book 3/3, art evidenced, 0 flags)");
+  ok(setPub.latest.integrity && setPub.latest.integrity.version === "INTEG-1",
+    "settlement record carries the integrity attestation alongside the fixings");
   const c2 = await collect({ root: CROOT });
   const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
   ok(hl2.length === hl1.length && c2.manifest.items.length === 4, "immediate re-run dedupes snapshots, still refreshes the manifest");

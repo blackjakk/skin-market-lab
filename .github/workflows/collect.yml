@@ -26,6 +26,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Sampling jitter (INTEG-1): the cron instants are public, and a fixed
+      # sampling instant is gameable — a manipulator only has to hold a fake
+      # price AT the reading moments, not all day. 0-10 min of random delay
+      # (on top of GitHub's own 0-15 min scheduling noise) makes the actual
+      # reading time unpredictable. Manual runs skip the wait; the CN/US
+      # gauge windows (10-15 / 22-03 UTC) tolerate the shift from :17.
+      - name: Sampling jitter
+        if: github.event_name == 'schedule'
+        run: sleep $((RANDOM % 600))
       - name: Snapshot watchlist
         run: node collect.js
       - name: Commit data
