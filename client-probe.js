@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// client-probe.js — Skin Market Lab dashboard, end-to-end in a real
+// client-probe.js — Skindex dashboard, end-to-end in a real
 // browser. Hermetic: the tracker server runs IN-PROCESS with a fixture
 // transport (no internet), pre-seeded with 120 days of history; Chromium
 // then drives the actual UI: watchlist → item view → stat tiles → canvas
@@ -73,7 +73,7 @@ M.setTransport(async (url) => {
   ok(true, "dashboard boots on the market home; ranked table renders");
   ok((await page.textContent('.mrow:has-text("Redline")')).includes("$43.25"), "table row shows the live snapshot price");
   const stripTxt = await page.textContent("#itemView");
-  ok(/LAB CASE INDEX/.test(stripTxt) && /CS2 PLAYERS/.test(stripTxt) && /CASH RATIO/.test(stripTxt),
+  ok(/SKINDEX/.test(stripTxt) && /CS2 PLAYERS/.test(stripTxt) && /CASH RATIO/.test(stripTxt),
     "market strip present (index / cash ratio / players)");
   ok(/VS BITCOIN/.test(stripTxt), "BTC correlation tile present (measuring until 10 paired days)");
   ok(/CN \/ US ACTIVITY/.test(stripTxt), "CN/US activity tile present (regional demand mix)");
@@ -209,7 +209,7 @@ M.setTransport(async (url) => {
     const rows = await pageD.$$eval(".mrow .nm", (els) => els.map((e) => e.textContent));
     ok(rows.length === 3, "static data mode boots read-only on the market home (" + rows.length + " rows)");
     ok(/read-only/.test(await pageD.textContent("#netStatus")), "netStatus says read-only + data via GitHub");
-    ok(/LAB CASE INDEX/.test(await pageD.textContent("#itemView")), "market strip renders from the committed manifest");
+    ok(/SKINDEX/.test(await pageD.textContent("#itemView")), "market strip renders from the committed manifest");
     // the 12-year backtest reconstruction overlays the home chart (rebased,
     // dashed, with range chips) — served from the repo's committed result.json
     await pageD.waitForFunction(() => {

@@ -1,4 +1,4 @@
-# Design System CONTRACT — skin-market-lab
+# Design System CONTRACT — Skindex
 
 The rules every DS consumer and contributor follows. The component test
 (`node tools/ds-component-test.js`) is the gate; the gallery

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SMLX-6 — Skin Market Lab Index &amp; Settlement Methodology</title>
+<title>SMLX-6 — Skindex Settlement Methodology</title>
 <link rel="stylesheet" href="skins.css">
 <link rel="stylesheet" href="design-system/tokens.css">
 <link rel="stylesheet" href="design-system/ds.css">
@@ -34,10 +34,10 @@
 </style>
 </head>
 <body>
-<nav class="ds-topnav" aria-label="Site"><a href="./">← Skin Market Lab</a></nav>
+<nav class="ds-topnav" aria-label="Site"><a href="./">← Skindex</a></nav>
 <main class="doc">
   <h1>SMLX-6 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
-  <p class="muted">Skin Market Lab · methodology version SMLX-6 · any rule change bumps the version — a
+  <p class="muted">Skindex · methodology version SMLX-6 · any rule change bumps the version — a
   fixing is meaningless without its rulebook. <b>This document describes a measurement, not an offer,
   solicitation, or operation of any financial instrument.</b> Derivatives referencing game items may be
   regulated products in most jurisdictions; nothing here is legal advice.</p>
@@ -52,7 +52,7 @@
   <h2>2 · The index families</h2>
   <div class="ds-scroll-x"><table class="ds-spec-table">
     <tr><th scope="col">Index</th><th scope="col">Constituents</th><th scope="col">Mark source</th><th scope="col">Aggregation</th></tr>
-    <tr><th scope="row">Lab Case Index</th><td>All tracked cases (the commodity layer)</td>
+    <tr><th scope="row">Skindex</th><td>All tracked cases (the commodity layer)</td>
       <td>Steam Market daily median price</td><td rowspan="2">CHAINED, WINSORIZED &amp; VOLUME-WEIGHTED:
       each day's index return is the <b>volume-weighted</b> mean of constituents' daily log-returns
       (items present and included on both days), after clamping each return to within ±0.05 log (≈5%)
@@ -114,8 +114,8 @@
   (“accruing”) until the minimum day count exists — a fixing is never backfilled or edited.</p>
   <div class="ds-scroll-x"><table class="ds-spec-table">
     <tr><th scope="col">Fixing</th><th scope="col">Definition</th><th scope="col">Window</th><th scope="col">Min days</th><th scope="col">Decimals</th></tr>
-    <tr><td>SETTLE-CASE-7D</td><td>Mean of daily Lab Case Index</td><td>≤7 days</td><td>3</td><td>2</td></tr>
-    <tr><td>SETTLE-CASE-30D</td><td>Mean of daily Lab Case Index</td><td>≤30 days</td><td>10</td><td>2</td></tr>
+    <tr><td>SETTLE-CASE-7D</td><td>Mean of daily Skindex</td><td>≤7 days</td><td>3</td><td>2</td></tr>
+    <tr><td>SETTLE-CASE-30D</td><td>Mean of daily Skindex</td><td>≤30 days</td><td>10</td><td>2</td></tr>
     <tr><td>SETTLE-RATIO-30D</td><td>Mean of daily cash ratio (median third-party realized ÷ Steam price)</td>
       <td>≤30 days</td><td>7</td><td>4</td></tr>
   </table></div>

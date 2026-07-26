@@ -1,4 +1,12 @@
-# skin-market-lab — agent notes
+# Skindex (repo: skin-market-lab) — agent notes
+
+NAMING: the product is **Skindex** — wordmark, page titles, the flagship
+index's display name, and all prose. FROZEN identifiers that are NOT
+branding and must never be renamed: the `SMLX-*` methodology version
+codes, the `SETTLE-*` fixing IDs, canonical-hash inputs, data-file schema
+keys (e.g. `caseIdx`), localStorage keys, and the repo name / URLs
+(`skin-market-lab`, blackjakk.github.io/skin-market-lab) until the GitHub
+repo itself is renamed.
 
 CS skin market research tracker. Zero-dependency Node server (`server.js`,
 port 8790) + static dashboard (`index.html`), no build step. `npm start`.
@@ -32,8 +40,8 @@ dashboard from the collector's committed files), or the setup panel
   bootstrap. First boot seeds the private watchlist from watchlist.json.
 - `assembleSeries` in analytics.js is the ONE canonical raw-records→series
   assembly — server, collector, and browser static mode all call it; never
-  fork that logic per surface. Same rule for `marketOverview` (the Lab Case
-  Index / cash ratio / volume block): collector publishes it in
+  fork that logic per surface. Same rule for `marketOverview` (the
+  Skindex / cash ratio / volume block): collector publishes it in
   data/index.json, the live server serves it at /api/skins/market — one
   function, three surfaces. today{} must stay non-null for skins-only sets
   (ratio/volume/players don't depend on cases).

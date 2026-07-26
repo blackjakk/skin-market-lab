@@ -1,5 +1,5 @@
 {
-  "name": "skin-market-lab",
+  "name": "skindex",
   "version": "1.0.0",
   "description": "CS skin market research tracker — price history over time, indicators, buy/sell heuristics, cross-market fee math, portfolio P/L. Zero dependencies.",
   "license": "MIT",

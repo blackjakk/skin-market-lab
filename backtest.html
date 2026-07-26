@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Backtest — Lab Case Index reconstructed 2014–2026</title>
+<title>Backtest — Skindex reconstructed 2014–2026</title>
 <link rel="stylesheet" href="skins.css">
 <link rel="stylesheet" href="design-system/tokens.css">
 <link rel="stylesheet" href="design-system/ds.css">
@@ -30,12 +30,12 @@
 </style>
 </head>
 <body>
-<nav class="ds-topnav" aria-label="Site"><a href="./">← Skin Market Lab</a><a href="methodology.html">Methodology</a></nav>
+<nav class="ds-topnav" aria-label="Site"><a href="./">← Skindex</a><a href="methodology.html">Methodology</a></nav>
 <main class="doc">
   <h1>Backtest <span class="muted">·</span> the index, had it existed since 2014</h1>
   <p class="muted" id="stamp">Loading backtest/result.json…</p>
-  <p>This is an <b>offline validation study</b>, not the live index. It reconstructs the Lab Case
-  Index by running the <b>exact shipped code</b> (the same <code>marketOverview</code> the collector
+  <p>This is an <b>offline validation study</b>, not the live index. It reconstructs the
+  Skindex by running the <b>exact shipped code</b> (the same <code>marketOverview</code> the collector
   runs — no reimplementation) over <b>Steam's own daily aggregates</b> (median price + units sold per
   day, per case, fetched logged-out from the public listing pages). The live index starts at its
   2026-07-25 adoption and is never backfilled; this page exists so the methodology's behavior through
@@ -43,7 +43,7 @@
 
   <h2>1 · The reconstructed index (log scale)</h2>
   <div class="ds-chartbox"><canvas id="mainChart" role="img"
-      aria-label="Reconstructed Lab Case Index 2014–2026 on a log scale: reference run SMLX-6 with no-clamp, equal-weight and no-seasoning variants"></canvas>
+      aria-label="Reconstructed Skindex 2014–2026 on a log scale: reference run SMLX-6 with no-clamp, equal-weight and no-seasoning variants"></canvas>
     <div class="ds-legend" id="mainLegend"></div></div>
   <div class="ds-tiles" id="statTiles"></div>
 

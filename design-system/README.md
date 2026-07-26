@@ -1,4 +1,4 @@
-# Design System — skin-market-lab
+# Design System — Skindex
 
 HTML-string factories + `.ds-*` classes + `--ds-*` tokens for the dashboard
 and doc pages. Rules live in [CONTRACT.md](CONTRACT.md); every component is
@@ -35,7 +35,7 @@ DS.attrs({ id: "x", disabled: true, skip: null })  // ' id="x" disabled'
 ### DS.tile — stat tile (label / value / sub)
 
 ```js
-DS.tile({ label: "LAB CASE INDEX", value: "112.4", sub: "+1.2% 24h", tone: "up" })
+DS.tile({ label: "SKINDEX", value: "112.4", sub: "+1.2% 24h", tone: "up" })
 // tone: "up" | "dn" | "good" | "bad"; cls: "big" = doc-page stat scale
 // valueHtml / subHtml = TRUSTED alternatives to value / sub
 ```
@@ -81,7 +81,7 @@ DS.rangeChips({ ranges: ["1Y", "5Y", "ALL"], active: "ALL", dataKey: "ir" })
 ### DS.legendItem — legend entry with a color swatch
 
 ```js
-DS.legendItem({ swatch: "var(--ds-series-price)", label: "Lab Index (wallet $)" })
+DS.legendItem({ swatch: "var(--ds-series-price)", label: "Skindex (wallet $)" })
 DS.legendItem({ swatch: c, html: 'recon (<a href="backtest.html">backtest</a>)' })  // TRUSTED
 ```
 
@@ -112,7 +112,7 @@ DS.badge({ label: "ACCUMULATE", tone: "good", cls: "card", value: "+34" })  // b
 DS.specTable({
   head: ["Fixing", "Definition", "Min days"],
   rows: [
-    ["SETTLE-CASE-7D", "Mean of daily Lab Case Index", "3"],       // escaped
+    ["SETTLE-CASE-7D", "Mean of daily Skindex", "3"],       // escaped
     ["SETTLE-RATIO-30D", { html: "Mean of daily <b>cash ratio</b>" }, "7"],  // trusted cell
   ],
 })

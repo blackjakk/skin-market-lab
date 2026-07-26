@@ -1,9 +1,9 @@
 ---
 name: design-system-review
-description: "Use when reviewing or adding any DOM/UI change in skin-market-lab: verifies the change routes through the Design System (DS.* factories, .ds-* classes, --ds-* tokens), adds no bypass, preserves probe contracts, and stays determinism-neutral."
+description: "Use when reviewing or adding any DOM/UI change in Skindex (skin-market-lab repo): verifies the change routes through the Design System (DS.* factories, .ds-* classes, --ds-* tokens), adds no bypass, preserves probe contracts, and stays determinism-neutral."
 ---
 
-# Design System review — skin-market-lab
+# Design System review — Skindex
 
 Reviewer checklist for ANY diff that touches the DOM/UI surfaces
 (`skins.js`, `index.html`, `methodology.html`, `backtest.html`, `skins.css`).
