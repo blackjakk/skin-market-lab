@@ -171,6 +171,9 @@
   // specTable({ head: ["A","B"], rows: [["x","y"], [{ html: "<b>t</b>" }, "z"]], cls })
   //   head cells + plain row cells are ESCAPED; a cell object opts out:
   //   { html } is TRUSTED, { text, cls } stays escaped with a td class.
+  //   Output is wrapped in a .ds-scroll-x overflow container so wide tables
+  //   scroll inside their own box on narrow viewports (never page blowout);
+  //   header cells carry scope="col" for AT column association.
   function specTable(o) {
     o = o || {};
     const cell = function (c) {
@@ -179,13 +182,13 @@
       }
       return "<td>" + esc(c) + "</td>";
     };
-    return '<table class="' + cx("ds-spec-table", o.cls) + '">' +
+    return '<div class="ds-scroll-x"><table class="' + cx("ds-spec-table", o.cls) + '">' +
       (o.head
-        ? "<thead><tr>" + o.head.map(function (h) { return "<th>" + esc(h) + "</th>"; }).join("") + "</tr></thead>"
+        ? "<thead><tr>" + o.head.map(function (h) { return '<th scope="col">' + esc(h) + "</th>"; }).join("") + "</tr></thead>"
         : "") +
       "<tbody>" + (o.rows || []).map(function (r) {
         return "<tr>" + r.map(cell).join("") + "</tr>";
-      }).join("") + "</tbody></table>";
+      }).join("") + "</tbody></table></div>";
   }
 
   // keyActivate(rootEl, selector, handler) — binds click + Enter/Space

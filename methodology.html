@@ -22,13 +22,20 @@
   .doc pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
     padding: 12px; overflow-x: auto; font-size: 11.5px; color: var(--text-secondary); }
   .doc .ds-spec-table { margin: 10px 0; }
-  .doc .ds-spec-table td:first-child { white-space: nowrap; }
+  .doc .ds-scroll-x { margin: 10px 0; }
+  .doc .ds-scroll-x .ds-spec-table { margin: 0; }
+  /* nowrap widens table min-content — desktop-only, so phone tables can wrap
+     inside their .ds-scroll-x container instead of degenerating */
+  @media (min-width: 641px) {
+    .doc .ds-spec-table td:first-child,
+    .doc .ds-spec-table th[scope="row"] { white-space: nowrap; }
+  }
   .muted { color: var(--text-muted); }
 </style>
 </head>
 <body>
-<div class="ds-topnav"><a href="./">← Skin Market Lab</a></div>
-<div class="doc">
+<nav class="ds-topnav" aria-label="Site"><a href="./">← Skin Market Lab</a></nav>
+<main class="doc">
   <h1>SMLX-6 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
   <p class="muted">Skin Market Lab · methodology version SMLX-6 · any rule change bumps the version — a
   fixing is meaningless without its rulebook. <b>This document describes a measurement, not an offer,
@@ -43,9 +50,9 @@
   that you cannot check.</p>
 
   <h2>2 · The index families</h2>
-  <table class="ds-spec-table">
-    <tr><th>Index</th><th>Constituents</th><th>Mark source</th><th>Aggregation</th></tr>
-    <tr><td>Lab Case Index</td><td>All tracked cases (the commodity layer)</td>
+  <div class="ds-scroll-x"><table class="ds-spec-table">
+    <tr><th scope="col">Index</th><th scope="col">Constituents</th><th scope="col">Mark source</th><th scope="col">Aggregation</th></tr>
+    <tr><th scope="row">Lab Case Index</th><td>All tracked cases (the commodity layer)</td>
       <td>Steam Market daily median price</td><td rowspan="2">CHAINED, WINSORIZED &amp; VOLUME-WEIGHTED:
       each day's index return is the <b>volume-weighted</b> mean of constituents' daily log-returns
       (items present and included on both days), after clamping each return to within ±0.05 log (≈5%)
@@ -57,13 +64,13 @@
       MARK-QUALITY FLOORS (SMLX-6, case family): marks under $0.25 contribute no return (one-cent
       tick = quantization noise), and a day's return applies only with ≥3 contributors — otherwise
       the level carries</td></tr>
-    <tr><td>Liquids Index</td><td>Non-case items with ≥5 median units sold/day (self-gating — “liquids”
+    <tr><th scope="row">Liquids Index</th><td>Non-case items with ≥5 median units sold/day (self-gating — “liquids”
       must be liquid)</td><td>Steam Market daily median</td></tr>
-    <tr><td>Art Index</td><td>Curated grail basket (<code>watchlist.json → art[]</code>)</td>
+    <tr><th scope="row">Art Index</th><td>Curated grail basket (<code>watchlist.json → art[]</code>)</td>
       <td>Skinport 30-day realized-sale median, carried forward (appraisal-style; grails sit above the
       ~$1,800 Steam listing cap and trade rarely)</td><td>Same chained method over the carried
       appraisal marks</td></tr>
-  </table>
+  </table></div>
   <p>Mark hygiene, all families: daily UTC buckets, median of intraday readings, a $0 price is never a
   mark (thin venues report zeros for no-sale windows), zero-volume days keep price but carry no volume,
   and per-item histories are append-only JSONL in <code>data/history/</code>.</p>
@@ -105,13 +112,13 @@
   weight</b> — which under volume weights means real traded dollars (§5 prices the cheapest such
   attack). Fixings publish with value <code>null</code>
   (“accruing”) until the minimum day count exists — a fixing is never backfilled or edited.</p>
-  <table class="ds-spec-table">
-    <tr><th>Fixing</th><th>Definition</th><th>Window</th><th>Min days</th><th>Decimals</th></tr>
+  <div class="ds-scroll-x"><table class="ds-spec-table">
+    <tr><th scope="col">Fixing</th><th scope="col">Definition</th><th scope="col">Window</th><th scope="col">Min days</th><th scope="col">Decimals</th></tr>
     <tr><td>SETTLE-CASE-7D</td><td>Mean of daily Lab Case Index</td><td>≤7 days</td><td>3</td><td>2</td></tr>
     <tr><td>SETTLE-CASE-30D</td><td>Mean of daily Lab Case Index</td><td>≤30 days</td><td>10</td><td>2</td></tr>
     <tr><td>SETTLE-RATIO-30D</td><td>Mean of daily cash ratio (median third-party realized ÷ Steam price)</td>
       <td>≤30 days</td><td>7</td><td>4</td></tr>
-  </table>
+  </table></div>
   <p>Suitability, stated plainly: the case family has commodity-grade depth and is the only plausible
   candidate for continuous instruments; the cash ratio is a spread/convertibility mark suited to
   <b>dated</b> settlement only; the art index is <b>never</b> suitable for settlement (appraisal marks,
@@ -184,8 +191,8 @@
   <p>The fixings above prove the <i>computation</i>; this layer surveils the <i>inputs</i>. Every mark
   feeding the index is single-venue at its source, so INTEG-1 corroborates each one against
   independent evidence and publishes divergence flags with every collector run. Lanes:</p>
-  <table class="ds-spec-table">
-    <tr><th>Lane</th><th>Corroborates</th><th>Flags when</th></tr>
+  <div class="ds-scroll-x"><table class="ds-spec-table">
+    <tr><th scope="col">Lane</th><th scope="col">Corroborates</th><th scope="col">Flags when</th></tr>
     <tr><td><b>ratio</b></td><td>Steam price vs the item's own realized-cash comparable (its daily
       Skinport÷Steam ratio vs its trailing 30-day median)</td><td>the deviation, measured relative to
       the day's <b>cross-sectional median deviation</b> (same median-relative logic as the index
@@ -206,7 +213,7 @@
     <tr><td><b>staleness</b></td><td>data-source liveness</td><td>fewer than half the steam-marked
       items have a fresh quote — venue loss surfaces as an alert instead of the site silently serving
       carried-forward prices.</td></tr>
-  </table>
+  </table></div>
   <p><b>Flag-only, by design.</b> Flags never remove a mark or reroute the index. Automatic rejection
   would hand an attacker a <i>cheaper</i> lever: manipulate the thin corroborating venue (Skinport) to
   force honest Steam marks out of the index and surgically break return pairs. Detection is published;
@@ -228,7 +235,7 @@ const m=require('./data/index.json').market;
 for(const [n,f] of Object.entries(S.computeAll(m.series)))
   console.log(n, c.createHash('sha256').update(S.canonical(f)).digest('hex'))"</pre>
   <button type="button" class="ds-btn primary" id="verifyBtn">Re-derive &amp; verify fixings</button>
-  <div id="verifyOut" style="margin-top:10px"></div>
+  <div id="verifyOut" role="status" style="margin-top:10px"></div>
   <p><b>Continuous verification — run a witness.</b> The button above checks one moment; a
   <i>witness</i> checks every publication, forever, with <b>your</b> credentials instead of the
   operator's: fork the repository, enable Actions on the fork, and <code>witness.yml</code> re-derives
@@ -246,29 +253,29 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   <div id="histOut" class="muted">Loading…</div>
 
   <h2>8 · Version history</h2>
-  <table class="ds-spec-table">
-    <tr><th>Version</th><th>Date</th><th>Change</th></tr>
-    <tr><td>SMLX-1</td><td>2026-07-25</td><td>Launch: level-vs-first-day geometric construction.
+  <div class="ds-scroll-x"><table class="ds-spec-table">
+    <tr><th scope="col">Version</th><th scope="col">Date</th><th scope="col">Change</th></tr>
+    <tr><th scope="row">SMLX-1</th><td>2026-07-25</td><td>Launch: level-vs-first-day geometric construction.
       Known limit: a new constituent entered at relative 1.0, mechanically diluting the level —
       acceptable for research, disqualifying for settlement.</td></tr>
-    <tr><td>SMLX-2</td><td>2026-07-25</td><td>Chained daily-return construction (constituent changes
+    <tr><th scope="row">SMLX-2</th><td>2026-07-25</td><td>Chained daily-return construction (constituent changes
       are return-neutral), 30-day seasoning for new listings, first-of-month scheduled inclusion,
       founding-cohort grandfather clause. Adopted before any external instrument referenced the
       fixings; SMLX-1 records in the history retain their stamp.</td></tr>
-    <tr><td>SMLX-3</td><td>2026-07-25</td><td>Median-relative winsorization: each constituent's daily
+    <tr><th scope="row">SMLX-3</th><td>2026-07-25</td><td>Median-relative winsorization: each constituent's daily
       log-return is clamped to within ±0.05 of the day's cross-sectional median before averaging.
       Closes the concentrated single-name attack (one thin case pumped 50% used to move the whole
       index ~1%); market-wide moves pass through because the median moves with them. Manipulation
       budget adds the cheapest-k concentrated attack model, which becomes the headline floor.
       Prior records retain their stamp.</td></tr>
-    <tr><td>SMLX-4</td><td>2026-07-25</td><td>Volume weighting (case &amp; liquids): daily returns are
+    <tr><th scope="row">SMLX-4</th><td>2026-07-25</td><td>Volume weighting (case &amp; liquids): daily returns are
       weighted by each name's median daily dollar volume over the 60 days ending at the prior
       month-end — lagged, monthly-rebalanced, capped at 10%, fallbacks neutral (§2a). Ties index
       influence to real traded dollars, closing the thin-name corner of the concentrated attack that
       SMLX-3's clamp alone left open (nine near-dead cases could still move the fixing for ~$8k). The
       budget's concentrated model becomes cheapest weight-accumulation against the published weights.
       Art stays equal-weight. Prior records retain their stamp.</td></tr>
-    <tr><td>SMLX-5</td><td>2026-07-26</td><td>Weight-weighted clamp center: the winsorization center is
+    <tr><th scope="row">SMLX-5</th><td>2026-07-26</td><td>Weight-weighted clamp center: the winsorization center is
       the volume-weighted median of the day's returns, not the plain one. Closes the median-capture
       attack SMLX-4 left open (a count majority of thin names could seize the unweighted center and
       drag honest names toward a fake move); seizing the center now costs a &gt;50%-weight coalition,
@@ -276,7 +283,7 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       weighted median to the plain median exactly, so no equal-weight behavior changes. Manipulation
       budget adds the center-capture model (price of unbounded control). Prior records retain their
       stamp.</td></tr>
-    <tr><td>SMLX-6</td><td>2026-07-26</td><td>The backtest release — both rules found by
+    <tr><th scope="row">SMLX-6</th><td>2026-07-26</td><td>The backtest release — both rules found by
       reconstructing 2013–2026 from Steam's own daily aggregates (<a href="backtest.html">report</a>):
       (1) mark-quality floors for the case family — marks under $0.25 carry no return (a one-cent
       tick at penny prices is a 30–50% quantization artifact) and a day's return needs ≥3
@@ -285,7 +292,7 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       phase of new cases. Neither rule changes any published live value (the founding basket is
       grandfathered, all above $0.25, all contributing); both close regimes the backtest showed
       grinding the index to zero. Prior records retain their stamp.</td></tr>
-  </table>
+  </table></div>
 
   <h2>9 · Disclaimers</h2>
   <p>Not financial advice; not an offer or invitation to trade any instrument. The underlying market is
@@ -293,7 +300,7 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   notice; data sources may revoke access at any time; upstream terms of service do not grant derivative
   settlement rights over their data. Anyone considering an actual instrument on these fixings needs
   qualified counsel in every relevant jurisdiction. The authors publish measurements.</p>
-</div>
+</main>
 <script src="settlement.js"></script>
 <script src="design-system/ds.js"></script>
 <script>
