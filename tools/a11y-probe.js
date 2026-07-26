@@ -117,7 +117,7 @@ async function activeInfo(page) {
       thbtn: !!(a.matches && a.matches(".thbtn")),
       dataIr: attr("data-ir"), dataK: attr("data-k"),
       inModal: !!(a.closest && a.closest(".modal")),
-      skipLink: !!(a.matches && a.matches('a.skip-link[href="#main"]')),
+      skipLink: !!(a.matches && a.matches('a.skip-link[href="#mktPanel"]')),
       outlineStyle: cs.outlineStyle, outlineWidth: cs.outlineWidth,
     };
   });
@@ -216,14 +216,14 @@ async function typeSearch(page) {
   await d2.keyboard.press("Tab");
   const first = await activeInfo(d2);
   if (!first.skipLink) {
-    put(29, "skip link is the first Tab stop and Enter jumps to #main", false,
-      "first Tab stop = " + who(first) + " (no a.skip-link[href=\"#main\"])");
+    put(29, "skip link is the first Tab stop and Enter jumps to #mktPanel", false,
+      "first Tab stop = " + who(first) + " (no a.skip-link[href=\"#mktPanel\"])");
   } else {
     await d2.keyboard.press("Enter");
     await d2.waitForTimeout(250);
-    const landed = await d2.evaluate(() => location.hash === "#main" || (document.activeElement && document.activeElement.id === "main"));
-    put(29, "skip link is the first Tab stop and Enter jumps to #main", landed,
-      landed ? "" : "Enter did not move to #main");
+    const landed = await d2.evaluate(() => location.hash === "#mktPanel" || (document.activeElement && document.activeElement.id === "mktPanel"));
+    put(29, "skip link is the first Tab stop and Enter jumps to #mktPanel", landed,
+      landed ? "" : "Enter did not move to #mktPanel");
   }
   await d2.close();
 

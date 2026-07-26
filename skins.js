@@ -275,7 +275,7 @@
           (lose.length ? '<span class="ds-hint hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
         "</div>" : "") +
       (state.market && state.market.settlement ? settlementPanel(state.market.settlement, state.market.integrity) : "") +
-      '<div class="ds-panel panel"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
+      '<div class="ds-panel panel" id="mktPanel" tabindex="-1"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
         // sortable headers: a real <button class="thbtn"> inside the th gives
         // native focus + Enter/Space activation (A2-1/A3-9); data-k stays on
         // the th (probe contract) and rides on the button too; aria-sort only

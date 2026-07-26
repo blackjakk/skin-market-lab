@@ -158,6 +158,7 @@ table.pf td { padding: 5px 6px; border-bottom: 1px solid var(--line);
 table.pf td.nm { max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .xbtn { background: none; border: 0; color: var(--text-muted); cursor: pointer; font-size: 13px; }
 .xbtn:hover { color: var(--status-bad); }
+.xbtn:focus-visible { outline: 2px solid var(--ds-focus); outline-offset: 1px; }
 .lotForm { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
 .lotForm label { font-size: 11px; letter-spacing: .4px; color: var(--text-secondary);
   margin-bottom: -3px; }
@@ -258,4 +259,6 @@ tr.mrow:focus-visible, .sr-row:focus-visible {
   summary { padding: 12px 0; }                            /* data-table disclosure */
   .idxLegend a { display: inline-block; padding: 9px 4px; margin: -6px 0; }  /* backtest link */
   .hdrNav a { display: inline-block; padding: 10px 6px; }
+  .thbtn { padding-top: 10px; padding-bottom: 10px; }     /* sort headers ≥32px */
+  .sr-row { min-height: 32px; }                           /* search options ≥32px */
 }
