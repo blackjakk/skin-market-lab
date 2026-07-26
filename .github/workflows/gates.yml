@@ -38,6 +38,8 @@ jobs:
         run: node probe.js
       - name: Dashboard probe (real Chromium, live + static modes, 39 checks)
         run: node client-probe.js
+      - name: A11y probe (real Chromium — keyboard, focus, contrast, responsive, semantics)
+        run: node tools/a11y-probe.js
       - name: Design System guard (no-bypass ratchet)
         run: node tools/ds-guard.js
       - name: Design System component test (real Chromium)
