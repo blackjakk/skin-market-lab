@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "probe": "node probe.js",
-    "probe:ui": "node client-probe.js"
+    "probe:ui": "node client-probe.js",
+    "probe:a11y": "node tools/a11y-probe.js"
   }
 }
