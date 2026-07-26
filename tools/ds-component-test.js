@@ -89,7 +89,7 @@ const server = http.createServer((req, res) => {
 
   // tiles
   ok(await count("#g-tiles .ds-tile") === 6, "DS.tile renders (6 tiles in the strip)");
-  ok((await txt("#g-tiles .ds-tile .ds-tile-lb")) === "LAB CASE INDEX", "tile label text");
+  ok((await txt("#g-tiles .ds-tile .ds-tile-lb")) === "SKINDEX", "tile label text");
   ok((await txt("#g-tiles .ds-tile .ds-tile-v")) === "112.4", "tile value text");
   ok(/\+1\.2% 24h/.test(await txt("#g-tiles .ds-tile .ds-tile-sub")), "tile sub renders");
   ok((await cs("#g-tiles .ds-tiles", "display")) === "grid", "DS.tiles wrapper is a CSS grid");
@@ -223,7 +223,7 @@ const server = http.createServer((req, res) => {
     "tile label with <script> renders as literal text");
   ok(await page.$eval("#g-esc .g-esc-tile .ds-tile-v", (el) => el.querySelector("img") === null),
     "tile value with <img onerror> injects no element");
-  ok(await page.evaluate(() => document.title) === "Design System Gallery — Skin Market Lab",
+  ok(await page.evaluate(() => document.title) === "Design System Gallery — Skindex",
     "onerror payload never ran (document.title untouched)");
   ok(dialogs.length === 0, "no dialog fired (script text never executed)");
   ok(await page.$("#g-trusted") !== null, "TRUSTED html slot renders intentional markup");

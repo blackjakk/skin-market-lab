@@ -184,7 +184,7 @@ async function collect(opts) {
   writeJson(bookFile, bookStore);
   if (steamNames.length) writeJson(bookCursorFile, { i: (bCursor + Math.min(BOOK_BUDGET, steamNames.length)) % steamNames.length });
 
-  // market overview: the Lab Case Index + cash ratio + total volume, plus
+  // market overview: the Skindex + cash ratio + total volume, plus
   // per-run macro readings (CS2 players, BTC/ETH — the correlation
   // benchmarks) appended raw to market.jsonl and daily-bucketed here
   manifest.market = A.marketOverview(marketItems);

@@ -1,4 +1,4 @@
-# DESIGN.md — Skin Market Lab
+# DESIGN.md — Skindex
 
 How the product should LOOK. `CLAUDE.md` is how to build; this file is the
 visual contract. **Read this before writing any UI** — markup, CSS, canvas
@@ -69,7 +69,7 @@ chart series, a status color, or a background fill larger than a chip.
 
 | Token / const | Value | Rarity | Series |
 |---|---|---|---|
-| `--series-price` | `#4b69ff` | Mil-Spec | Steam price line, Lab Case Index (4.1:1) |
+| `--series-price` | `#4b69ff` | Mil-Spec | Steam price line, the Skindex (4.1:1) |
 | `--series-sma7` | `#199e70` | — (functional) | SMA 7 overlay (5.3:1) |
 | `--series-sma30` | `#8847ff` | Restricted | SMA 30 + BTC overlay (3.8:1) |
 | `--series-skinport` | `#caab05` | Gold | realized-cash line — real money marks gold (8.0:1) |

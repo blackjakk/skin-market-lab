@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Design System Gallery — Skin Market Lab</title>
+<title>Design System Gallery — Skindex</title>
 <link rel="stylesheet" href="../skins.css">
 <link rel="stylesheet" href="tokens.css">
 <link rel="stylesheet" href="ds.css">
@@ -21,7 +21,7 @@
 </head>
 <body>
 <div class="ds-topnav" id="g-topnav">
-  <a href="../index.html">← Skin Market Lab</a>
+  <a href="../index.html">← Skindex</a>
   <a href="../methodology.html">Methodology</a>
   <a href="../backtest.html">Backtest</a>
 </div>
@@ -47,7 +47,7 @@
     // ── tiles ──
     D.panel({ title: "TILES — DS.tile + DS.tiles", attrs: { id: "g-tiles" }, body:
       D.tiles(
-        D.tile({ label: "LAB CASE INDEX", value: "112.4", sub: "+1.2% 24h · +3.4% 7d", tone: "up" }) +
+        D.tile({ label: "SKINDEX", value: "112.4", sub: "+1.2% 24h · +3.4% 7d", tone: "up" }) +
         D.tile({ label: "CASH RATIO", value: "71%", sub: "cash sale vs steam price" }) +
         D.tile({ label: "7D", value: "−4.2%", tone: "dn" }) +
         D.tile({ label: "MARK INTEGRITY", value: "✓ CLEAN", sub: "ratio 12/14 · book 8/10 corroborated", tone: "good" }) +
@@ -97,7 +97,7 @@
     // ── legend ──
     D.panel({ title: "LEGEND — DS.legendItem + .ds-sw", attrs: { id: "g-legend" }, body:
       '<div class="ds-legend">' +
-        D.legendItem({ swatch: "var(--ds-series-price)", label: "Lab Index (wallet $)" }) +
+        D.legendItem({ swatch: "var(--ds-series-price)", label: "Skindex (wallet $)" }) +
         D.legendItem({ swatch: "var(--ds-series-sma7)", label: "Cash-adjusted (real $)" }) +
         D.legendItem({ swatch: "var(--ds-series-sma30)",
           html: '2014→ reconstruction (<a href="../backtest.html">backtest</a>, rebased)' }) +
@@ -127,7 +127,7 @@
       D.specTable({
         head: ["Fixing", "Definition", "Window", "Min days"],
         rows: [
-          ["SETTLE-CASE-7D", "Mean of daily Lab Case Index", "≤7 days", "3"],
+          ["SETTLE-CASE-7D", "Mean of daily Skindex", "≤7 days", "3"],
           ["SETTLE-RATIO-30D", { html: "Mean of daily <b>cash ratio</b> (trusted-cell demo)" }, "≤30 days", "7"],
           [XSS, "attacker string in a plain cell — renders as text", "—", "—"],
         ] }) }) +

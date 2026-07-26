@@ -1,4 +1,4 @@
-# Skin Market Lab — CS skin market analysis over time
+# Skindex — CS skin market analysis over time
 
 A self-contained market-research tool for Counter-Strike skin investing:
 a zero-dependency Node tracker that records prices **over time** and a
@@ -65,7 +65,7 @@ backfill to the hosted dashboard, commit the resulting
 
 ## The market home (what the header numbers mean)
 
-- **Lab Case Index** — chained: each day's move is the volume-weighted
+- **Skindex** — chained: each day's move is the volume-weighted
   mean of tracked cases' daily returns, cumulated from 100 (SMLX-6 —
   weights are each case's median daily dollar volume over the prior
   month-end's trailing 60 days, capped at 10%; new cases season 365 days
@@ -102,7 +102,7 @@ backfill to the hosted dashboard, commit the resulting
 
 Dated settlement marks computed from the committed series by fixed rules —
 what a cash-settled future or scalar market would settle against:
-**SETTLE-CASE-7D/30D** (means of the daily Lab Case Index) and
+**SETTLE-CASE-7D/30D** (means of the daily Skindex) and
 **SETTLE-RATIO-30D** (mean daily cash ratio). Each publishes with a
 SHA-256 hash over its canonical form so any counterparty re-derives it
 bit-exactly from `data/`; fixings show "accruing" until their minimum day

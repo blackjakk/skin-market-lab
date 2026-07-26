@@ -1,4 +1,4 @@
-// ─── design-system/ds.js — Skin Market Lab Design System factories ─────────
+// ─── design-system/ds.js — Skindex Design System factories ─────────
 // HTML-STRING factories (the whole app renders via innerHTML — same idiom).
 // UMD, same shape as analytics.js: Node require (the component test) and
 // browser global `window.DS`. DOM-only presentation layer, determinism-

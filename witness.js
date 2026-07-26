@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// witness.js — independent verification of a Skin Market Lab publisher.
+// witness.js — independent verification of a Skindex publisher.
 //
 // The primary's hashes prove its fixings were computed correctly FROM its
 // committed data; a WITNESS is what proves the data and the publication

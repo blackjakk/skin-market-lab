@@ -332,7 +332,7 @@
   // ── market overview (the CoinGecko-style header numbers) ─────────────────
   // items: [{name, cat, daily, skinportDaily}] (daily from assembleSeries).
   // Returns { series:[{day,t,caseIdx,cashRatio,volTotal}], today:{...} }.
-  //   caseIdx   — the Lab Case Index: geometric mean of each CASE's price
+  //   caseIdx   — the Skindex: geometric mean of each CASE's price
   //               relative to its own first recorded day, ×100. Cases are
   //               the market's commodity layer — this is the "S&P of skins".
   //               (Known limit: an item added later enters at rel=1, which

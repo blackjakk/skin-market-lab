@@ -1,4 +1,4 @@
-/* design-system/ds.css — Skin Market Lab DS component classes.
+/* design-system/ds.css — Skindex DS component classes.
    TOKEN-ONLY styling: every color is a var(--ds-*) reference (no raw hex —
    the one deliberate exception is `border: 1px solid` with no color on
    .ds-badge.card, which inherits currentColor by spec, exactly like the

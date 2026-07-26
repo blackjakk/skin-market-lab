@@ -1,4 +1,4 @@
-/* design-system/tokens.css — Skin Market Lab DS token layer.
+/* design-system/tokens.css — Skindex DS token layer.
    ADDITIVE ONLY. skins.css :root owns the raw palette (--surface-*, --accent,
    --status-*, --series-*, --line, --text-*, --radius, --vol-bar) and must be
    loaded BEFORE this file. Everything here is a --ds-* semantic alias onto

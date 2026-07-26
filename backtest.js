@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// backtest.js — reconstruct the Lab Case Index through history (OFFLINE STUDY).
+// backtest.js — reconstruct the Skindex through history (OFFLINE STUDY).
 //
 // Runs the EXACT shipped index code (analytics.js marketOverview — no
 // reimplementation, no fork) over Steam's own daily aggregates fetched by

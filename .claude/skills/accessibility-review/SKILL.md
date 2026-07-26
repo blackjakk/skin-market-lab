@@ -1,9 +1,9 @@
 ---
 name: accessibility-review
-description: "Use when reviewing or adding any UI/DOM change in skin-market-lab: verifies keyboard operability, visible focus, focus management across re-renders, contrast tokens, responsive behavior at phone/tablet/zoom, touch targets, and ARIA semantics — and that the a11y probe still passes."
+description: "Use when reviewing or adding any UI/DOM change in Skindex (skin-market-lab repo): verifies keyboard operability, visible focus, focus management across re-renders, contrast tokens, responsive behavior at phone/tablet/zoom, touch targets, and ARIA semantics — and that the a11y probe still passes."
 ---
 
-# Accessibility review — skin-market-lab
+# Accessibility review — Skindex
 
 Reviewer checklist for ANY diff that touches the UI surfaces (`skins.js`,
 `index.html`, `methodology.html`, `backtest.html`, `skins.css`,

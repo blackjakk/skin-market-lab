@@ -8,7 +8,7 @@
 // scalar market would settle against. Methodology id: SMLX-6 (any rule
 // change bumps the id — a fixing is meaningless without its rulebook).
 //
-//   SETTLE-CASE-7D   — mean of the last ≤7 daily Lab Case Index values (min 3)
+//   SETTLE-CASE-7D   — mean of the last ≤7 daily Skindex values (min 3)
 //   SETTLE-CASE-30D  — mean of the last ≤30 daily values (min 10)
 //   SETTLE-RATIO-30D — mean of the last ≤30 daily cash-ratio values (min 7)
 //

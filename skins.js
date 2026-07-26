@@ -1,4 +1,4 @@
-// skins.js — Skin Market Lab client (vanilla JS, no build).
+// skins.js — Skindex client (vanilla JS, no build).
 // Talks to skins/server.js; analytics math is shared via analytics.js
 // (window.SkinAnalytics — the exact module the server runs).
 "use strict";
@@ -238,7 +238,7 @@
     const ovChip = (key, label, col, avail) => !avail ? "" :
       DS.toggle({ label: label, swatch: col, on: !!state.overlays[key], data: { ov: key }, cls: "ovToggle" });
     const strip =
-      tile2("LAB CASE INDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
+      tile2("SKINDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
         t && t.idx1 != null ? fmtPct(t.idx1) + " 24h" + (t.idx7 != null ? " · " + fmtPct(t.idx7) + " 7d" : "") : "base 100 at first collection",
         t && t.idx1 != null ? cls(t.idx1) : "") +
       tile2("LIQUIDS INDEX", t && t.liqIdx != null ? t.liqIdx.toFixed(1) : "—", "commodity skins & knives, steam marks", "") +
@@ -258,7 +258,7 @@
         (hasIdxChart ?
           '<div class="ds-legend idxLegend">' +
             (reconPts.length >= 2 ? DS.legendItem({ swatch: RECON_COL, html: '2014→ reconstruction (<a href="backtest.html">backtest</a>, rebased)' }) : "") +
-            DS.legendItem({ swatch: COL.price, label: "Lab Index (wallet $)" }) +
+            DS.legendItem({ swatch: COL.price, label: "Skindex (wallet $)" }) +
             DS.legendItem({ swatch: COL.sma7, label: "Cash-adjusted (real $)" }) +
             ovChip("players", "CS players", PLAYERS_COL, hasPlayersData) +
             ovChip("btc", "BTC", COL.sma30, hasBtcData) +
@@ -266,7 +266,7 @@
               ? DS.rangeChips({ ranges: Object.keys(IDXR), active: state.idxRange, dataKey: "ir", cls: "idxRangeRow" })
               : '<span class="ds-hint hint">gap between the first two = wallet inflation / exit pressure</span>') +
           "</div>" +
-          '<canvas id="idxChart" height="130" aria-label="Lab case index over time, with backtest reconstruction and comparison overlays" role="img"></canvas>' +
+          '<canvas id="idxChart" height="130" aria-label="Skindex over time, with backtest reconstruction and comparison overlays" role="img"></canvas>' +
           idxDataTableHtml(reconPts, idxRaw, idxCut) : "") +
       "</div>" +
       (gain.length || lose.length ?

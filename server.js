@@ -247,7 +247,7 @@ function startServer(opts) {
     });
   }
 
-  // market overview (Lab Case Index / cash ratio / volume / players) —
+  // market overview (Skindex / cash ratio / volume / players) —
   // same shared math the collector publishes for the static site
   async function marketReport() {
     const items = watchlist.map((name) => {
