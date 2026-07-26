@@ -28,7 +28,8 @@
   //                  files from this same static host (GitHub Pages)
   const state = { mode: "live", manifest: null, watch: [], market: null, selected: null, item: null,
     portfolio: null, range: "3M", hover: -1, view: "home", sort: { key: "vol24h", dir: -1 },
-    backtest: null, idxRange: "ALL", macroHist: null, overlays: { players: true, btc: true } };
+    backtest: null, idxRange: "ALL", macroHist: null, corrStudy: null,
+    overlays: { players: true, btc: true } };
   const RANGES = { "1M": 31, "3M": 92, "1Y": 366, "ALL": Infinity };
 
   // Where "edit the watchlist" and "run the collector" live on GitHub.
@@ -251,6 +252,7 @@
         t && t.cnus != null ? "Asia-evening ÷ US-evening peak" : "measuring — needs a full day of samples", "") +
       tile2("VS BITCOIN (30D)", btcCorr.corr != null ? (btcCorr.corr > 0 ? "+" : "") + btcCorr.corr.toFixed(2) : "—",
         (btcCorr.corr != null ? "return correlation" : "measuring: " + btcCorr.n + "/10 days") +
+        (state.corrStudy ? " · 12y " + (state.corrStudy.monthly > 0 ? "+" : "") + state.corrStudy.monthly.toFixed(2) : "") +
         (t && t.btc != null ? " · BTC $" + fmtCompact(t.btc) : ""), "") +
       tile2("TRACKED", String(state.watch.length), state.mode === "static" && state.manifest ? "updated " + ago(state.manifest.generatedAt) : "live tracker", "");
     $("itemView").innerHTML =
@@ -1226,7 +1228,14 @@
         if (j && (j.players || j.btc)) state.macroHist = j;
       }
     } catch (e) { /* no macro history available */ }
-    if ((state.backtest || state.macroHist) && state.view === "home" && state.market) renderHome();
+    try {
+      const r = await fetchTimeout("backtest/corr.json", 6000, {});
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.corr && j.corr.monthly != null) state.corrStudy = j.corr;
+      }
+    } catch (e) { /* no correlation study available */ }
+    if ((state.backtest || state.macroHist || state.corrStudy) && state.view === "home" && state.market) renderHome();
   }
   async function boot() {
     $("netStatus").textContent = "connecting…";

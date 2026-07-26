@@ -136,7 +136,12 @@ announcement (+92%/30d), the 2023–24 −53% drawdown, and per-variant
 proof of what each protection rule is worth. The reconstruction also
 caught two methodology defects (penny-mark quantization, seasoning far
 too short) that are now fixed as SMLX-6 — which is exactly what a
-backtest is for.
+backtest is for. The same page carries a **correlations study**
+(`node corr.js` → `backtest/corr.json`): twelve years of Skindex ×
+Bitcoin × player-count evidence — monthly return correlation ≈ +0.19
+(R² 3.7%), no BTC lead at any monthly lag, decoupled drawdowns in both
+directions, and an honest test showing the player-count lead is a
+fundamental's fingerprint, not a tradeable edge after fees.
 
 **Don't trust me — witness it.** Fork this repo and enable Actions: your
 fork's `witness.yml` then independently verifies every publication — it
