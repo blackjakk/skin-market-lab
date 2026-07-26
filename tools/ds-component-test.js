@@ -57,6 +57,13 @@ const server = http.createServer((req, res) => {
   ok(DS.specTable({ head: ["H"], rows: [["<x>"], [{ html: "<b>t</b>" }]] }).includes("&lt;x&gt;") &&
      DS.specTable({ head: ["H"], rows: [[{ html: "<b>t</b>" }]] }).includes("<b>t</b>"),
     "DS.specTable escapes plain cells, passes { html } cells through TRUSTED");
+  ok(DS.specTable({ head: ["H"], rows: [["x"]] })
+       .startsWith('<div class="ds-scroll-x"><table class="ds-spec-table">') &&
+     DS.specTable({ head: ["H"], rows: [["x"]] }).endsWith("</table></div>"),
+    "DS.specTable wraps its table in a .ds-scroll-x overflow container");
+  ok(DS.specTable({ head: ["A", "<B>"], rows: [] }).includes('<th scope="col">A</th>') &&
+     DS.specTable({ head: ["A", "<B>"], rows: [] }).includes('<th scope="col">&lt;B&gt;</th>'),
+    "DS.specTable header cells carry scope=\"col\" (labels still escaped)");
   ok(DS.toggle({ label: "T", on: true, data: { ov: "btc" } }).includes('aria-pressed="true"') &&
      DS.toggle({ label: "T", on: false, data: { ov: "btc" } }).includes('data-ov="btc"'),
     "DS.toggle emits aria-pressed state + data-* hooks");
@@ -172,7 +179,8 @@ const server = http.createServer((req, res) => {
   ok(await page.$eval("#g-tiles", (el) => el.classList.contains("ds-panel")), "DS.panel emits .ds-panel + attrs id");
   ok(/TILES/.test(await txt("#g-tiles .ds-panel-h")), "panel title renders in .ds-panel-h");
   ok((await cs("#g-tiles", "backgroundColor")) === "rgb(21, 22, 26)", "panel surface = --ds-surface-1");
-  ok((await cs("#g-hints .ds-hint", "color")) === "rgb(124, 127, 136)", "hint text = --ds-text-muted");
+  ok((await cs("#g-hints .ds-hint", "color")) === "rgb(135, 138, 148)",
+    "hint text = --ds-text-muted (#878a94, the ≥4.5:1 contrast value)");
   ok((await cs("#g-warmup", "borderTopColor")) === "rgb(212, 175, 55)", "warmup pill = accent border");
 
   // badges
@@ -185,6 +193,13 @@ const server = http.createServer((req, res) => {
   ok((await txt("#g-badges .ds-badge.card .ds-badge-v")) === "+34", "badge card big value slot");
 
   // spec table
+  ok(await page.$("#g-spec .ds-scroll-x > .ds-spec-table") !== null,
+    "specTable renders inside its .ds-scroll-x wrapper");
+  ok((await cs("#g-spec .ds-scroll-x", "overflowX")) === "auto",
+    ".ds-scroll-x wrapper scrolls horizontally (overflow-x: auto)");
+  ok(await page.$$eval("#g-spec .ds-spec-table thead th",
+      (els) => els.length > 0 && els.every((th) => th.getAttribute("scope") === "col")),
+    "rendered spec-table header cells all carry scope=col");
   ok(await count("#g-spec .ds-spec-table thead th") === 4, "specTable head renders 4 columns");
   ok(await count("#g-spec .ds-spec-table tbody tr") === 3, "specTable renders 3 rows");
   ok(await page.$eval("#g-spec .ds-spec-table", (el) =>
