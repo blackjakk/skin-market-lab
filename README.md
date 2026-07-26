@@ -180,6 +180,16 @@ browser; unit-pinned by the probe):
 Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 30min–12h). Collected data lands in `data/` (committed by the collector); the local tracker keeps its private copy in `local-data/` (gitignored).
 
+## Design System
+
+All UI chrome (dashboard + doc pages) renders through one component
+library: `design-system/` — `--ds-*` tokens, `.ds-*` classes, and
+`window.DS` factories with escaping by default. A CI ratchet
+(`tools/ds-guard.js`) blocks any new hand-rolled component, color, or
+font bypass, and a 72-check real-Chromium component test covers every
+factory including keyboard and ARIA behavior. See
+[design-system/README.md](design-system/README.md).
+
 ## Gates
 
 - `npm run probe` — 133 checks, hermetic (fixture transport):

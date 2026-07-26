@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SMLX-6 — Skin Market Lab Index &amp; Settlement Methodology</title>
 <link rel="stylesheet" href="skins.css">
+<link rel="stylesheet" href="design-system/tokens.css">
+<link rel="stylesheet" href="design-system/ds.css">
 <style>
+  /* Page-specific only: prose layout the Design System does not own. Shared
+     components (spec tables, buttons, verdict badges, top nav) come from ds.css
+     via .ds-* classes / DS.* factories. */
   .doc { max-width: 880px; margin: 0 auto; padding: 0 20px 60px; }
   .doc h1 { font-size: 24px; letter-spacing: 1px; margin: 18px 0 4px; }
   .doc h2 { font-size: 15px; letter-spacing: 1.6px; color: var(--accent); margin: 30px 0 10px;
@@ -16,21 +21,13 @@
     padding: 0 5px; font-size: 12px; }
   .doc pre { background: var(--surface-2); border: 1px solid var(--line); border-radius: 8px;
     padding: 12px; overflow-x: auto; font-size: 11.5px; color: var(--text-secondary); }
-  table.spec { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 10px 0; }
-  table.spec th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 6px 8px;
-    border-bottom: 1px solid var(--line); }
-  table.spec td { padding: 7px 8px; border-bottom: 1px solid var(--line);
-    font-variant-numeric: tabular-nums; color: var(--text-secondary); }
-  table.spec td:first-child { color: var(--text-primary); white-space: nowrap; }
-  .ok { color: var(--status-good); font-weight: 700; }
-  .bad { color: var(--status-bad); font-weight: 700; }
+  .doc .ds-spec-table { margin: 10px 0; }
+  .doc .ds-spec-table td:first-child { white-space: nowrap; }
   .muted { color: var(--text-muted); }
-  .topnav { padding: 14px 20px; }
-  .topnav a { color: var(--text-secondary); text-decoration: none; font-size: 13px; }
 </style>
 </head>
 <body>
-<div class="topnav"><a href="./">← Skin Market Lab</a></div>
+<div class="ds-topnav"><a href="./">← Skin Market Lab</a></div>
 <div class="doc">
   <h1>SMLX-6 <span class="muted">·</span> Index &amp; Settlement Methodology</h1>
   <p class="muted">Skin Market Lab · methodology version SMLX-6 · any rule change bumps the version — a
@@ -46,7 +43,7 @@
   that you cannot check.</p>
 
   <h2>2 · The index families</h2>
-  <table class="spec">
+  <table class="ds-spec-table">
     <tr><th>Index</th><th>Constituents</th><th>Mark source</th><th>Aggregation</th></tr>
     <tr><td>Lab Case Index</td><td>All tracked cases (the commodity layer)</td>
       <td>Steam Market daily median price</td><td rowspan="2">CHAINED, WINSORIZED &amp; VOLUME-WEIGHTED:
@@ -108,7 +105,7 @@
   weight</b> — which under volume weights means real traded dollars (§5 prices the cheapest such
   attack). Fixings publish with value <code>null</code>
   (“accruing”) until the minimum day count exists — a fixing is never backfilled or edited.</p>
-  <table class="spec">
+  <table class="ds-spec-table">
     <tr><th>Fixing</th><th>Definition</th><th>Window</th><th>Min days</th><th>Decimals</th></tr>
     <tr><td>SETTLE-CASE-7D</td><td>Mean of daily Lab Case Index</td><td>≤7 days</td><td>3</td><td>2</td></tr>
     <tr><td>SETTLE-CASE-30D</td><td>Mean of daily Lab Case Index</td><td>≤30 days</td><td>10</td><td>2</td></tr>
@@ -187,7 +184,7 @@
   <p>The fixings above prove the <i>computation</i>; this layer surveils the <i>inputs</i>. Every mark
   feeding the index is single-venue at its source, so INTEG-1 corroborates each one against
   independent evidence and publishes divergence flags with every collector run. Lanes:</p>
-  <table class="spec">
+  <table class="ds-spec-table">
     <tr><th>Lane</th><th>Corroborates</th><th>Flags when</th></tr>
     <tr><td><b>ratio</b></td><td>Steam price vs the item's own realized-cash comparable (its daily
       Skinport÷Steam ratio vs its trailing 30-day median)</td><td>the deviation, measured relative to
@@ -230,7 +227,7 @@
 const m=require('./data/index.json').market;
 for(const [n,f] of Object.entries(S.computeAll(m.series)))
   console.log(n, c.createHash('sha256').update(S.canonical(f)).digest('hex'))"</pre>
-  <button class="btn primary" id="verifyBtn">Re-derive &amp; verify fixings</button>
+  <button type="button" class="ds-btn primary" id="verifyBtn">Re-derive &amp; verify fixings</button>
   <div id="verifyOut" style="margin-top:10px"></div>
   <p><b>Continuous verification — run a witness.</b> The button above checks one moment; a
   <i>witness</i> checks every publication, forever, with <b>your</b> credentials instead of the
@@ -249,7 +246,7 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   <div id="histOut" class="muted">Loading…</div>
 
   <h2>8 · Version history</h2>
-  <table class="spec">
+  <table class="ds-spec-table">
     <tr><th>Version</th><th>Date</th><th>Change</th></tr>
     <tr><td>SMLX-1</td><td>2026-07-25</td><td>Launch: level-vs-first-day geometric construction.
       Known limit: a new constituent entered at relative 1.0, mechanically diluting the level —
@@ -298,6 +295,7 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   qualified counsel in every relevant jurisdiction. The authors publish measurements.</p>
 </div>
 <script src="settlement.js"></script>
+<script src="design-system/ds.js"></script>
 <script>
 (function () {
   "use strict";
@@ -309,29 +307,26 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   function budgetHtml(b) {
     if (!b) return "<p class='muted'>No budget published yet.</p>";
     var c = b.caseIndex, r = b.cashRatio, k = c.concentrated, cc = c.centerCapture;
-    var kRows = "";
+    // Plain cells pass raw values (DS.specTable escapes); cells carrying <b>
+    // markup use trusted { html } slots (money() output is HTML-safe).
+    var rows = [
+      ["Case basket daily $ volume", money(c.dailyDollarVolume), c.coverage],
+      ["Uniform attack: move every case 1% for one day", money(c.costMove1pctDay), ""],
+      ["Move SETTLE-CASE-7D 1% (uniform)", money(c.costMove1pctFix7d), ""],
+      ["Move SETTLE-CASE-30D 1% (uniform)", money(c.costMove1pctFix30d), ""],
+    ];
     if (k) {
-      kRows =
-        "<tr><td>Concentrated attack: cheapest " + esc(k.kMin) + " names, 1 day</td><td>" + money(k.costMove1pctDay) + "</td><td>" + esc(k.note || "") + "</td></tr>" +
-        "<tr><td><b>Move SETTLE-CASE-7D 1% (concentrated floor)</b></td><td><b>" + money(k.costMove1pctFix7d) + "</b></td><td></td></tr>" +
-        "<tr><td>Move SETTLE-CASE-30D 1% (concentrated floor)</td><td>" + money(k.costMove1pctFix30d) + "</td><td></td></tr>";
+      rows.push(["Concentrated attack: cheapest " + k.kMin + " names, 1 day", money(k.costMove1pctDay), k.note || ""]);
+      rows.push([{ html: "<b>Move SETTLE-CASE-7D 1% (concentrated floor)</b>" }, { html: "<b>" + money(k.costMove1pctFix7d) + "</b>" }, ""]);
+      rows.push(["Move SETTLE-CASE-30D 1% (concentrated floor)", money(k.costMove1pctFix30d), ""]);
     }
-    var ccRows = "";
     if (cc) {
-      ccRows =
-        "<tr><td><b>Center capture: seize &gt;50% of index weight</b></td><td><b>" + money(cc.costPerDay) + "/day</b></td><td>" + esc(cc.note || "") + "</td></tr>";
+      rows.push([{ html: "<b>Center capture: seize &gt;50% of index weight</b>" }, { html: "<b>" + money(cc.costPerDay) + "/day</b>" }, cc.note || ""]);
     }
-    return "<table class='spec'>" +
-      "<tr><th>Quantity</th><th>Value</th><th>Coverage</th></tr>" +
-      "<tr><td>Case basket daily $ volume</td><td>" + money(c.dailyDollarVolume) + "</td><td>" + esc(c.coverage) + "</td></tr>" +
-      "<tr><td>Uniform attack: move every case 1% for one day</td><td>" + money(c.costMove1pctDay) + "</td><td></td></tr>" +
-      "<tr><td>Move SETTLE-CASE-7D 1% (uniform)</td><td>" + money(c.costMove1pctFix7d) + "</td><td></td></tr>" +
-      "<tr><td>Move SETTLE-CASE-30D 1% (uniform)</td><td>" + money(c.costMove1pctFix30d) + "</td><td></td></tr>" +
-      kRows +
-      ccRows +
-      "<tr><td>Cash-ratio thin-leg 30d $ volume</td><td>" + money(r.thinLegDollarVolume30d) + "</td><td>" + esc(r.coverage) + "</td></tr>" +
-      "<tr><td>Move SETTLE-RATIO-30D 1%</td><td>" + money(r.costMove1pctFix30d) + "</td><td></td></tr>" +
-      "</table><p class='muted'>Model: wash fraction " + b.model.washFraction + ", Steam fee " + b.model.feeSteam +
+    rows.push(["Cash-ratio thin-leg 30d $ volume", money(r.thinLegDollarVolume30d), r.coverage]);
+    rows.push(["Move SETTLE-RATIO-30D 1%", money(r.costMove1pctFix30d), ""]);
+    return DS.specTable({ head: ["Quantity", "Value", "Coverage"], rows: rows }) +
+      "<p class='muted'>Model: wash fraction " + b.model.washFraction + ", Steam fee " + b.model.feeSteam +
       ", cash fee " + b.model.feeCash + (b.model.clampLog != null ? ", clamp ±" + b.model.clampLog + " log" : "") +
       " — " + esc(b.model.note) + ".</p>";
   }
@@ -349,12 +344,18 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       esc(sm.ratioCorroborated) + " · book " + esc(sm.bookCorroborated) + " · steam fresh " +
       esc(sm.steamFresh) + " · art evidenced " + esc(sm.artEvidenced) + "</p>";
     var fl = g.flags || [];
-    if (!fl.length) return head + "<p><span class='ok'>✓ NO FLAGS</span> — every corroborated mark agreed with its independent evidence this run.</p>";
-    return head + "<table class='spec'><tr><th>Severity</th><th>Lane</th><th>Item</th><th>Detail</th></tr>" +
-      fl.map(function (f) {
-        return "<tr><td>" + (f.severity === "alert" ? "<span class='bad'>ALERT</span>" : "watch") + "</td><td>" +
-          esc(f.lane) + "</td><td>" + esc(f.name) + "</td><td>" + esc(f.detail) + (f.dev != null ? " (" + esc(f.dev) + ")" : "") + "</td></tr>";
-      }).join("") + "</table>";
+    if (!fl.length) return head + "<p>" + DS.badge({ label: "✓ NO FLAGS", tone: "good" }) +
+      " — every corroborated mark agreed with its independent evidence this run.</p>";
+    return head + DS.specTable({
+      head: ["Severity", "Lane", "Item", "Detail"],
+      rows: fl.map(function (f) {
+        return [
+          f.severity === "alert" ? { html: DS.badge({ label: "ALERT", tone: "bad" }) } : "watch",
+          f.lane, f.name,
+          f.detail + (f.dev != null ? " (" + f.dev + ")" : ""),
+        ];
+      }),
+    });
   }
 
   var settlement = null;
@@ -373,13 +374,12 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
     var rows = lines.map(function (ln) {
       try {
         var f = JSON.parse(ln), fx = f.fixings || {};
-        var cell = function (n) { var x = fx[n]; return x && x.value != null ? x.value : (x ? esc(x.accruing || "—") : "—"); };
-        return "<tr><td>" + esc(f.day) + "</td><td>" + cell("SETTLE-CASE-7D") + "</td><td>" +
-          cell("SETTLE-CASE-30D") + "</td><td>" + cell("SETTLE-RATIO-30D") + "</td></tr>";
-      } catch (e) { return ""; }
-    }).join("");
-    document.getElementById("histOut").innerHTML = rows
-      ? "<table class='spec'><tr><th>Day</th><th>CASE-7D</th><th>CASE-30D</th><th>RATIO-30D</th></tr>" + rows + "</table>"
+        var cell = function (n) { var x = fx[n]; return x && x.value != null ? x.value : (x ? (x.accruing || "—") : "—"); };
+        return [f.day, cell("SETTLE-CASE-7D"), cell("SETTLE-CASE-30D"), cell("SETTLE-RATIO-30D")];
+      } catch (e) { return null; }
+    }).filter(Boolean);
+    document.getElementById("histOut").innerHTML = rows.length
+      ? DS.specTable({ head: ["Day", "CASE-7D", "CASE-30D", "RATIO-30D"], rows: rows })
       : "No fixing history yet.";
   }).catch(function () { document.getElementById("histOut").textContent = "No fixing history yet."; });
 
@@ -397,12 +397,12 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       out.innerHTML = res.map(function (r) {
         var p = pub[r.n];
         var match = p && p.hash === r.h;
-        return "<div>" + (match ? "<span class='ok'>✓ VERIFIED</span> " : "<span class='bad'>✗ MISMATCH</span> ") +
+        return "<div>" + (match ? DS.badge({ label: "✓ VERIFIED", tone: "good" }) : DS.badge({ label: "✗ MISMATCH", tone: "bad" })) + " " +
           esc(r.n) + " = " + (r.f.value != null ? r.f.value : "accruing (" + esc(r.f.accruing || "") + ")") +
           " <span class='muted'>· " + r.h.slice(0, 16) + "…</span></div>";
       }).join("") + "<p class='muted'>Derived in this browser from the committed series; hashes compared against the published fixing record." +
         " A MISMATCH on a freshly-deployed page can mean index.json and settlement.json are from different collector runs — retry after the next run.</p>";
-    }).catch(function (e) { out.innerHTML = "<p class='bad'>Verification failed to load data: " + esc(e.message) + "</p>"; });
+    }).catch(function (e) { out.innerHTML = "<p>" + DS.badge({ label: "Verification failed to load data: " + e.message, tone: "bad" }) + "</p>"; });
   });
 })();
 </script>

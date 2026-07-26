@@ -1,0 +1,61 @@
+{
+  "_comment": "DS no-bypass ratchet baseline (tools/ds-guard.js). Per-file bypass debt; the guard fails when any count EXCEEDS these. Lower via migration, then lock the gain with `node tools/ds-guard.js --update-baseline`. Never raise the baseline to admit a new bypass.",
+  "generated": "2026-07-26",
+  "categories": [
+    "rawHex",
+    "fontStack",
+    "handRolled",
+    "inlineStyle"
+  ],
+  "handRolledMarkers": [
+    "tile",
+    "tile2",
+    "chip",
+    "btn",
+    "hint",
+    "warmup",
+    "panel",
+    "badge",
+    "legend",
+    "sw",
+    "spec"
+  ],
+  "fileCategories": {
+    "skins.css": [
+      "rawHex",
+      "fontStack"
+    ]
+  },
+  "counts": {
+    "skins.js": {
+      "rawHex": 13,
+      "fontStack": 0,
+      "handRolled": 0,
+      "inlineStyle": 0
+    },
+    "index.html": {
+      "rawHex": 0,
+      "fontStack": 0,
+      "handRolled": 0,
+      "inlineStyle": 0
+    },
+    "methodology.html": {
+      "rawHex": 0,
+      "fontStack": 0,
+      "handRolled": 0,
+      "inlineStyle": 0
+    },
+    "backtest.html": {
+      "rawHex": 6,
+      "fontStack": 0,
+      "handRolled": 0,
+      "inlineStyle": 0
+    },
+    "skins.css": {
+      "rawHex": 1,
+      "fontStack": 0,
+      "handRolled": 0,
+      "inlineStyle": 0
+    }
+  }
+}

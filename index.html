@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Skin Market Lab — CS skin investment research</title>
 <link rel="stylesheet" href="skins.css">
+<link rel="stylesheet" href="design-system/tokens.css">
+<link rel="stylesheet" href="design-system/ds.css">
 </head>
 <body>
 <header class="hdr">
@@ -20,7 +22,7 @@
 
 <main class="grid">
   <aside>
-    <div class="panel">
+    <div class="ds-panel panel">
       <h2>FIND AN ITEM</h2>
       <div class="searchWrap">
         <input id="searchBox" placeholder="Search skins, cases, knives…" autocomplete="off"
@@ -28,12 +30,12 @@
         <div id="searchResults" role="listbox"></div>
       </div>
       <div class="btnrow">
-        <button class="btn" id="homeBtn" title="Back to the market overview">🏠 Market</button>
-        <button class="btn" id="refreshAllBtn" title="Record a price snapshot for every watched item">⟳ Snapshot all</button>
+        <button class="ds-btn btn" id="homeBtn" title="Back to the market overview">🏠 Market</button>
+        <button class="ds-btn btn" id="refreshAllBtn" title="Record a price snapshot for every watched item">⟳ Snapshot all</button>
       </div>
     </div>
 
-    <div class="panel">
+    <div class="ds-panel panel">
       <h2>PORTFOLIO</h2>
       <div id="pfTotals" class="pfTotals"></div>
       <div style="overflow-x:auto"><table class="pf" id="pfTable"></table></div>
@@ -41,12 +43,12 @@
         <input id="lotQty" type="number" min="1" step="1" placeholder="Qty" aria-label="Quantity">
         <input id="lotCost" type="number" min="0" step="0.01" placeholder="Cost each $" aria-label="Unit cost in dollars">
         <div class="lotHint" id="lotHint">Adds a lot of the selected item at your buy price.</div>
-        <button class="btn primary" type="submit">＋ Add lot of selected item</button>
+        <button class="ds-btn primary btn" type="submit">＋ Add lot of selected item</button>
       </form>
     </div>
   </aside>
 
-  <section id="itemView"><div class="panel"><div class="emptyChart">Loading market…</div></div></section>
+  <section id="itemView"><div class="ds-panel panel"><div class="emptyChart">Loading market…</div></div></section>
 </main>
 
 <div id="tooltip" aria-hidden="true"></div>
@@ -63,18 +65,19 @@
           <code id="importSnippet"></code></li>
         <li>The result is copied to your clipboard — paste it below.</li>
       </ol>
-      <p class="hint">Alternatively set <code>STEAM_COOKIE</code> on the server and use ⚡ Bootstrap instead.</p>
+      <p class="ds-hint hint">Alternatively set <code>STEAM_COOKIE</code> on the server and use ⚡ Bootstrap instead.</p>
     </div>
     <textarea id="importText" placeholder='[["Dec 06 2013 01: +0", 4.297, "117"], …]'></textarea>
     <div class="modalErr" id="importErr"></div>
     <div class="btnrow">
-      <button class="btn primary" id="importGo">Import</button>
-      <button class="btn" id="importCancel">Cancel</button>
+      <button class="ds-btn primary btn" id="importGo">Import</button>
+      <button class="ds-btn btn" id="importCancel">Cancel</button>
     </div>
   </div>
 </div>
 
 <script src="analytics.js"></script>
+<script src="design-system/ds.js"></script>
 <script src="skins.js"></script>
 </body>
 </html>

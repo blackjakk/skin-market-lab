@@ -5,7 +5,12 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Backtest — Lab Case Index reconstructed 2014–2026</title>
 <link rel="stylesheet" href="skins.css">
+<link rel="stylesheet" href="design-system/tokens.css">
+<link rel="stylesheet" href="design-system/ds.css">
 <style>
+  /* Page-specific only: prose layout + chart-canvas sizing the Design System
+     does not own. Shared components (spec tables, chart box, stat tiles,
+     legend, top nav) come from ds.css via .ds-* classes / DS.* factories. */
   .doc { max-width: 940px; margin: 0 auto; padding: 0 20px 60px; }
   .doc h1 { font-size: 24px; letter-spacing: 1px; margin: 18px 0 4px; }
   .doc h2 { font-size: 15px; letter-spacing: 1.6px; color: var(--accent); margin: 30px 0 10px;
@@ -14,31 +19,18 @@
   .doc b { color: var(--text-primary); }
   .doc code { background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px;
     padding: 0 5px; font-size: 12px; }
-  table.spec { width: 100%; border-collapse: collapse; font-size: 12.5px; margin: 10px 0; }
-  table.spec th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 6px 8px;
-    border-bottom: 1px solid var(--line); }
-  table.spec td { padding: 7px 8px; border-bottom: 1px solid var(--line);
-    font-variant-numeric: tabular-nums; color: var(--text-secondary); }
-  table.spec td:first-child { color: var(--text-primary); }
   .muted { color: var(--text-muted); }
-  .up { color: var(--status-good); } .dn { color: var(--status-bad); }
-  .topnav { padding: 14px 20px; }
-  .topnav a { color: var(--text-secondary); text-decoration: none; font-size: 13px; margin-right: 14px; }
-  .chartBox { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px;
-    padding: 12px; margin: 12px 0; }
-  .chartBox canvas { width: 100%; height: 320px; display: block; }
-  .legend { display: flex; flex-wrap: wrap; gap: 14px; font-size: 12px; color: var(--text-secondary); margin: 8px 2px 0; }
-  .legend .sw { display: inline-block; width: 18px; height: 3px; border-radius: 2px; vertical-align: middle; margin-right: 6px; }
-  .tiles2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 12px 0; }
-  .tile2 { background: var(--surface-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
-  .tile2 .lb { font-size: 10.5px; letter-spacing: 1.2px; color: var(--text-muted); }
-  .tile2 .v { font-size: 20px; font-weight: 700; color: var(--text-primary); margin-top: 2px;
-    font-variant-numeric: tabular-nums; }
-  .tile2 .sub { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+  .doc .ds-spec-table { margin: 10px 0; }
+  .doc .ds-chartbox { margin: 12px 0; }
+  .doc .ds-tiles { margin: 12px 0; }
+  #mainChart { height: 320px; }                 /* canvas needs a fixed height so drawChart reads clientHeight */
+  #mainLegend { margin: 8px 2px 0; }
+  .ds-spec-table td.up { color: var(--ds-good); }   /* colored return cells (page-specific over ds td color) */
+  .ds-spec-table td.dn { color: var(--ds-bad); }
 </style>
 </head>
 <body>
-<div class="topnav"><a href="./">← Skin Market Lab</a><a href="methodology.html">Methodology</a></div>
+<div class="ds-topnav"><a href="./">← Skin Market Lab</a><a href="methodology.html">Methodology</a></div>
 <div class="doc">
   <h1>Backtest <span class="muted">·</span> the index, had it existed since 2014</h1>
   <p class="muted" id="stamp">Loading backtest/result.json…</p>
@@ -50,14 +42,14 @@
   real market history is <i>measured</i>, not asserted.</p>
 
   <h2>1 · The reconstructed index (log scale)</h2>
-  <div class="chartBox"><canvas id="mainChart"></canvas>
-    <div class="legend" id="mainLegend"></div></div>
-  <div class="tiles2" id="statTiles"></div>
+  <div class="ds-chartbox"><canvas id="mainChart"></canvas>
+    <div class="ds-legend" id="mainLegend"></div></div>
+  <div class="ds-tiles" id="statTiles"></div>
 
   <h2>2 · What each protection is worth — variants</h2>
   <p>Each variant disables exactly one rule; everything else stays as shipped. The gaps are the
   measured value (or cost) of each layer over twelve years of real history:</p>
-  <table class="spec" id="variantTable"></table>
+  <div id="variantTable"></div>
   <ul>
     <li><b>Seasoning is worth everything.</b> New cases average −1590%/yr (annualized log) in their
     first three months and −36%/yr through month twelve, turning positive only after the drop pool
@@ -74,11 +66,11 @@
 
   <h2>3 · Event studies</h2>
   <p>Windows are measured on the reconstruction; the dates are public history:</p>
-  <table class="spec" id="eventTable"></table>
-  <table class="spec" id="movesTable"></table>
+  <div id="eventTable"></div>
+  <div id="movesTable"></div>
 
   <h2>4 · Diagnostics</h2>
-  <div class="tiles2" id="diagTiles"></div>
+  <div class="ds-tiles" id="diagTiles"></div>
   <p id="weightsLine"></p>
 
   <h2>5 · What the backtest changed (SMLX-6)</h2>
@@ -105,6 +97,7 @@
     questions, both published.</li>
   </ul>
 </div>
+<script src="design-system/ds.js"></script>
 <script>
 (function () {
   "use strict";
@@ -167,48 +160,56 @@
     });
     drawChart(document.getElementById("mainChart"), runs);
     document.getElementById("mainLegend").innerHTML = Object.keys(v).map(function (k) {
-      return "<span><span class='sw' style='background:" + COL[k] + "'></span>" + esc(v[k].label) + "</span>";
+      return DS.legendItem({ swatch: COL[k], label: v[k].label });
     }).join("");
+    // stat tiles: DS.tile at doc scale (cls "big"). Plain fields are escaped by
+    // the factory, so callers pass raw strings (no pre-esc).
     var tile = function (lb, val, sub) {
-      return "<div class='tile2'><div class='lb'>" + lb + "</div><div class='v'>" + val + "</div>"
-        + (sub ? "<div class='sub'>" + sub + "</div>" : "") + "</div>";
+      return DS.tile({ label: lb, value: val, sub: sub || null, cls: "big" });
     };
     document.getElementById("statTiles").innerHTML =
       tile("END LEVEL", st.endLevel.toLocaleString("en-US"), "base 100 at " + st.firstDay) +
       tile("TOTAL RETURN", fmtPct(st.totalReturnPct), "") +
       tile("CAGR", fmtPct(st.cagrPct), "") +
       tile("ANN. VOL", st.annVolPct + "%", "daily log-returns") +
-      tile("MAX DRAWDOWN", st.maxDrawdownPct + "%", esc(st.maxDrawdownPeak + " → " + st.maxDrawdownTrough)) +
-      tile("WORST DAY", fmtPct(st.worstDay.pct), esc(st.worstDay.day));
-    document.getElementById("variantTable").innerHTML =
-      "<tr><th>Variant</th><th>End level</th><th>Total</th><th>CAGR</th><th>Max DD</th></tr>" +
-      Object.keys(v).map(function (k) {
+      tile("MAX DRAWDOWN", st.maxDrawdownPct + "%", st.maxDrawdownPeak + " → " + st.maxDrawdownTrough) +
+      tile("WORST DAY", fmtPct(st.worstDay.pct), st.worstDay.day);
+    document.getElementById("variantTable").innerHTML = DS.specTable({
+      head: ["Variant", "End level", "Total", "CAGR", "Max DD"],
+      rows: Object.keys(v).map(function (k) {
         var s = v[k].stats;
-        return "<tr><td><span class='sw' style='display:inline-block;width:12px;height:3px;background:" + COL[k]
-          + ";border-radius:2px;margin-right:8px;vertical-align:middle'></span>" + esc(v[k].label) + "</td><td>"
-          + (s ? s.endLevel.toLocaleString("en-US") : "—") + "</td><td class='" + cls(s && s.totalReturnPct) + "'>"
-          + (s ? fmtPct(s.totalReturnPct) : "—") + "</td><td>" + (s ? fmtPct(s.cagrPct) : "—") + "</td><td>"
-          + (s ? s.maxDrawdownPct + "%" : "—") + "</td></tr>";
-      }).join("");
-    document.getElementById("eventTable").innerHTML =
-      "<tr><th>Event</th><th>Date</th><th>Index before</th><th>~30d after</th><th>Move</th></tr>" +
-      j.events.map(function (e) {
-        return "<tr><td>" + esc(e.label) + "</td><td>" + esc(e.day) + "</td><td>" + e.pre.toLocaleString("en-US")
-          + "</td><td>" + e.post.toLocaleString("en-US") + "</td><td class='" + cls(e.movePct) + "'>"
-          + fmtPct(e.movePct) + "</td></tr>";
-      }).join("");
-    document.getElementById("movesTable").innerHTML =
-      "<tr><th>Largest 30-day windows</th><th>From</th><th>To</th><th>Move</th></tr>" +
-      j.topMoves.up.map(function (w, i) {
-        return "<tr><td>Up #" + (i + 1) + "</td><td>" + esc(w.from) + "</td><td>" + esc(w.to)
-          + "</td><td class='up'>" + fmtPct(w.movePct) + "</td></tr>"; }).join("") +
-      j.topMoves.down.map(function (w, i) {
-        return "<tr><td>Down #" + (i + 1) + "</td><td>" + esc(w.from) + "</td><td>" + esc(w.to)
-          + "</td><td class='dn'>" + fmtPct(w.movePct) + "</td></tr>"; }).join("");
+        return [
+          { html: DS.legendItem({ swatch: COL[k], label: v[k].label }) },
+          s ? s.endLevel.toLocaleString("en-US") : "—",
+          { text: s ? fmtPct(s.totalReturnPct) : "—", cls: cls(s && s.totalReturnPct) },
+          s ? fmtPct(s.cagrPct) : "—",
+          s ? s.maxDrawdownPct + "%" : "—",
+        ];
+      }),
+    });
+    document.getElementById("eventTable").innerHTML = DS.specTable({
+      head: ["Event", "Date", "Index before", "~30d after", "Move"],
+      rows: j.events.map(function (e) {
+        return [
+          e.label, e.day,
+          e.pre.toLocaleString("en-US"),
+          e.post.toLocaleString("en-US"),
+          { text: fmtPct(e.movePct), cls: cls(e.movePct) },
+        ];
+      }),
+    });
+    document.getElementById("movesTable").innerHTML = DS.specTable({
+      head: ["Largest 30-day windows", "From", "To", "Move"],
+      rows: j.topMoves.up.map(function (w, i) {
+        return ["Up #" + (i + 1), w.from, w.to, { text: fmtPct(w.movePct), cls: "up" }];
+      }).concat(j.topMoves.down.map(function (w, i) {
+        return ["Down #" + (i + 1), w.from, w.to, { text: fmtPct(w.movePct), cls: "dn" }];
+      })),
+    });
     document.getElementById("diagTiles").innerHTML =
       tile("CLAMP ENGAGED", j.clamp.ratePct + "%", "of days, ≥1 name clipped") +
       tile("BIGGEST ABSORB", (j.clamp.topAbsorbed[0] ? fmtPct(j.clamp.topAbsorbed[0].absorbedPct) : "—"),
-        esc(j.clamp.topAbsorbed[0] ? j.clamp.topAbsorbed[0].day : "")) +
+        j.clamp.topAbsorbed[0] ? j.clamp.topAbsorbed[0].day : "") +
       tile("NAMES AT 10% CAP", String(j.weights.cappedAtTen), "current month");
     document.getElementById("weightsLine").innerHTML = "<b>Current top weights</b> (reference run): "
       + j.weights.top.map(function (w) { return esc(w.name.replace(" Case", "")) + " "
