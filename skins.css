@@ -216,3 +216,9 @@ tr.mrow:hover, tr.mrow:focus-visible { background: var(--surface-2); outline: no
   color: var(--text-secondary); margin: 4px 0 2px; }
 .idxLegend .sw { display: inline-block; width: 14px; height: 3px; border-radius: 2px;
   vertical-align: middle; margin-right: 5px; }
+
+/* home-chart reconstruction legend + range chips (backtest overlay) */
+.idxLegend a { color: var(--text-secondary); }
+.idxRangeRow { margin-left: auto; display: flex; gap: 4px; }
+.idxRangeRow .btn { padding: 2px 8px; font-size: 10.5px; border-radius: 6px; }
+.idxRangeRow .btn.on { border-color: var(--accent); color: var(--accent); }

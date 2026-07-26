@@ -206,6 +206,27 @@ M.setTransport(async (url) => {
     ok(rows.length === 2, "static data mode boots read-only on the market home (" + rows.length + " rows)");
     ok(/read-only/.test(await pageD.textContent("#netStatus")), "netStatus says read-only + data via GitHub");
     ok(/LAB CASE INDEX/.test(await pageD.textContent("#itemView")), "market strip renders from the committed manifest");
+    // the 12-year backtest reconstruction overlays the home chart (rebased,
+    // dashed, with range chips) — served from the repo's committed result.json
+    await pageD.waitForFunction(() => {
+      const l = document.querySelector(".idxLegend");
+      return l && /reconstruction/.test(l.textContent);
+    }, { timeout: 8000 });
+    await pageD.click('[data-ir="1Y"]');
+    await pageD.waitForFunction(() => {
+      const b = document.querySelector('[data-ir="1Y"]');
+      return b && b.classList.contains("on");
+    }, { timeout: 6000 });
+    const idxPainted = await pageD.evaluate(() => {
+      const cv = document.getElementById("idxChart");
+      if (!cv) return 0;
+      const img = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+      let lit = 0;
+      for (let i = 3; i < img.length; i += 40) if (img[i] > 0) lit++;
+      return lit;
+    });
+    ok(idxPainted > 200, "home chart overlays the 12-year reconstruction with working range chips (" + idxPainted + " px)");
+    await pageD.click('[data-ir="ALL"]');
     await pageD.screenshot({ path: "/tmp/skin_lab_static.png", fullPage: true });
     console.log("  📸 /tmp/skin_lab_static.png");
     await pageD.click('.mrow:has-text("Redline")');

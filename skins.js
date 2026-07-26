@@ -22,7 +22,8 @@
   //       "static" — no tracker; reading the collector's committed data
   //                  files from this same static host (GitHub Pages)
   const state = { mode: "live", manifest: null, watch: [], market: null, selected: null, item: null,
-    portfolio: null, range: "3M", hover: -1, view: "home", sort: { key: "vol24h", dir: -1 } };
+    portfolio: null, range: "3M", hover: -1, view: "home", sort: { key: "vol24h", dir: -1 },
+    backtest: null, idxRange: "ALL" };
   const RANGES = { "1M": 31, "3M": 92, "1Y": 366, "ALL": Infinity };
 
   // Where "edit the watchlist" and "run the collector" live on GitHub.
@@ -153,6 +154,24 @@
     const idxPts = series.filter((s) => s.caseIdx != null);
     const cashPts = A.cashAdjustedIndex(series);
     const btcCorr = A.corrDaily(series, "caseIdx", "btc", 30);
+    // 12-year backtest reconstruction, REBASED so it flows into the live
+    // series at the live series' first day (chart context only — the live
+    // published index is never backfilled; rebasing is cosmetic, disclosed)
+    let reconPts = [];
+    if (state.backtest && state.backtest.length >= 2) {
+      const liveFirst = idxPts.length ? idxPts[0] : null;
+      const liveFirstDay = liveFirst ? A.dayKey(liveFirst.t) : null;
+      let join = state.backtest[state.backtest.length - 1];
+      if (liveFirstDay) for (const p of state.backtest) { if (p[0] <= liveFirstDay) join = p; else break; }
+      const k = (liveFirst ? liveFirst.caseIdx : 100) / join[1];
+      reconPts = state.backtest.filter((p) => !liveFirstDay || p[0] < liveFirstDay)
+        .map((p) => ({ t: Date.parse(p[0]), v: p[1] * k }));
+    }
+    const IDXR = { "1Y": 366, "5Y": 1827, "ALL": Infinity };
+    const idxCut = Date.now() - (IDXR[state.idxRange] || Infinity) * 86400000;
+    const reconVis = reconPts.filter((p) => p.t >= idxCut);
+    const hasIdxChart = idxPts.length >= 2 || reconVis.length >= 2;
+    const RECON_COL = "rgba(57,135,229,.45)";
     const strip =
       tile2("LAB CASE INDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
         t && t.idx1 != null ? fmtPct(t.idx1) + " 24h" + (t.idx7 != null ? " · " + fmtPct(t.idx7) + " 7d" : "") : "base 100 at first collection",
@@ -171,14 +190,18 @@
       tile2("TRACKED", String(state.watch.length), state.mode === "static" && state.manifest ? "updated " + ago(state.manifest.generatedAt) : "live tracker", "");
     $("itemView").innerHTML =
       '<div class="panel"><div class="tiles strip">' + strip + "</div>" +
-        (idxPts.length >= 2 ?
+        (hasIdxChart ?
           '<div class="idxLegend">' +
+            (reconPts.length >= 2 ? '<span><span class="sw" style="background:' + RECON_COL + '"></span>2014→ reconstruction (<a href="backtest.html">backtest</a>, rebased)</span>' : "") +
             '<span><span class="sw" style="background:' + COL.price + '"></span>Lab Index (wallet $)</span>' +
             '<span><span class="sw" style="background:' + COL.sma7 + '"></span>Cash-adjusted (real $)</span>' +
             (series.some((s) => s.btc != null) ? '<span><span class="sw" style="background:' + COL.sma30 + '"></span>BTC (rebased)</span>' : "") +
-            '<span class="hint">gap between the first two = wallet inflation / exit pressure</span>' +
+            (reconPts.length >= 2
+              ? '<span class="idxRangeRow">' + Object.keys(IDXR).map((r) =>
+                  '<button class="btn' + (state.idxRange === r ? " on" : "") + '" data-ir="' + r + '">' + r + "</button>").join("") + "</span>"
+              : '<span class="hint">gap between the first two = wallet inflation / exit pressure</span>') +
           "</div>" +
-          '<canvas id="idxChart" height="130" aria-label="Lab case index, cash-adjusted index and BTC over time" role="img"></canvas>' : "") +
+          '<canvas id="idxChart" height="130" aria-label="Lab case index over time, with backtest reconstruction" role="img"></canvas>' : "") +
       "</div>" +
       (gain.length || lose.length ?
         '<div class="panel moversRow">' +
@@ -221,15 +244,21 @@
     $("itemView").querySelectorAll(".moverChip").forEach((b) =>
       b.addEventListener("click", () => selectItem(b.dataset.name)));
     rows.forEach((w, i) => drawSpark($("itemView").querySelector('.spark[data-i="' + i + '"]'), w.spark));
-    if (idxPts.length >= 2) {
-      const lines = [{ pts: idxPts.map((p) => ({ t: p.t, v: p.caseIdx })), col: COL.price, w: 2 }];
+    if (hasIdxChart) {
+      const lines = [];
+      if (reconVis.length >= 2) lines.push({ pts: reconVis, col: RECON_COL, w: 1.5, dash: [4, 3] });
+      if (idxPts.length >= 2) lines.push({ pts: idxPts.map((p) => ({ t: p.t, v: p.caseIdx })), col: COL.price, w: 2 });
       if (cashPts.length >= 2) lines.push({ pts: cashPts.map((p) => ({ t: p.t, v: p.cashIdx })), col: COL.sma7, w: 1.5 });
       const btcBase = series.find((s) => s.btc != null);
       if (btcBase) {
         const btcPts = series.filter((s) => s.btc != null).map((s) => ({ t: s.t, v: 100 * s.btc / btcBase.btc }));
         if (btcPts.length >= 2) lines.push({ pts: btcPts, col: COL.sma30, w: 1.5, dash: [5, 4] });
       }
-      drawIdxChart($("idxChart"), lines);
+      // log scale whenever the reconstruction is on screen (a 40x level range
+      // flattens to nothing on a linear axis)
+      drawIdxChart($("idxChart"), lines, { log: reconVis.length >= 2 });
+      $("itemView").querySelectorAll("[data-ir]").forEach((b) =>
+        b.addEventListener("click", () => { state.idxRange = b.dataset.ir; renderHome(); }));
     }
   }
   function settlementPanel(st, integ) {
@@ -287,25 +316,32 @@
   }
   // lines: [{pts:[{t,v}], col, w, dash?}] — all rebased to 100 so ONE axis
   // serves every series (never two scales on one chart)
-  function drawIdxChart(cv, lines) {
+  function drawIdxChart(cv, lines, opts) {
     if (!cv || !lines.length) return;
+    const log = !!(opts && opts.log);
     cv.width = cv.parentElement.clientWidth - 8;
     const ctx = cv.getContext("2d");
     const W = cv.width, H = cv.height, L = 40, R = 8, T = 8, B = 16;
-    const all = lines.flatMap((l) => l.pts);
+    const all = lines.flatMap((l) => l.pts).filter((p) => !log || p.v > 0);
+    const tv = (v) => (log ? Math.log(v) : v);
     const t0 = Math.min(...all.map((p) => p.t)), t1 = Math.max(...all.map((p) => p.t)) || t0 + 1;
-    let lo = Math.min(...all.map((p) => p.v)), hi = Math.max(...all.map((p) => p.v));
+    let lo = Math.min(...all.map((p) => tv(p.v))), hi = Math.max(...all.map((p) => tv(p.v)));
     const pad = (hi - lo) * 0.1 || 1; lo -= pad; hi += pad;
     const x = (t) => L + (t1 === t0 ? 0 : (t - t0) / (t1 - t0)) * (W - L - R);
-    const y = (v) => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+    const y = (v) => T + (1 - (tv(v) - lo) / (hi - lo)) * (H - T - B);
     ctx.font = "10px -apple-system, sans-serif"; ctx.strokeStyle = COL.grid; ctx.fillStyle = COL.text; ctx.lineWidth = 1;
     for (let i = 0; i <= 2; i++) {
-      const v = lo + (hi - lo) * i / 2, yy = Math.round(y(v)) + 0.5;
+      const gv = log ? Math.exp(lo + (hi - lo) * i / 2) : lo + (hi - lo) * i / 2;
+      const yy = Math.round(y(gv)) + 0.5;
       ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(W - R, yy); ctx.stroke();
-      ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.fillText(v.toFixed(1), L - 5, yy);
+      ctx.textAlign = "right"; ctx.textBaseline = "middle";
+      ctx.fillText(gv >= 1000 ? (gv / 1000).toFixed(1) + "k" : gv.toFixed(1), L - 5, yy);
     }
     const d0 = new Date(t0), d1 = new Date(t1);
-    const dl = (d) => d.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    const longSpan = t1 - t0 > 400 * 86400000;
+    const dl = (d) => d.toLocaleDateString("en-US", longSpan
+      ? { month: "short", year: "numeric", timeZone: "UTC" }
+      : { month: "short", day: "numeric", timeZone: "UTC" });
     ctx.textAlign = "center"; ctx.textBaseline = "top";
     ctx.fillText(dl(d0), x(t0) + 24, H - B + 4); ctx.fillText(dl(d1), x(t1) - 24, H - B + 4);
     for (const ln of lines) {
@@ -904,8 +940,24 @@
     await loadPortfolio();
     renderHome();
   }
+  // The 12-year reconstruction (backtest/result.json, committed + served by
+  // Pages AND the live tracker) — home-chart context. Missing file = live
+  // chart only, no error: the reconstruction is optional garnish.
+  async function loadBacktest() {
+    try {
+      const r = await fetchTimeout("backtest/result.json", 6000, {});
+      if (!r.ok) return;
+      const j = await r.json();
+      const v = j && j.variants && j.variants.smlx6;
+      if (v && v.series && v.series.length >= 2) {
+        state.backtest = v.series;
+        if (state.view === "home" && state.market) renderHome();
+      }
+    } catch (e) { /* no reconstruction available */ }
+  }
   async function boot() {
     $("netStatus").textContent = "connecting…";
+    loadBacktest(); // fire-and-forget — re-renders home when it lands
     if (!(await resolveApiBase())) {
       if (await tryStatic()) return bootStatic();
       return renderSetup();

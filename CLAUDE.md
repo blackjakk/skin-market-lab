@@ -236,7 +236,7 @@ dashboard from the collector's committed files), or the setup panel
   import/bootstrap, portfolio P/L, restart persistence, watchlist
   seeding, the collector (manifest, import merge, dedupe, book store,
   integrity attestation).
-- `node client-probe.js` — 36 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node client-probe.js` — 37 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback
