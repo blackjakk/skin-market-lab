@@ -18,6 +18,7 @@ const A = require("./analytics.js");
 const M = require("./market.js");
 const S = require("./settlement.js");
 const { startServer, slug } = require("./server.js");
+const { witness } = require("./witness.js");
 
 let pass = 0, fail = 0;
 const ok = (c, label) => { if (c) { pass++; console.log("  ✓ " + label); } else { fail++; console.log("  ✗ FAIL " + label); } };
@@ -610,6 +611,48 @@ async function fixtureTransport(url, headers) {
   const c2 = await collect({ root: CROOT });
   const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
   ok(hl2.length === hl1.length && c2.manifest.items.length === 4, "immediate re-run dedupes snapshots, still refreshes the manifest");
+  // ── witness protocol against the collector's published tree ──────────────
+  console.log("— witness —");
+  const readLocal = async (rel) => {
+    const f = path.join(CROOT, rel);
+    return fs.existsSync(f) ? fs.readFileSync(f, "utf8") : null;
+  };
+  const w1 = await witness({ read: readLocal, primary: "fixture://primary", obsN: 3 });
+  ok(w1.verdict === "ATTESTED" && w1.checks.series.mismatchedDays === 0 && w1.checks.weightsMatch
+    && Object.values(w1.checks.fixings).every(Boolean)
+    && w1.checks.observations.length === 3 && w1.checks.observations.every((o) => o.ok === true),
+    "witness ATTESTS an honest primary (full re-derivation + hashes + 3 independent samples)");
+  // tampered published index value → the re-derivation catches it
+  const wTamperIdx = async (rel) => {
+    const t = await readLocal(rel);
+    if (rel !== "data/index.json" || t == null) return t;
+    const j = JSON.parse(t);
+    j.market.series[j.market.series.length - 1].caseIdx = 999.99;
+    return JSON.stringify(j);
+  };
+  const w2 = await witness({ read: wTamperIdx, primary: "fixture://primary", obsN: 0 });
+  ok(w2.verdict === "MISMATCH" && w2.checks.series.mismatchedDays >= 1
+    && w2.reasons.some((r) => /do not re-derive from the committed history/.test(r)),
+    "witness catches a fabricated index value (published series ≠ re-derivation from raw files)");
+  // tampered fixing hash → the byte-exact hash check catches it
+  const wTamperFix = async (rel) => {
+    const t = await readLocal(rel);
+    if (rel !== "data/settlement.json" || t == null) return t;
+    const j = JSON.parse(t);
+    j.latest.fixings["SETTLE-CASE-7D"].hash = "0".repeat(64);
+    return JSON.stringify(j);
+  };
+  const w3 = await witness({ read: wTamperFix, primary: "fixture://primary", obsN: 0 });
+  ok(w3.verdict === "MISMATCH" && w3.checks.fixings["SETTLE-CASE-7D"] === false
+    && w3.checks.fixings["SETTLE-RATIO-30D"] === true,
+    "witness catches a tampered fixing hash (and vouches for the untouched ones)");
+  // primary's marks diverge from live reality → the observation lane alarms
+  fixture.steamPrice = "$40.00";
+  const w4 = await witness({ read: readLocal, primary: "fixture://primary", obsN: 3 });
+  fixture.steamPrice = "$23.00";
+  ok(w4.verdict === "MISMATCH" && w4.checks.observations.filter((o) => o.ok === false).length >= 2
+    && w4.reasons.some((r) => /independently sampled prices diverge/.test(r)),
+    "witness alarms when the primary's marks diverge from independently sampled reality (≥2 names)");
   fs.rmSync(CROOT, { recursive: true, force: true });
 
   M.setTransport(null);

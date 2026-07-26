@@ -221,6 +221,16 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   console.log(n, c.createHash('sha256').update(S.canonical(f)).digest('hex'))"</pre>
   <button class="btn primary" id="verifyBtn">Re-derive &amp; verify fixings</button>
   <div id="verifyOut" style="margin-top:10px"></div>
+  <p><b>Continuous verification — run a witness.</b> The button above checks one moment; a
+  <i>witness</i> checks every publication, forever, with <b>your</b> credentials instead of the
+  operator's: fork the repository, enable Actions on the fork, and <code>witness.yml</code> re-derives
+  the full index from the committed raw files (using the collector's own assembly code), verifies
+  every fixing hash byte-exactly, and takes its own independent Steam samples against the published
+  marks — every 6 hours. Any divergence fails the workflow: red CI on <i>your</i> fork plus GitHub's
+  automatic failure email is the alarm, entirely outside the operator's control. This repository also
+  witnesses itself each cycle (<code>data/witness.json</code>) — that catches drift and corruption,
+  but self-attestation can never prove operator honesty; only an independently run witness can. Full
+  trust analysis, attack-by-attack: <code>TRUST_ARCHITECTURE.md</code> in the repository.</p>
 
   <h2>7 · History</h2>
   <p>Every collector run appends the day's fixing record to <code>data/settlements.jsonl</code>

@@ -1,0 +1,53 @@
+name: Witness — verify the primary
+
+# The self-service trust layer (TRUST_ARCHITECTURE.md): re-derives the
+# primary's published index + fixings from its committed raw files and takes
+# independent Steam samples. In THIS repo it self-witnesses (catches
+# derivation/publication drift). In a FORK it witnesses the canonical site
+# with the fork owner's credentials — a real second party. Enabling it there
+# is the whole setup: fork → Actions tab → enable. A divergence fails this
+# run: red CI + GitHub's automatic failure email is the alarm.
+
+on:
+  schedule:
+    - cron: "47 */6 * * *" # 30 min after the primary's :17 collector cron
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: witness
+  cancel-in-progress: false
+
+jobs:
+  witness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify the primary publisher
+        id: w
+        run: node witness.js || echo "failed=1" >> "$GITHUB_OUTPUT"
+        env:
+          # Forks may point elsewhere via a PRIMARY repository variable;
+          # the default is the canonical site, so a fork needs NO config.
+          PRIMARY: ${{ vars.PRIMARY || 'https://blackjakk.github.io/skin-market-lab' }}
+      - name: Commit attestation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/witness.json
+          if git diff --cached --quiet; then echo "no change"; else
+            git commit -m "witness: $(date -u '+%Y-%m-%d %H:%M') UTC"
+            git pull --rebase origin HEAD || true
+            git push origin HEAD
+          fi
+      - name: Alarm on mismatch
+        if: steps.w.outputs.failed == '1'
+        run: |
+          echo "::error::WITNESS MISMATCH — the primary's published data did not verify. See data/witness.json for reasons."
+          exit 1

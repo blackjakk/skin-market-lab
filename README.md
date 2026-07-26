@@ -127,6 +127,17 @@ Scheduled collector runs add random sampling jitter so reading instants
 can't be pinned. The home page shows the current state as a MARK INTEGRITY
 tile; the full flag table is on the methodology page.
 
+**Don't trust me — witness it.** Fork this repo and enable Actions: your
+fork's `witness.yml` then independently verifies every publication — it
+re-derives the whole index from the committed raw files with the
+collector's own code, checks every fixing hash byte-exactly, and takes its
+own live Steam samples against the published marks, every 6 hours. Any
+divergence fails the workflow on **your** fork (red CI + GitHub's failure
+email), entirely outside the operator's reach. This repo also witnesses
+itself (`data/witness.json`) — that catches drift, not dishonesty; real
+assurance is running your own. Design + threat analysis:
+[TRUST_ARCHITECTURE.md](TRUST_ARCHITECTURE.md).
+
 ## What the analytics mean
 
 All computed in `analytics.js` (shared verbatim by server and
@@ -160,7 +171,7 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 117 checks, hermetic (fixture transport):
+- `npm run probe` — 121 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
 - `npm run probe:ui` — 35 real-Chromium checks across live AND static modes:

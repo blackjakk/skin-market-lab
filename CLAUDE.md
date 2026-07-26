@@ -168,6 +168,27 @@ dashboard from the collector's committed files), or the setup panel
   table + sparklines); item detail is one click deep with a ← Market back
   button. The watchlist is ~all cases (the index basket) + a few blue-chip
   skins — keep the basket broad, the index is only as good as its coverage.
+- WITNESS PROTOCOL (witness.js + witness.yml — the trust-architecture
+  layer; design doc TRUST_ARCHITECTURE.md): anyone forks the repo +
+  enables Actions → their fork independently verifies every publication
+  each 6h cycle (cron :47, 30min after the collector's :17). Three
+  checks: (1) FULL RE-DERIVATION — fetch watchlist + every history
+  jsonl + import file from the primary's Pages site and rebuild the
+  index with collect.js's exported assembleMarketItem (ONE function
+  shared by collector and witness — forking that logic false-alarms
+  every witness; that's why it's exported), compare every published
+  day's index fields + weights; (2) fixing hashes byte-exact +
+  methodology stamp; (3) independent live Steam samples vs the
+  primary's marks (|log dev| ≤ 0.12, alarm needs ≥2 divergent names —
+  single-name drift between sampling instants is noise). MISMATCH/
+  UNREACHABLE → exit 1 → red CI on the WITNESS repo + GitHub's failure
+  email = the alarm, outside the primary operator's control. This repo
+  self-witnesses (L0: catches drift/corruption, NOT operator honesty —
+  the ladder is in the design doc). Verified live before shipping:
+  ATTESTED against the real Pages site on first run. Buff163 third
+  venue: DESIGNED in TRUST_ARCHITECTURE.md §4, deliberately NOT
+  dark-built — wire it + live-verify in the same session the
+  BUFF_API_KEY secret lands (the book-lane incident is the lesson).
 - `analytics.js` is UMD and SHARED VERBATIM by server (require) and browser
   (window.SkinAnalytics) — keep it dependency-free and side-effect-free;
   the probe pins its math to hand-computed values.
@@ -177,7 +198,7 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 117 checks: analytics units (incl. SMLX-3
+- `node probe.js` — 121 checks: analytics units (incl. SMLX-3
   winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
   clamp, concentrated/center-capture budget arithmetic, INTEG-1 lane
   pins, order-book fetcher parsing), full API flow, snapshot dedupe,

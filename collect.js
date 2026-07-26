@@ -48,6 +48,18 @@ function catOf(name) {
   return CAT_BY_NAME.get(name) || (/\b(Case|Package)$/.test(name) ? "case" : name.startsWith("★") ? "knife" : "skin");
 }
 
+// ONE canonical raw-inputs → market-item assembly, shared by the collector
+// and the WITNESS (witness.js re-derives the published index from the
+// committed files with THIS function — any fork of this logic would
+// false-alarm every witness). lines = history jsonl records (parsed),
+// imported = the data/import/<slug>.json object or null.
+function assembleMarketItem(name, tier, lines, imported) {
+  const series = A.assembleSeries(imported && imported.rows, lines);
+  const artDaily = tier ? A.toDaily(lines.filter((l) => l.src === "skinport" && l.sp30 != null)
+    .map((l) => ({ t: l.t, price: l.sp30 })), { volMode: "max" }) : [];
+  return { name, cat: catOf(name), tier, daily: series.daily, skinportDaily: series.skinportDaily, artDaily };
+}
+
 async function collect(opts) {
   opts = opts || {};
   const root = opts.root || __dirname;
@@ -140,17 +152,15 @@ async function collect(opts) {
       if (last) quote = { t: last.t, price: last.price, lowest: last.lowest != null ? last.lowest : null, vol: last.vol != null ? last.vol : null };
     }
     const imported = readJson(path.join(dataDir, "import", s + ".json"), null);
-    const series = A.assembleSeries(imported && imported.rows, lines);
-    const an = A.analyze(series.daily);
-    const cat = catOf(name);
-    const artDaily = tier ? A.toDaily(lines.filter((l) => l.src === "skinport" && l.sp30 != null)
-      .map((l) => ({ t: l.t, price: l.sp30 })), { volMode: "max" }) : [];
+    const mi = assembleMarketItem(name, tier, lines, imported);
+    const an = A.analyze(mi.daily);
+    const cat = mi.cat;
     const m30latest = (sales && sales.last30d && sales.last30d.median) || null;
-    marketItems.push({ name, cat, tier, daily: series.daily, skinportDaily: series.skinportDaily, artDaily });
+    marketItems.push(mi);
     // per-item daily (skinport realized ÷ steam) ratios feed the INTEG-1
     // ratio lane — each item corroborated against its OWN baseline
-    const spByDay = new Map(series.skinportDaily.map((d) => [d.day, d.price]));
-    const ratioDays = series.daily
+    const spByDay = new Map(mi.skinportDaily.map((d) => [d.day, d.price]));
+    const ratioDays = mi.daily
       .filter((d) => d.price > 0 && spByDay.get(d.day) > 0)
       .map((d) => ({ day: d.day, r: spByDay.get(d.day) / d.price }));
     integItems.push({
@@ -164,9 +174,9 @@ async function collect(opts) {
       name, slug: s, cat, tier,
       quote, skinport: sales, imported: !!imported,
       days: an.days, latest: an.latest != null ? an.latest : m30latest,
-      mom1: A.momentum(series.daily, 1), mom7: an.mom7, mom30: an.mom30,
+      mom1: A.momentum(mi.daily, 1), mom7: an.mom7, mom30: an.mom30,
       vol24h: quote ? quote.vol : null,
-      spark: series.daily.slice(-14).map((d) => d.price),
+      spark: mi.daily.slice(-14).map((d) => d.price),
       verdict: an.signal.verdict, score: an.signal.score,
       book: bookStore[s] || null,
     });
@@ -270,4 +280,4 @@ if (require.main === module) {
   }).catch((e) => { console.error("[collect] fatal:", e); process.exit(1); });
 }
 
-module.exports = { collect };
+module.exports = { collect, assembleMarketItem, catOf };
