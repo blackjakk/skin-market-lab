@@ -42,6 +42,22 @@ async function backfill() {
     } catch (e) { console.log("[backfill] FAIL " + name + ": " + e.message); failed++; }
   }
   console.log("[backfill] done — " + ok + " fetched, " + skipped + " already present, " + failed + " failed");
+  // macro history for the home-chart overlays (players since 2012, BTC since
+  // 2010) — one-shot like the case histories; the live series continues from
+  // our own collector samples. Committed to backtest/macro.json.
+  const macroFile = path.join(__dirname, "backtest", "macro.json");
+  if (refresh || !fs.existsSync(macroFile)) {
+    const macro = { fetched: Date.now(), players: null, btc: null };
+    try { macro.players = (await M.steamchartsMonthly()).map((r) => [r.day, r.players]); }
+    catch (e) { console.log("[backfill] steamcharts: " + e.message); }
+    try { macro.btc = (await M.btcHistoryAll()).map((r) => [r.day, r.usd]); }
+    catch (e) { console.log("[backfill] btc history: " + e.message); }
+    if (macro.players || macro.btc) {
+      fs.writeFileSync(macroFile, JSON.stringify(macro));
+      console.log("[backfill] macro.json: " + (macro.players ? macro.players.length + " player months" : "no players")
+        + ", " + (macro.btc ? macro.btc.length + " btc points" : "no btc"));
+    }
+  }
   return { ok, skipped, failed, total: cases.length };
 }
 

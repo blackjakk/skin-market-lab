@@ -255,6 +255,39 @@ async function skinportSalesHistory(name) {
 
 function numOrNull(v) { const n = Number(v); return isFinite(n) ? n : null; }
 
+// ── Historical macro backfills (one-shot, backtest/macro.json) ─────────────
+// CS players monthly averages back to July 2012 — steamcharts.com HTML
+// (verified live 2026-07-26: 168 monthly rows). One fetch, committed once;
+// the LIVE series continues from our own market.jsonl samples.
+// → [{day:"YYYY-MM-01", players}] ascending | throws on shape change.
+const FULL_MONTHS = { January: 0, February: 1, March: 2, April: 3, May: 4, June: 5,
+  July: 6, August: 7, September: 8, October: 9, November: 10, December: 11 };
+async function steamchartsMonthly() {
+  const res = await polite("https://steamcharts.com/app/" + APP_ID);
+  if (res.status !== 200) throw new Error("steamcharts HTTP " + res.status);
+  const out = [];
+  for (const m of res.body.matchAll(/<td class="month-cell[^"]*">\s*([A-Za-z]+) (\d{4})\s*<\/td>\s*<td[^>]*>\s*([\d.]+)/g)) {
+    if (!(m[1] in FULL_MONTHS)) continue;
+    out.push({ day: m[2] + "-" + String(FULL_MONTHS[m[1]] + 1).padStart(2, "0") + "-01",
+      players: Math.round(Number(m[3])) });
+  }
+  if (!out.length) throw new Error("steamcharts: no monthly rows parsed (markup changed?)");
+  return out.sort((a, b) => (a.day < b.day ? -1 : 1));
+}
+
+// BTC USD back to 2010 — blockchain.info charts API, keyless (CoinGecko's
+// free tier caps history at 365d — verified 401 on days=max, don't retry it).
+// ~4-day granularity on timespan=all; plenty for a comparison overlay.
+// → [{day, usd}] ascending.
+async function btcHistoryAll() {
+  const res = await polite("https://api.blockchain.info/charts/market-price?timespan=all&format=json");
+  if (res.status !== 200) throw new Error("blockchain.info HTTP " + res.status);
+  const j = JSON.parse(res.body);
+  if (!j || !Array.isArray(j.values)) throw new Error("blockchain.info: bad payload");
+  return j.values.filter((v) => v && v.y > 0 && isFinite(v.x))
+    .map((v) => ({ day: new Date(v.x * 1000).toISOString().slice(0, 10), usd: Math.round(v.y * 100) / 100 }));
+}
+
 // ── Crypto benchmarks (the speculative-liquidity tide) ─────────────────────
 // BTC = the risk-appetite benchmark, ETH = the degen beta. Stablecoins move
 // the actual cash-out volume but are pegged — useless for correlation.
@@ -281,6 +314,6 @@ async function steamPlayers() {
 module.exports = {
   APP_ID, setTransport, httpGet,
   steamPriceOverview, steamPriceHistory, parseSteamDate, normalizeHistoryRows,
-  steamOrderBook, steamPriceHistoryPublic,
+  steamOrderBook, steamPriceHistoryPublic, steamchartsMonthly, btcHistoryAll,
   skinportItems, skinportSalesHistory, steamPlayers, cryptoPrices,
 };

@@ -220,6 +220,20 @@ dashboard from the collector's committed files), or the setup panel
   40%, maxDD −53% peaking 2023-04-18 post-CS2-announce). Clamp engages
   ~97% of days and costs ~10%/yr of right tail vs noClamp — the
   measured, published price of settlement-grade manipulation resistance.
+- HOME-CHART OVERLAYS (skins.js): the home chart stitches the backtest
+  reconstruction to the live index and offers CS-players + BTC toggle
+  overlays (state.overlays, default on). Sources: backtest/macro.json —
+  steamchartsMonthly() (monthly avg players since July 2012, HTML parse)
+  + btcHistoryAll() (blockchain.info, keyless, since 2010; CoinGecko free
+  tier caps history at 365d — verified 401, don't retry) — one-shot via
+  backfill.js, then joined to the LIVE daily players/btc the collector
+  folds into market.series. REBASE SEMANTICS: every line rebases to 100
+  at the first visible point of the selected range (1Y/5Y/ALL chips);
+  the index family (recon+live+cash) shares ONE factor so the seam and
+  the wallet-vs-real gap survive; overlays are CLAMPED to the index's
+  own span (pre-index BTC at $0.07 would explode the scale). Log axis
+  auto-engages when any visible line spans >6x. Axis labels have k/M
+  tiers (a 7-char label overflows the 40px gutter).
 - `analytics.js` is UMD and SHARED VERBATIM by server (require) and browser
   (window.SkinAnalytics) — keep it dependency-free and side-effect-free;
   the probe pins its math to hand-computed values.
@@ -229,14 +243,14 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 129 checks: analytics units (incl. SMLX-3
+- `node probe.js` — 131 checks: analytics units (incl. SMLX-3
   winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
   clamp, concentrated/center-capture budget arithmetic, INTEG-1 lane
   pins, order-book fetcher parsing), full API flow, snapshot dedupe,
   import/bootstrap, portfolio P/L, restart persistence, watchlist
   seeding, the collector (manifest, import merge, dedupe, book store,
   integrity attestation).
-- `node client-probe.js` — 37 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node client-probe.js` — 38 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback

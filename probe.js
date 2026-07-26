@@ -401,6 +401,12 @@ async function fixtureTransport(url, headers) {
       '\\"rgCompactSellOrders\\":[2350,4,2400,11,3000,75],' +
       '\\"ecurrency\\":1,\\"prices\\":[{\\"time\\":1596758400,\\"price_median\\":10.7,\\"purchases\\":57688},' +
       '{\\"time\\":1596844800,\\"price_median\\":6.93,\\"purchases\\":48599}]}"</html>' };
+  if (url.includes("steamcharts.com/app/")) // monthly avg players table (macro backfill)
+    return { status: 200, body: '<tr><td class="month-cell left">July 2012</td><td class="right num-f">932.57</td></tr>' +
+      '<tr><td class="month-cell left">August 2012</td><td class="right num-f">1522.10</td></tr>' };
+  if (url.includes("api.blockchain.info/charts/market-price"))
+    return { status: 200, body: JSON.stringify({ values: [
+      { x: 1282089600, y: 0.0674 }, { x: 1764028800, y: 64095.49 }, { x: 1, y: 0 }] }) };
   if (url.includes("api.steampowered.com/ISteamUserStats")) {
     return { status: 200, body: JSON.stringify({ response: { player_count: 1534000, result: 1 } }) };
   }
@@ -442,6 +448,14 @@ async function fixtureTransport(url, headers) {
   const histPub = await M.steamPriceHistoryPublic("Fracture Case");
   ok(histPub.length === 2 && histPub[0].t === 1596758400000 && histPub[0].price === 10.7 && histPub[0].vol === 57688,
     "steamPriceHistoryPublic: full logged-out history from the same SSR payload (seconds → ms)");
+  const scMonthly = await M.steamchartsMonthly();
+  ok(scMonthly.length === 2 && scMonthly[0].day === "2012-07-01" && scMonthly[0].players === 933
+    && scMonthly[1].day === "2012-08-01",
+    "steamchartsMonthly: monthly avg players parsed + sorted (macro overlay backfill)");
+  const btcHist = await M.btcHistoryAll();
+  ok(btcHist.length === 2 && btcHist[0].day === "2010-08-18" && btcHist[0].usd === 0.07
+    && btcHist[1].usd === 64095.49,
+    "btcHistoryAll: blockchain.info points parsed, zero-price rows dropped");
   const DATA = path.join(os.tmpdir(), "hh-skin-probe-" + Date.now());
   // pre-write an EMPTY watchlist so the first-boot auto-seed (from the
   // repo's committed watchlist.json) doesn't inject items under this test;

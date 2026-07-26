@@ -23,7 +23,7 @@
   //                  files from this same static host (GitHub Pages)
   const state = { mode: "live", manifest: null, watch: [], market: null, selected: null, item: null,
     portfolio: null, range: "3M", hover: -1, view: "home", sort: { key: "vol24h", dir: -1 },
-    backtest: null, idxRange: "ALL" };
+    backtest: null, idxRange: "ALL", macroHist: null, overlays: { players: true, btc: true } };
   const RANGES = { "1M": 31, "3M": 92, "1Y": 366, "ALL": Infinity };
 
   // Where "edit the watchlist" and "run the collector" live on GitHub.
@@ -154,9 +154,9 @@
     const idxPts = series.filter((s) => s.caseIdx != null);
     const cashPts = A.cashAdjustedIndex(series);
     const btcCorr = A.corrDaily(series, "caseIdx", "btc", 30);
-    // 12-year backtest reconstruction, REBASED so it flows into the live
-    // series at the live series' first day (chart context only — the live
-    // published index is never backfilled; rebasing is cosmetic, disclosed)
+    // 12-year backtest reconstruction, stitched to the live series at the
+    // live series' first day (chart context only — the live published index
+    // is never backfilled; all rebasing is cosmetic and disclosed)
     let reconPts = [];
     if (state.backtest && state.backtest.length >= 2) {
       const liveFirst = idxPts.length ? idxPts[0] : null;
@@ -167,11 +167,51 @@
       reconPts = state.backtest.filter((p) => !liveFirstDay || p[0] < liveFirstDay)
         .map((p) => ({ t: Date.parse(p[0]), v: p[1] * k }));
     }
+    // comparison overlays: historical backfill (backtest/macro.json —
+    // steamcharts monthly players, blockchain.info BTC) joined to the LIVE
+    // daily samples the collector already folds into market.series
+    const mac = state.macroHist || {};
+    const liveDayFirst = series.length ? series[0].day : null;
+    const joinHist = (hist, liveKey) => (hist || [])
+      .filter((p) => !liveDayFirst || p[0] < liveDayFirst)
+      .map((p) => ({ t: Date.parse(p[0]), v: p[1] }))
+      .concat(series.filter((s) => s[liveKey] != null && s[liveKey] > 0).map((s) => ({ t: s.t, v: s[liveKey] })));
+    // overlays are clamped to the index's own span — the chart compares
+    // things TO the index, and pre-index BTC ($0.07 in 2010) would explode
+    // the rebase scale and drag the x-axis years before the index exists
+    const famFirstT = state.backtest && state.backtest.length ? Date.parse(state.backtest[0][0])
+      : (idxPts.length ? idxPts[0].t : null);
+    const clampFam = (pts) => (famFirstT == null ? pts : pts.filter((p) => p.t >= famFirstT));
+    const playersAll = state.overlays.players ? clampFam(joinHist(mac.players, "players")) : [];
+    const btcAll = state.overlays.btc ? clampFam(joinHist(mac.btc, "btc")) : [];
+    // EVERY line rebases to 100 at the first visible point of the selected
+    // range — a fair relative comparison at any zoom. The index family
+    // (recon + live + cash-adjusted) shares ONE factor so the recon→live
+    // seam and the wallet-vs-real gap survive the rebase.
     const IDXR = { "1Y": 366, "5Y": 1827, "ALL": Infinity };
     const idxCut = Date.now() - (IDXR[state.idxRange] || Infinity) * 86400000;
-    const reconVis = reconPts.filter((p) => p.t >= idxCut);
-    const hasIdxChart = idxPts.length >= 2 || reconVis.length >= 2;
-    const RECON_COL = "rgba(57,135,229,.45)";
+    const idxRaw = idxPts.map((p) => ({ t: p.t, v: p.caseIdx }));
+    const grpVis = reconPts.concat(idxRaw).filter((p) => p.t >= idxCut && p.v > 0);
+    const gF = grpVis.length ? 100 / grpVis[0].v : 1;
+    const scaleG = (pts) => pts.filter((p) => p.t >= idxCut && p.v > 0).map((p) => ({ t: p.t, v: p.v * gF }));
+    const rebase = (pts) => {
+      const vis = pts.filter((p) => p.t >= idxCut && p.v > 0);
+      if (vis.length < 2) return [];
+      const f = 100 / vis[0].v;
+      return vis.map((p) => ({ t: p.t, v: p.v * f }));
+    };
+    const reconVis = scaleG(reconPts);
+    const idxVis = scaleG(idxRaw);
+    const cashVis = scaleG(cashPts.map((p) => ({ t: p.t, v: p.cashIdx })));
+    const playersVis = rebase(playersAll);
+    const btcVis = rebase(btcAll);
+    const hasIdxChart = idxVis.length >= 2 || reconVis.length >= 2 || playersVis.length >= 2 || btcVis.length >= 2;
+    const RECON_COL = "rgba(57,135,229,.45)", PLAYERS_COL = "#9085e9";
+    const hasPlayersData = (mac.players && mac.players.length) || series.some((s) => s.players != null);
+    const hasBtcData = (mac.btc && mac.btc.length) || series.some((s) => s.btc != null);
+    const ovChip = (key, label, col, avail) => !avail ? "" :
+      '<button class="ovToggle btn' + (state.overlays[key] ? " on" : "") + '" data-ov="' + key + '" aria-pressed="' + !!state.overlays[key] + '">' +
+      '<span class="sw" style="background:' + col + (state.overlays[key] ? "" : ";opacity:.35") + '"></span>' + label + "</button>";
     const strip =
       tile2("LAB CASE INDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
         t && t.idx1 != null ? fmtPct(t.idx1) + " 24h" + (t.idx7 != null ? " · " + fmtPct(t.idx7) + " 7d" : "") : "base 100 at first collection",
@@ -195,13 +235,14 @@
             (reconPts.length >= 2 ? '<span><span class="sw" style="background:' + RECON_COL + '"></span>2014→ reconstruction (<a href="backtest.html">backtest</a>, rebased)</span>' : "") +
             '<span><span class="sw" style="background:' + COL.price + '"></span>Lab Index (wallet $)</span>' +
             '<span><span class="sw" style="background:' + COL.sma7 + '"></span>Cash-adjusted (real $)</span>' +
-            (series.some((s) => s.btc != null) ? '<span><span class="sw" style="background:' + COL.sma30 + '"></span>BTC (rebased)</span>' : "") +
+            ovChip("players", "CS players", PLAYERS_COL, hasPlayersData) +
+            ovChip("btc", "BTC", COL.sma30, hasBtcData) +
             (reconPts.length >= 2
               ? '<span class="idxRangeRow">' + Object.keys(IDXR).map((r) =>
                   '<button class="btn' + (state.idxRange === r ? " on" : "") + '" data-ir="' + r + '">' + r + "</button>").join("") + "</span>"
               : '<span class="hint">gap between the first two = wallet inflation / exit pressure</span>') +
           "</div>" +
-          '<canvas id="idxChart" height="130" aria-label="Lab case index over time, with backtest reconstruction" role="img"></canvas>' : "") +
+          '<canvas id="idxChart" height="130" aria-label="Lab case index over time, with backtest reconstruction and comparison overlays" role="img"></canvas>' : "") +
       "</div>" +
       (gain.length || lose.length ?
         '<div class="panel moversRow">' +
@@ -247,18 +288,19 @@
     if (hasIdxChart) {
       const lines = [];
       if (reconVis.length >= 2) lines.push({ pts: reconVis, col: RECON_COL, w: 1.5, dash: [4, 3] });
-      if (idxPts.length >= 2) lines.push({ pts: idxPts.map((p) => ({ t: p.t, v: p.caseIdx })), col: COL.price, w: 2 });
-      if (cashPts.length >= 2) lines.push({ pts: cashPts.map((p) => ({ t: p.t, v: p.cashIdx })), col: COL.sma7, w: 1.5 });
-      const btcBase = series.find((s) => s.btc != null);
-      if (btcBase) {
-        const btcPts = series.filter((s) => s.btc != null).map((s) => ({ t: s.t, v: 100 * s.btc / btcBase.btc }));
-        if (btcPts.length >= 2) lines.push({ pts: btcPts, col: COL.sma30, w: 1.5, dash: [5, 4] });
-      }
-      // log scale whenever the reconstruction is on screen (a 40x level range
-      // flattens to nothing on a linear axis)
-      drawIdxChart($("idxChart"), lines, { log: reconVis.length >= 2 });
+      if (idxVis.length >= 2) lines.push({ pts: idxVis, col: COL.price, w: 2 });
+      if (cashVis.length >= 2) lines.push({ pts: cashVis, col: COL.sma7, w: 1.5 });
+      if (playersVis.length >= 2) lines.push({ pts: playersVis, col: PLAYERS_COL, w: 1.5, dash: [2, 3] });
+      if (btcVis.length >= 2) lines.push({ pts: btcVis, col: COL.sma30, w: 1.5, dash: [5, 4] });
+      // log scale whenever any visible line spans a big ratio (a 1000x
+      // players range or 40x index range flattens to nothing on linear)
+      const vals = lines.flatMap((l) => l.pts.map((p) => p.v)).filter((v) => v > 0);
+      const useLog = vals.length && Math.max.apply(null, vals) / Math.min.apply(null, vals) > 6;
+      drawIdxChart($("idxChart"), lines, { log: useLog });
       $("itemView").querySelectorAll("[data-ir]").forEach((b) =>
         b.addEventListener("click", () => { state.idxRange = b.dataset.ir; renderHome(); }));
+      $("itemView").querySelectorAll(".ovToggle").forEach((b) =>
+        b.addEventListener("click", () => { const k = b.dataset.ov; state.overlays[k] = !state.overlays[k]; renderHome(); }));
     }
   }
   function settlementPanel(st, integ) {
@@ -335,7 +377,7 @@
       const yy = Math.round(y(gv)) + 0.5;
       ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(W - R, yy); ctx.stroke();
       ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      ctx.fillText(gv >= 1000 ? (gv / 1000).toFixed(1) + "k" : gv.toFixed(1), L - 5, yy);
+      ctx.fillText(gv >= 1e6 ? (gv / 1e6).toFixed(1) + "M" : gv >= 1000 ? (gv / 1000).toFixed(1) + "k" : gv.toFixed(1), L - 5, yy);
     }
     const d0 = new Date(t0), d1 = new Date(t1);
     const longSpan = t1 - t0 > 400 * 86400000;
@@ -949,11 +991,16 @@
       if (!r.ok) return;
       const j = await r.json();
       const v = j && j.variants && j.variants.smlx6;
-      if (v && v.series && v.series.length >= 2) {
-        state.backtest = v.series;
-        if (state.view === "home" && state.market) renderHome();
-      }
+      if (v && v.series && v.series.length >= 2) state.backtest = v.series;
     } catch (e) { /* no reconstruction available */ }
+    try {
+      const r = await fetchTimeout("backtest/macro.json", 6000, {});
+      if (r.ok) {
+        const j = await r.json();
+        if (j && (j.players || j.btc)) state.macroHist = j;
+      }
+    } catch (e) { /* no macro history available */ }
+    if ((state.backtest || state.macroHist) && state.view === "home" && state.market) renderHome();
   }
   async function boot() {
     $("netStatus").textContent = "connecting…";

@@ -226,6 +226,18 @@ M.setTransport(async (url) => {
       return lit;
     });
     ok(idxPainted > 200, "home chart overlays the 12-year reconstruction with working range chips (" + idxPainted + " px)");
+    // comparison overlays: CS players + BTC toggles (macro.json served from
+    // the repo) — toggling off must repaint and flip aria-pressed
+    const ovOn = await pageD.$eval('[data-ov="players"]', (b) => b.classList.contains("on"));
+    await pageD.click('[data-ov="players"]');
+    await pageD.waitForFunction(() => {
+      const b = document.querySelector('[data-ov="players"]');
+      return b && b.getAttribute("aria-pressed") === "false";
+    }, { timeout: 6000 });
+    ok(ovOn && !(await pageD.$eval('[data-ov="players"]', (b) => b.classList.contains("on")))
+      && (await pageD.$("[data-ov='btc']")) != null,
+      "CS players + BTC comparison overlays render as toggles (players default-on, toggles off live)");
+    await pageD.click('[data-ov="players"]'); // back on for the screenshot
     await pageD.click('[data-ir="ALL"]');
     await pageD.screenshot({ path: "/tmp/skin_lab_static.png", fullPage: true });
     console.log("  📸 /tmp/skin_lab_static.png");
