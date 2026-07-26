@@ -104,7 +104,7 @@
   "use strict";
   var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
     return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
-  var COL = { smlx6: "#3987e5", noClamp: "#199e70", equalWeight: "#9085e9", noSeason: "#d95926" };
+  var COL = { smlx6: "#4b69ff", noClamp: "#199e70", equalWeight: "#8847ff", noSeason: "#caab05" };  /* rarity ramp (DESIGN.md §2) */
   var fmtPct = function (v) { return v == null ? "—" : (v > 0 ? "+" : "") + v + "%"; };
   var cls = function (v) { return v > 0 ? "up" : v < 0 ? "dn" : ""; };
 

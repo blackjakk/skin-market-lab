@@ -9,6 +9,15 @@ Reviewer checklist for ANY diff that touches the DOM/UI surfaces
 (`skins.js`, `index.html`, `methodology.html`, `backtest.html`, `skins.css`).
 Every item below must hold before the diff ships.
 
+## 0. Read DESIGN.md first
+
+`DESIGN.md` (repo root) is the visual contract: palette (sole action
+orange, rarity-ramp data colors), type/spacing/radius scales, elevation
+tiers, component rules, do/don't. Any UI diff must conform to it — and a
+deliberate visual change must UPDATE it in the same diff (plus the token
+and the ds-component-test pins that resolve it, with the WCAG math
+re-run). Doc and tokens never drift apart.
+
 ## 1. Route through the Design System — never hand-roll
 
 - ALL new chrome goes through `DS.*` factories, `.ds-*` classes, and

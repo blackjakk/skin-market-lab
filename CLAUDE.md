@@ -260,6 +260,16 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Design System (all DOM/UI chrome) — route ALL new UI through it
 
+**`DESIGN.md` (repo root) is the visual contract — READ IT BEFORE ANY UI
+BUILD** (markup, CSS, canvas paint, DS work). It spells out color (CS2
+palette on Coinbase discipline: ONE action orange, rarity-ramp data
+colors, WCAG-validated values), type scale, spacing, radius (pill CTAs),
+elevation, and component rules. The skins.css :root palette + --ds-*
+tokens are its implementation; if the doc and a token disagree, fix one
+in the same diff. A palette change = update DESIGN.md + the token + the
+ds-component-test pins together, and re-run the WCAG math (a11y-probe
+gates the floors).
+
 The dashboard + doc pages render their chrome through ONE Design System in
 `design-system/` (tokens.css → --ds-* aliases over the skins.css :root
 palette + spacing/radius/type scales; ds.css → .ds-* component classes,

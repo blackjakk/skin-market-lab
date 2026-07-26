@@ -18,7 +18,7 @@
   --ds-good: var(--status-good);
   --ds-bad: var(--status-bad);
   --ds-neutral: var(--status-neutral);
-  --ds-focus: var(--series-price);       /* focus ring — matches .btn:focus-visible */
+  --ds-focus: var(--accent);             /* focus ring = the action color (DESIGN.md §2; 7.6:1 vs panels) */
   --ds-series-price: var(--series-price);
   --ds-series-sma7: var(--series-sma7);
   --ds-series-sma30: var(--series-sma30);

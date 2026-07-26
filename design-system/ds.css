@@ -46,7 +46,7 @@
 .ds-toggle[aria-pressed="false"] .ds-sw { opacity: .35; }
 
 /* ── button ────────────────────────────────────────────────────────────── */
-.ds-btn { display: inline-block; padding: 7px 12px; border-radius: var(--ds-radius-md);
+.ds-btn { display: inline-block; padding: 7px 14px; border-radius: var(--ds-radius-pill);
   border: 1px solid var(--ds-line); background: var(--ds-surface-2); color: var(--ds-text);
   font-size: var(--ds-fs-txt); font-family: inherit; cursor: pointer; text-decoration: none; }
 .ds-btn:hover { border-color: var(--ds-text-muted); }

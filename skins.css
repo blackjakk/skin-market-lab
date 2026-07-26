@@ -1,6 +1,7 @@
 /* skins.css — Skin Market Lab (standalone research tool, fixed dark theme).
-   Chart series colors are the validated dark-mode categorical set
-   (dataviz-checked against the --surface-1 panel token): blue/aqua/orange/violet. */
+   Palette per DESIGN.md (read it before any UI change): CS2 identity on
+   Coinbase discipline — ONE action orange, series drawn from the CS2 rarity
+   ramp, every value WCAG-validated against the surface it meets. */
 :root {
   color-scheme: dark;
   --surface-0: #0e0f12;
@@ -10,11 +11,11 @@
   --text-primary: #f2f2ef;
   --text-secondary: #b9bbc2;
   --text-muted: #878a94;        /* ≥4.5:1 on every surface incl. --surface-2 tiles */
-  --accent: #d4af37;            /* chrome accent only — never a data series */
-  --series-price: #3987e5;
-  --series-sma7: #199e70;
-  --series-sma30: #d95926;
-  --series-skinport: #9085e9;
+  --accent: #de9b35;            /* CS2 orange — the SOLE action color (7.6:1 on panels); never a data series */
+  --series-price: #4b69ff;      /* mil-spec blue (4.1:1 vs --surface-1) */
+  --series-sma7: #199e70;       /* functional green (5.3:1) */
+  --series-sma30: #8847ff;      /* restricted purple, also the BTC overlay (3.8:1) */
+  --series-skinport: #caab05;   /* CS gold — realized-cash marks (8.0:1) */
   --vol-bar: #636a7a;           /* ≥3:1 vs --surface-1 chart background */
   --line-input: #6a6e7a;        /* input/textarea boundaries ONLY (≥3:1 vs panels); decorative hairlines keep --line */
   --status-good: #3fae6a;
@@ -25,7 +26,7 @@
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; background: var(--surface-0); color: var(--text-primary);
   font: 14px/1.45 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
-a { color: var(--series-price); }
+a { color: var(--accent); }  /* links = the action color (DESIGN.md §2) */
 
 /* skip link (a11y): visually hidden until keyboard focus, then a top-left pill */
 .skip-link { position: fixed; top: 8px; left: 8px; z-index: 300; padding: 10px 16px;
