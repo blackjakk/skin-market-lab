@@ -26,11 +26,10 @@ const steamDateStr = (t) => { const d = new Date(t); return MON[d.getUTCMonth()]
 M.setTransport(async (url) => {
   if (url.includes("/market/priceoverview/"))
     return { status: 200, body: JSON.stringify({ success: true, lowest_price: "$41.90", volume: "63", median_price: "$43.25" }) };
-  if (url.includes("/market/listings/"))
-    return { status: 200, body: "<html>Market_LoadOrderSpread( 176321160 );</html>" };
-  if (url.includes("/market/itemordershistogram"))
-    return { status: 200, body: JSON.stringify({ success: 1, highest_buy_order: "4200", lowest_sell_order: "4400",
-      buy_order_graph: [[42.00, 5, ""], [41.00, 20, ""]], sell_order_graph: [[44.00, 4, ""], [45.00, 15, ""]] }) };
+  if (url.includes("/market/listings/")) // SSR page with the embedded order book
+    return { status: 200, body: '<html>window.SSR.loaderData = "{\\"amtMaxBuyOrder\\":4200,\\"amtMinSellOrder\\":4400,' +
+      '\\"cBuyOrders\\":25,\\"cSellOrders\\":19,\\"rgCompactBuyOrders\\":[4200,5,4100,20],' +
+      '\\"rgCompactSellOrders\\":[4400,4,4500,15]}"</html>' };
   if (url.includes("api.skinport.com/v1/items"))
     return { status: 200, body: JSON.stringify([{ market_hash_name: "AK-47 | Redline (Field-Tested)", min_price: 38.2, mean_price: 41, max_price: 90, quantity: 420 }]) };
   if (url.includes("api.steampowered.com/ISteamUserStats")) {

@@ -344,12 +344,11 @@ async function fixtureTransport(url, headers) {
     const prices = Array.from({ length: 40 }, (_, i) => [steamDateStr(now - (40 - i) * D), 4 + i * 0.1, "" + (50 + i)]);
     return { status: 200, body: JSON.stringify({ success: true, price_prefix: "$", prices }) };
   }
-  if (url.includes("/market/listings/")) // public listing page (nameid scrape)
-    return { status: 200, body: "<div>Market_LoadOrderSpread( 176321160 );</div>" };
-  if (url.includes("/market/itemordershistogram")) // TRAPS: bid/ask = STRING CENTS, graphs = dollars+cumulative
-    return { status: 200, body: JSON.stringify({ success: 1, highest_buy_order: "2250", lowest_sell_order: "2350",
-      buy_order_graph: [[22.5, 5, ""], [22.0, 20, ""], [20.0, 60, ""]],
-      sell_order_graph: [[23.5, 4, ""], [24.0, 15, ""], [30.0, 90, ""]] }) };
+  if (url.includes("/market/listings/")) // SSR listing page with the embedded react-query order book
+    // (TRAPS mirrored from live: integer CENTS, PER-LEVEL quantities)
+    return { status: 200, body: '<html>window.SSR.loaderData = "{\\"amtMaxBuyOrder\\":2250,\\"amtMinSellOrder\\":2350,' +
+      '\\"cBuyOrders\\":60,\\"cSellOrders\\":90,\\"rgCompactBuyOrders\\":[2250,5,2200,15,2000,40],' +
+      '\\"rgCompactSellOrders\\":[2350,4,2400,11,3000,75]}"</html>' };
   if (url.includes("api.steampowered.com/ISteamUserStats")) {
     return { status: 200, body: JSON.stringify({ response: { player_count: 1534000, result: 1 } }) };
   }
@@ -381,14 +380,13 @@ async function fixtureTransport(url, headers) {
   ok(zeroed.last30d.median === null && zeroed.last24h.volume === 0,
     "skinport zero-medians (never sold) map to null — a $0 price is never a mark");
   M.setTransport(fixtureTransport);
-  // order-book fetchers (INTEG-1 second read path) against the fixture
-  const nid = await M.steamItemNameId("Fracture Case");
-  ok(nid === 176321160, "steamItemNameId scrapes the internal id from the public listing page");
-  const book = await M.steamOrderBook(nid);
+  // order-book fetcher (INTEG-1 second read path) against the SSR fixture
+  const book = await M.steamOrderBook("Fracture Case");
   ok(book.bid === 22.5 && book.ask === 23.5 && book.mid === 23 && book.spreadPct === 4.3,
-    "steamOrderBook: cents-string bid/ask parsed (2250 → $22.50), mid + spread derived");
-  ok(book.bidQty5 === 20 && book.askQty5 === 15 && book.bidUsd5 === 460 && book.askUsd5 === 345,
-    "steamOrderBook: ±5%-of-mid depth from the cumulative dollar graphs");
+    "steamOrderBook: integer-cents bid/ask parsed from the SSR-embedded book (2250 → $22.50)");
+  ok(book.bidQty5 === 20 && book.askQty5 === 15 && book.bidUsd5 === 460 && book.askUsd5 === 345
+    && book.cBuy === 60 && book.cSell === 90,
+    "steamOrderBook: ±5%-of-mid depth summed over PER-LEVEL quantities + total book sizes");
   const DATA = path.join(os.tmpdir(), "hh-skin-probe-" + Date.now());
   // pre-write an EMPTY watchlist so the first-boot auto-seed (from the
   // repo's committed watchlist.json) doesn't inject items under this test;
@@ -599,10 +597,7 @@ async function fixtureTransport(url, headers) {
   const frW = c1.manifest.items.find((i) => /Fracture/.test(i.name));
   ok(frW && frW.weight === 1 && cCon.weighted === true,
     "manifest items carry the published index weight; the budget prices on it (single case → weight 1)");
-  // INTEG-1 through the collector: nameid cache, book store, clean attestation
-  const nids = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "steam-nameids.json"), "utf8"));
-  ok(nids[slug("Fracture Case")] === 176321160,
-    "collector caches scraped item_nameids (data/steam-nameids.json — committed, auditable)");
+  // INTEG-1 through the collector: book store + clean attestation
   const bookPub = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "book.json"), "utf8"));
   ok(bookPub[slug("Fracture Case")] && bookPub[slug("Fracture Case")].mid === 23 && frW.book && frW.book.mid === 23,
     "collector publishes order-book readings (data/book.json + manifest item.book)");

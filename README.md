@@ -151,7 +151,7 @@ browser; unit-pinned by the probe):
 |---|---|---|
 | Steam `priceoverview` | live median/lowest + 24h volume | none |
 | Steam `pricehistory` | full multi-year daily history | login cookie (or paste) |
-| Steam `itemordershistogram` | standing order book (bid/ask/depth — the INTEG-1 second read path) | none |
+| Steam listing page (embedded book) | standing order book (bid/ask/depth — the INTEG-1 second read path) | none |
 | Skinport `/v1/items` | full item dump → search + ask prices | none (brotli) |
 | Skinport `/v1/sales/history` | realized-sale medians 24h/7d/30d/90d | none (brotli) |
 
@@ -160,7 +160,7 @@ Rate limits are respected (3.5s politeness gap to Steam; Skinport cached
 
 ## Gates
 
-- `npm run probe` — 119 checks, hermetic (fixture transport):
+- `npm run probe` — 117 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
 - `npm run probe:ui` — 35 real-Chromium checks across live AND static modes:

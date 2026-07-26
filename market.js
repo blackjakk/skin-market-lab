@@ -21,7 +21,12 @@ const APP_ID = 730; // Counter-Strike 2
 const UA = "hashmark-heroes-skin-tracker/1.0 (personal research tool)";
 
 // ── transport (injectable) ─────────────────────────────────────────────────
-function httpGet(url, headers) {
+// Follows up to 3 redirect hops: Steam 302s market listing pages to an
+// internal canonical URL (found live 2026-07-26 — "Fracture Case" →
+// /listings/730/G18DA243004), so a non-following client can never scrape
+// the nameid.
+function httpGet(url, headers, hops) {
+  hops = hops || 0;
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: Object.assign({
@@ -31,6 +36,10 @@ function httpGet(url, headers) {
       }, headers || {}),
       timeout: 20000,
     }, (res) => {
+      if (res.statusCode >= 301 && res.statusCode <= 308 && res.headers.location && hops < 3) {
+        res.resume(); // drain — then chase the redirect
+        return resolve(httpGet(new URL(res.headers.location, url).href, headers, hops + 1));
+      }
       const chunks = [];
       res.on("data", (c) => chunks.push(c));
       res.on("end", () => {
@@ -88,53 +97,60 @@ async function steamPriceOverview(name, A) {
 // Wash trades can fake the last-sale median (priceoverview), but the STANDING
 // order book is committed capital: faking it means posting real buy/sell
 // orders that can get filled. Reading both paths forces a manipulator to move
-// them consistently. The histogram endpoint needs Steam's internal item_nameid
-// (NOT the market_hash_name) — scraped once from the public listing page and
-// cached forever (data/steam-nameids.json).
+// them consistently.
 //
-// TRAPS (learned from the live payload shape — keep these):
-//   highest_buy_order / lowest_sell_order are STRING CENTS ("5342" = $53.42);
-//   buy_order_graph / sell_order_graph rows are [price_DOLLARS, CUMULATIVE
-//   qty, label] — dollars, not cents, and cumulative, not per-level.
-async function steamItemNameId(name) {
+// SOURCE (found live 2026-07-26): Steam's market listing pages are now a
+// server-side-rendered React app — the legacy Market_LoadOrderSpread(nameid)
+// inline script and the item_nameid are GONE from the HTML, and the old
+// itemordershistogram flow is unreachable without them. But the SSR
+// hydration payload (window.SSR.loaderData) embeds a react-query cache
+// keyed ["market","orderbook",730,<name>] containing the COMPLETE book:
+//   amtMaxBuyOrder / amtMinSellOrder — best bid/ask in INTEGER CENTS
+//   rgCompactBuyOrders / rgCompactSellOrders — flat [cents, qty, ...] pairs,
+//     PER-LEVEL quantities (not cumulative — sum within a range for depth)
+//   cBuyOrders / cSellOrders — total units resting on each side
+// One public request per item, no id, no auth. The payload is nested-escaped
+// JSON; stripping every backslash first makes the keys plain-regexable (the
+// fields are all numeric — nothing inside them can contain a backslash).
+// The same payload also embeds the FULL multi-year price history logged-out
+// (the "prices" query) — a future no-cookie backfill path.
+// → { t, bid, ask, mid, spreadPct, bidQty5, askQty5, bidUsd5, askUsd5,
+//     cBuy, cSell } | null. Depth = units within ±5% of mid; usd ≈ qty×mid
+// (approximation, published as surveillance evidence — never a settlement
+// input). Requires the redirect-following transport (listing URLs 302 to a
+// canonical internal code URL).
+async function steamOrderBook(name) {
   const url = "https://steamcommunity.com/market/listings/" + APP_ID + "/" + enc(name);
   const res = await polite(url);
   if (res.status !== 200) throw new Error("steam listing page HTTP " + res.status);
-  const m = /Market_LoadOrderSpread\(\s*(\d+)\s*\)/.exec(res.body) || /item_nameid=(\d+)/.exec(res.body);
-  return m ? Number(m[1]) : null;
-}
-
-// → { t, bid, ask, mid, spreadPct, bidQty5, askQty5, bidUsd5, askUsd5 } | null
-// Depth = cumulative units within ±5% of mid; usd ≈ qty × mid (approximation,
-// published as surveillance evidence — never a settlement input).
-async function steamOrderBook(nameId) {
-  const url = "https://steamcommunity.com/market/itemordershistogram?country=US&language=english" +
-    "&currency=1&item_nameid=" + nameId + "&two_factor=0";
-  const res = await polite(url);
-  if (res.status !== 200) throw new Error("steam histogram HTTP " + res.status);
-  const j = JSON.parse(res.body);
-  if (!j || j.success !== 1) return null;
-  const cents = (v) => { const n = parseInt(v, 10); return isFinite(n) && n > 0 ? n / 100 : null; };
-  const bid = cents(j.highest_buy_order), ask = cents(j.lowest_sell_order);
+  const s = res.body.replace(/\\/g, "");
+  const num = (re) => { const m = re.exec(s); return m ? Number(m[1]) : null; };
+  const bidC = num(/"amtMaxBuyOrder":(\d+)/), askC = num(/"amtMinSellOrder":(\d+)/);
+  if (bidC == null && askC == null) return null;
+  const bid = bidC != null && bidC > 0 ? bidC / 100 : null;
+  const ask = askC != null && askC > 0 ? askC / 100 : null;
   if (bid == null && ask == null) return null;
   const mid = bid != null && ask != null ? (bid + ask) / 2 : (bid != null ? bid : ask);
-  const depth = (graph, side) => {
-    if (!Array.isArray(graph)) return null;
-    let q = null;
-    for (const row of graph) {
-      if (!Array.isArray(row) || !isFinite(row[0]) || !isFinite(row[1])) continue;
-      const inRange = side === "buy" ? row[0] >= mid * 0.95 : row[0] <= mid * 1.05;
-      if (inRange) q = Math.max(q || 0, row[1]); // cumulative → deepest in-range row wins
-    }
-    return q;
+  const levels = (re) => {
+    const m = re.exec(s);
+    if (!m) return null;
+    const a = m[1].split(",").map(Number);
+    const out = [];
+    for (let i = 0; i + 1 < a.length; i += 2) if (isFinite(a[i]) && isFinite(a[i + 1])) out.push([a[i] / 100, a[i + 1]]);
+    return out;
   };
-  const bidQty5 = depth(j.buy_order_graph, "buy"), askQty5 = depth(j.sell_order_graph, "sell");
+  const buys = levels(/"rgCompactBuyOrders":\[([\d,]*)\]/);
+  const sells = levels(/"rgCompactSellOrders":\[([\d,]*)\]/);
+  const depth = (lv, side) => lv == null ? null : lv.reduce((q, l) =>
+    q + ((side === "buy" ? l[0] >= mid * 0.95 : l[0] <= mid * 1.05) ? l[1] : 0), 0);
+  const bidQty5 = depth(buys, "buy"), askQty5 = depth(sells, "sell");
   return {
     t: Date.now(), bid: bid, ask: ask, mid: Math.round(mid * 100) / 100,
     spreadPct: bid != null && ask != null && mid > 0 ? Math.round(((ask - bid) / mid) * 1000) / 10 : null,
     bidQty5: bidQty5, askQty5: askQty5,
     bidUsd5: bidQty5 != null ? Math.round(bidQty5 * mid) : null,
     askUsd5: askQty5 != null ? Math.round(askQty5 * mid) : null,
+    cBuy: num(/"cBuyOrders":(\d+)/), cSell: num(/"cSellOrders":(\d+)/),
   };
 }
 
@@ -239,6 +255,6 @@ async function steamPlayers() {
 module.exports = {
   APP_ID, setTransport, httpGet,
   steamPriceOverview, steamPriceHistory, parseSteamDate, normalizeHistoryRows,
-  steamItemNameId, steamOrderBook,
+  steamOrderBook,
   skinportItems, skinportSalesHistory, steamPlayers, cryptoPrices,
 };

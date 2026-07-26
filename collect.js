@@ -73,14 +73,12 @@ async function collect(opts) {
     (_, k) => names[(cursor + k) % names.length]));
 
   // Order-book lane (INTEG-1 second read path): a rotating window of steam-
-  // marked items gets a fresh book reading per run. item_nameids are scraped
-  // once from the public listing page and cached forever in
-  // data/steam-nameids.json (committed = a transparent, auditable id map).
+  // marked items gets a fresh book reading per run, extracted from the SSR
+  // listing page's embedded react-query cache (one public request per item —
+  // see steamOrderBook in market.js for the payload shape and its traps).
   // Book readings live in data/book.json — NEVER in the history jsonl, where
   // an extra src line would pollute assembleSeries' daily marks.
   const BOOK_BUDGET = 10;
-  const nameidFile = path.join(dataDir, "steam-nameids.json");
-  const nameids = readJson(nameidFile, {});
   const bookFile = path.join(dataDir, "book.json");
   const bookStore = readJson(bookFile, {});
   const bookCursorFile = path.join(dataDir, "book-cursor.json");
@@ -127,16 +125,9 @@ async function collect(opts) {
     }
     if (bookSet.has(name)) {
       try {
-        let nid = nameids[s];
-        if (nid == null) { nid = await M.steamItemNameId(name); if (nid != null) nameids[s] = nid; }
-        if (nid != null) {
-          const book = await M.steamOrderBook(nid);
-          if (book) bookStore[s] = book;
-        }
-      } catch (e) {
-        console.log("[collect] book " + name + ": " + e.message);
-        if (/HTTP 4/.test(String(e.message))) delete nameids[s]; // stale id (renamed?) → re-resolve next turn
-      }
+        const book = await M.steamOrderBook(name);
+        if (book) bookStore[s] = book;
+      } catch (e) { console.log("[collect] book " + name + ": " + e.message); }
     }
     const sales = salesStore[s] ? salesStore[s].data : null;
     // art grails (and anything above the ~$1,800 steam listing cap) have NO
@@ -180,7 +171,6 @@ async function collect(opts) {
       book: bookStore[s] || null,
     });
   }
-  writeJson(nameidFile, nameids);
   writeJson(bookFile, bookStore);
   if (steamNames.length) writeJson(bookCursorFile, { i: (bCursor + Math.min(BOOK_BUDGET, steamNames.length)) % steamNames.length });
 

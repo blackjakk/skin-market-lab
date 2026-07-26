@@ -143,16 +143,27 @@ dashboard from the collector's committed files), or the setup panel
   honest. Sampling jitter: scheduled collect.yml runs sleep 0-10min
   (schedule-only guard, so probes/manual runs never wait) — reading
   instants can't be pinned; CN/US windows tolerate the shift.
-- ORDER-BOOK LANE plumbing: item_nameids scraped ONCE from the public
-  listing page (Market_LoadOrderSpread regex) → data/steam-nameids.json
-  (committed, auditable); readings rotate BOOK_BUDGET=10 steam-marked
-  items/run (data/book-cursor.json) → data/book.json + manifest
-  item.book. NEVER write book lines into history jsonl — assembleSeries
-  would fold an extra src into daily price marks. Art items are excluded
-  (the ~$1,800 listing cap distorts grail asks). TRAPS (live payload):
-  highest_buy_order/lowest_sell_order are STRING CENTS ("2250"=$22.50);
-  buy/sell_order_graph rows are [price_DOLLARS, CUMULATIVE qty, label].
-  On HTTP 4xx for a cached nameid, drop it (renamed item) → re-resolve.
+- ORDER-BOOK LANE plumbing (rebuilt live 2026-07-26): Steam's listing
+  pages are now an SSR React app — Market_LoadOrderSpread/item_nameid are
+  GONE from the HTML and the legacy itemordershistogram flow is
+  unreachable (do NOT resurrect it). steamOrderBook(name) instead
+  extracts the book from the SSR hydration payload's react-query cache
+  (queryKey ["market","orderbook",730,name]): ONE public request per
+  item, no id, no auth. TRAPS: amtMaxBuyOrder/amtMinSellOrder are
+  INTEGER CENTS; rgCompactBuy/SellOrders are flat [cents,qty,…] pairs
+  with PER-LEVEL quantities (SUM within range for depth — not cumulative
+  like the old graphs); payload is nested-escaped JSON → strip ALL
+  backslashes then plain-regex the keys (fields are numeric, nothing in
+  them can hold a backslash); listing URLs 302 to a canonical code URL →
+  httpGet follows ≤3 redirect hops (don't remove that). Readings rotate
+  BOOK_BUDGET=10 steam-marked items/run (data/book-cursor.json) →
+  data/book.json + manifest item.book. NEVER write book lines into
+  history jsonl — assembleSeries would fold an extra src into daily
+  price marks. Art items are excluded (the ~$1,800 listing cap distorts
+  grail asks). BONUS FOUND: the same SSR payload embeds the FULL
+  multi-year price history LOGGED-OUT (the "prices" query — {time,
+  price_median, purchases} back to release) — a future replacement for
+  the cookie/paste-import backfill machinery, unwired for now.
 - HOME-FIRST UI: boot lands on renderHome (strip + movers + ranked sortable
   table + sparklines); item detail is one click deep with a ← Market back
   button. The watchlist is ~all cases (the index basket) + a few blue-chip
@@ -166,7 +177,7 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 119 checks: analytics units (incl. SMLX-3
+- `node probe.js` — 117 checks: analytics units (incl. SMLX-3
   winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
   clamp, concentrated/center-capture budget arithmetic, INTEG-1 lane
   pins, order-book fetcher parsing), full API flow, snapshot dedupe,
