@@ -159,9 +159,14 @@ function computeBacktest(items) {
 }
 
 function loadItems() {
+  // backtest/history also holds skins/knives for the ITEM-DETAIL deep
+  // charts — the reconstruction is the CASE index, so filter by category
+  // (catOf is the same classifier the collector uses)
+  const { catOf } = require("./collect.js");
   const items = [];
   for (const f of fs.readdirSync(HIST).filter((x) => x.endsWith(".json"))) {
     const j = JSON.parse(fs.readFileSync(path.join(HIST, f), "utf8"));
+    if (catOf(j.name) !== "case") continue;
     // Steam serves recent rows sub-daily → bucket exactly like the import
     // path (median price per UTC day, per-interval volumes summed)
     const daily = A.toDaily(j.rows.map((r) => ({ t: r[0], price: r[1], vol: r[2] })), { volMode: "sum" });

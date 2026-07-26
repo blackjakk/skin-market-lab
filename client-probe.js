@@ -144,6 +144,10 @@ M.setTransport(async (url) => {
   const makeStatic = (port, dataDir) => http.createServer((req, res) => {
     const url = req.url.split("?")[0];
     let f;
+    // Fracture Case stays a DAY-0 item in the static scenario (no deep
+    // backfill served) so the warm-up/fallback honesty path keeps a real
+    // test; Redline's deep file is served → tests the deep-history chart.
+    if (url.startsWith("/backtest/history/") && /Fracture/i.test(url)) { res.writeHead(404); return res.end(); }
     if (url.startsWith("/data/")) {
       if (!dataDir) { res.writeHead(404); return res.end(); }
       f = path.join(dataDir, path.normalize(url.slice("/data/".length)).replace(/^([.][.][/\\])+/, ""));
@@ -189,7 +193,7 @@ M.setTransport(async (url) => {
     const { collect } = require("./collect.js");
     const SROOT = path.join(os.tmpdir(), "hh-skin-staticdata-" + Date.now());
     fs.mkdirSync(path.join(SROOT, "data", "import"), { recursive: true });
-    fs.writeFileSync(path.join(SROOT, "watchlist.json"), JSON.stringify({ items: [NAME, "Fracture Case"] }));
+    fs.writeFileSync(path.join(SROOT, "watchlist.json"), JSON.stringify({ items: [NAME, "Fracture Case", "Kilowatt Case"] }));
     const { slug } = require(path.join(__dirname, "server.js"));
     const impRows = Array.from({ length: 120 }, (_, i) =>
       ({ t: Date.now() - (120 - i) * D, price: 30 * Math.exp(0.003 * i) * (1 + 0.05 * Math.sin(i / 6)), vol: 40 + (i % 20) }));
@@ -203,7 +207,7 @@ M.setTransport(async (url) => {
     await pageD.goto("http://localhost:5394/", { waitUntil: "networkidle" });
     await pageD.waitForSelector(".mrow", { timeout: 10000 });
     const rows = await pageD.$$eval(".mrow .nm", (els) => els.map((e) => e.textContent));
-    ok(rows.length === 2, "static data mode boots read-only on the market home (" + rows.length + " rows)");
+    ok(rows.length === 3, "static data mode boots read-only on the market home (" + rows.length + " rows)");
     ok(/read-only/.test(await pageD.textContent("#netStatus")), "netStatus says read-only + data via GitHub");
     ok(/LAB CASE INDEX/.test(await pageD.textContent("#itemView")), "market strip renders from the committed manifest");
     // the 12-year backtest reconstruction overlays the home chart (rebased,
@@ -251,6 +255,24 @@ M.setTransport(async (url) => {
       return lit;
     });
     ok(paintedD > 500, "chart painted from committed jsonl + import (" + paintedD + " px)");
+    await pageD.click("#backBtn");
+    await pageD.waitForSelector("table.mkt", { timeout: 6000 });
+    await pageD.click('.mrow:has-text("Kilowatt")');
+    await pageD.waitForSelector(".sigCard", { timeout: 8000 });
+    await pageD.waitForFunction(() => /backfilled Steam daily aggregates/.test(document.getElementById("itemView").textContent), { timeout: 8000 });
+    const deepPx = await pageD.evaluate(() => {
+      const cv = document.getElementById("chart");
+      const img = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+      let lit = 0;
+      for (let i = 3; i < img.length; i += 40) if (img[i] > 0) lit++;
+      return lit;
+    });
+    ok(deepPx > 500 && !/day \d+ of 30/.test(await pageD.textContent("#itemView")),
+      "case detail chart shows YEARS of deep history with disclosure, no warm-up chip (" + deepPx + " px)");
+    await pageD.click("#backBtn");
+    await pageD.waitForSelector("table.mkt", { timeout: 6000 });
+    await pageD.click('.mrow:has-text("Redline")');
+    await pageD.waitForSelector(".sigCard", { timeout: 8000 });
     ok((await pageD.$$eval("a.btn", (els) => els.map((a) => a.href).join(" "))).includes("watchlist.json"),
       "read-only actions link to editing watchlist.json on GitHub");
     // the 1-day item leans on skinport aggregates + warm-up honesty

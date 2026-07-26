@@ -51,6 +51,22 @@
     return d.getUTCFullYear() + "-" + p(d.getUTCMonth() + 1) + "-" + p(d.getUTCDate());
   }
 
+  // Display-layer deep-history merge (item view ONLY — never the index).
+  // Backtest-fetched rows may extend an item's series strictly BEFORE its
+  // first collected/imported day: they never override a collected mark, and
+  // they must never reach marketOverview/the collector — the live index
+  // starts at its adoption date and is never backfilled (a silent rebase
+  // would change every fixing). Returns the merged base-rows array to pass
+  // as assembleSeries' imported side.
+  function deepHistoryBase(deepRows, importRows, snapRows) {
+    let firstT = Infinity;
+    for (const r of importRows || []) if (r && r.t < firstT) firstT = r.t;
+    for (const r of snapRows || []) if (r && r.t < firstT) firstT = r.t;
+    const cutDay = isFinite(firstT) ? dayKey(firstT) : null;
+    return (deepRows || []).filter((r) => r && (!cutDay || dayKey(r.t) < cutDay))
+      .concat(importRows || []);
+  }
+
   function median(vals) {
     if (!vals.length) return null;
     const s = vals.slice().sort((a, b) => a - b);
@@ -615,6 +631,7 @@
   return {
     parseMoney: parseMoney, parseCount: parseCount, dayKey: dayKey, median: median, toDaily: toDaily,
     marketOverview: marketOverview, includedFromDay: includedFromDay, INDEX_RULES: INDEX_RULES,
+    deepHistoryBase: deepHistoryBase,
     cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,

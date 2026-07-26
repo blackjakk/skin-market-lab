@@ -178,7 +178,18 @@ function startServer(opts) {
 
   // ── item report ──────────────────────────────────────────────────────────
   async function itemReport(name, allowFetch) {
-    const daily = dailyFor(name);
+    // DISPLAY-ONLY deep history: backtest/history extends the item series
+    // strictly before its first collected/imported day (deepHistoryBase).
+    // NEVER route this into dailyFor/marketReport — the live index and its
+    // fixings start at adoption and are never backfilled.
+    const deep = readJson(path.join(ROOT, "backtest", "history", slug(name) + ".json"), null);
+    const deepRows = deep && Array.isArray(deep.rows)
+      ? deep.rows.map((r) => ({ t: r[0], price: r[1], vol: r[2] })) : null;
+    const imported = readJson(importFile(name), null);
+    const snapRows = snaps(name);
+    const base = A.deepHistoryBase(deepRows, imported && imported.rows, snapRows);
+    const daily = A.assembleSeries(base, snapRows).daily;
+    const deepDays = deepRows ? base.length - ((imported && imported.rows) ? imported.rows.length : 0) : 0;
     const analytics = A.analyze(daily);
     const last = latestSteam(name);
     const sales = await salesFor(name, false);
@@ -192,8 +203,9 @@ function startServer(opts) {
       daily,
       skinportDaily: skinportDaily(name),
       analytics,
-      snapshots: snaps(name).length,
-      imported: !!readJson(importFile(name), null),
+      snapshots: snapRows.length,
+      imported: !!imported,
+      deepDays: deepDays,
       watched: watchlist.includes(name),
       quote: last ? { t: last.t, price: last.price, lowest: last.lowest, vol: last.vol } : null,
       skinport: { sales: sales || null, ask: dumpRow ? dumpRow.min : null, qty: dumpRow ? dumpRow.qty : null },

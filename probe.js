@@ -70,6 +70,12 @@ const asm = A.assembleSeries(
 ok(asm.daily.length === 2 && asm.daily[0].price === 5 && asm.daily[1].price === 6
   && asm.skinportDaily.length === 1 && asm.skinportDaily[0].price === 4,
   "assembleSeries: import wins collisions, skinport split out");
+const deepBase = A.deepHistoryBase(
+  [{ t: T0 - 5 * D, price: 1, vol: 1 }, { t: T0, price: 2, vol: 1 }, { t: T0 + D, price: 3, vol: 1 }],
+  [{ t: T0 + D, price: 9, vol: 9 }],
+  [{ t: T0 + 2 * D, src: "steam", price: 8, vol: 1 }]);
+ok(deepBase.length === 3 && deepBase[0].price === 1 && deepBase[1].price === 2 && deepBase[2].price === 9,
+  "deepHistoryBase: deep rows extend ONLY before the first collected/imported day (never override a mark)");
 // SMLX-6 needs ≥3 case contributors: A +10%, B +21%, C flat →
 // median ret = ln(1.1); B clamped to med+0.05, C to med−0.05 →
 // mean = ln(1.1) exactly → index 110.00 (the clamp is symmetric here)
@@ -572,6 +578,12 @@ async function fixtureTransport(url, headers) {
   await api("/api/skins/watch", { name: "Fracture Case" });
   seedFounding(DATA, "Fracture Case", { src: "steam", price: 23, lowest: 22.1, vol: 57 }); // launch mark FIRST (chronological)
   await api("/api/skins/refresh", { name: "Fracture Case" });
+  // item detail merges DISPLAY-ONLY deep history (repo backtest/history/)
+  // under the live marks; the market/index path below must NOT see it
+  const frIt = await api("/api/skins/item?name=" + encodeURIComponent("Fracture Case"));
+  ok(frIt.body.deepDays > 500 && frIt.body.daily.length > 500
+    && frIt.body.daily[frIt.body.daily.length - 1].price === 23,
+    "item report: deep backfill fills the chart, live snapshot stays the last word (" + frIt.body.deepDays + " deep days)");
   const mkt = await api("/api/skins/market");
   ok(mkt.status === 200 && mkt.body.today && mkt.body.today.caseIdx === 100,
     "live /api/skins/market: grandfathered case indexes at base 100 (launch + today, flat)");

@@ -481,7 +481,16 @@
       try { importRows = (await (await fetch("data/import/" + row.slug + ".json", { cache: "no-store" })).json()).rows; }
       catch (e) { /* missing import */ }
     }
-    const series = A.assembleSeries(importRows, lines);
+    // DISPLAY-ONLY deep history (backtest backfill) — extends the series
+    // strictly before the first collected day; never fed to the index
+    let deepRows = null;
+    try {
+      const dj = await (await fetch("backtest/history/" + row.slug + ".json", { cache: "no-store" })).json();
+      if (dj && Array.isArray(dj.rows)) deepRows = dj.rows.map((r) => ({ t: r[0], price: r[1], vol: r[2] }));
+    } catch (e) { /* no deep history for this item */ }
+    const base = A.deepHistoryBase(deepRows, importRows, lines);
+    const deepDays = deepRows ? base.length - (importRows ? importRows.length : 0) : 0;
+    const series = A.assembleSeries(base, lines);
     const analytics = A.analyze(series.daily);
     const steamSnaps = lines.filter((l) => l.src === "steam");
     const last = steamSnaps.length ? steamSnaps[steamSnaps.length - 1] : null;
@@ -492,7 +501,7 @@
       || (sales && sales.last7d && sales.last7d.median) || null;
     return {
       name, daily: series.daily, skinportDaily: series.skinportDaily,
-      analytics, snapshots: lines.length, imported: !!importRows, watched: true, quote,
+      analytics, snapshots: lines.length, imported: !!importRows, deepDays, watched: true, quote,
       skinport: { sales, ask: null, qty: null },
       compare: {
         steam: { gross: steamGross, net: A.netProceeds(steamGross, "steam"), cash: false },
@@ -571,6 +580,8 @@
           tile("SOLD/DAY (30D)", an.liq30 == null ? "—" : Math.round(an.liq30), "") +
         "</div>" +
         (usedAgg ? '<div class="hint" style="margin:-6px 0 12px">* from Skinport realized-sale medians — an instant read while price history builds</div>' : "") +
+        (it.deepDays > 0 ? '<div class="hint" style="margin:-4px 0 12px">Chart &amp; analytics include ' + it.deepDays.toLocaleString("en-US") +
+          " days of backfilled Steam daily aggregates (display only — the <a href=\"methodology.html\">live index</a> starts at its adoption date and is never backfilled)</div>" : "") +
         (an.days < 30 ? '<div class="warmup">day ' + an.days + " of 30 — trend signals warm up as history builds" +
           (ro ? " (the collector records every 6 hours)" : "; Import/Bootstrap full Steam history for instant depth") + "</div>" : "") +
         '<div class="sigCard">' +

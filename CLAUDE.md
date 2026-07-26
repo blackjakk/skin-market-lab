@@ -220,6 +220,23 @@ dashboard from the collector's committed files), or the setup panel
   40%, maxDD −53% peaking 2023-04-18 post-CS2-announce). Clamp engages
   ~97% of days and costs ~10%/yr of right tail vs noClamp — the
   measured, published price of settlement-grade manipulation resistance.
+- ITEM-DETAIL DEEP HISTORY (deepHistoryBase in analytics.js, display
+  layer ONLY): item charts + item analytics merge backtest/history/
+  <slug>.json rows STRICTLY BEFORE the item's first collected/imported
+  day (never overriding a collected mark). Wired in server.js itemReport
+  + skins.js staticItemReport, each with an on-page disclosure hint.
+  HARD RULE: this base must NEVER reach dailyFor/marketReport/the
+  collector — the live index + fixings start at adoption and are never
+  backfilled. backfill.js fetches ALL non-art watchlist items (cases
+  feed the backtest; skins/knives exist ONLY for these item charts —
+  backtest.js loadItems filters catOf==="case"). COVERAGE QUIRK (live,
+  2026-07-26): unique items' SSR history depth varies wildly (Karambit
+  Doppler FN 2,150 days; Redline FT exactly 1 row — bucketed UI serves
+  some items almost nothing); cases are always rich (commodities).
+  Shallow files merge harmlessly (deepDays 0 → no hint). The client
+  probe keeps Fracture DAY-0 by 404ing its deep file in makeStatic (the
+  warm-up/fallback path stays tested) and tests the deep chart on
+  Kilowatt Case.
 - HOME-CHART OVERLAYS (skins.js): the home chart stitches the backtest
   reconstruction to the live index and offers CS-players + BTC toggle
   overlays (state.overlays, default on). Sources: backtest/macro.json —
@@ -243,14 +260,14 @@ dashboard from the collector's committed files), or the setup panel
 
 ## Gates (both in CI, run before every push)
 
-- `node probe.js` — 131 checks: analytics units (incl. SMLX-3
+- `node probe.js` — 133 checks: analytics units (incl. SMLX-3
   winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
   clamp, concentrated/center-capture budget arithmetic, INTEG-1 lane
   pins, order-book fetcher parsing), full API flow, snapshot dedupe,
   import/bootstrap, portfolio P/L, restart persistence, watchlist
   seeding, the collector (manifest, import merge, dedupe, book store,
   integrity attestation).
-- `node client-probe.js` — 38 checks, real Chromium (PLAYWRIGHT_LIB env
+- `node client-probe.js` — 39 checks, real Chromium (PLAYWRIGHT_LIB env
   overrides the library path): chart-pixels-painted assert, crosshair
   tooltip, portfolio form, static-host discovery, setup panel, and the
   full STATIC DATA mode (read-only boot from collected files, fallback

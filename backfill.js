@@ -24,11 +24,14 @@ const OUT = path.join(__dirname, "backtest", "history");
 async function backfill() {
   const wl = JSON.parse(fs.readFileSync(path.join(__dirname, "watchlist.json"), "utf8"));
   const artSet = new Set(wl.art || []);
-  const cases = (wl.items || []).filter((n) => catOf(n) === "case" && !artSet.has(n));
+  // every steam-marked item (cases feed the BACKTEST; skins/knives feed the
+  // item-detail deep charts only — backtest.js filters to cat "case"). Art
+  // is skipped: grails have no Steam sales, so no embedded history exists.
+  const names = (wl.items || []).filter((n) => !artSet.has(n));
   const refresh = process.argv.includes("--refresh");
   fs.mkdirSync(OUT, { recursive: true });
   let ok = 0, skipped = 0, failed = 0;
-  for (const name of cases) {
+  for (const name of names) {
     const f = path.join(OUT, slug(name) + ".json");
     if (!refresh && fs.existsSync(f)) { skipped++; continue; }
     try {
@@ -58,7 +61,7 @@ async function backfill() {
         + ", " + (macro.btc ? macro.btc.length + " btc points" : "no btc"));
     }
   }
-  return { ok, skipped, failed, total: cases.length };
+  return { ok, skipped, failed, total: names.length };
 }
 
 if (require.main === module) {
