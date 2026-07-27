@@ -777,6 +777,19 @@ async function fixtureTransport(url, headers) {
   const cCon = c1.manifest.market.settlement.budget.caseIndex.concentrated;
   ok(cCon && cCon.kMin === 1 && cCon.costMove1pctDay === 98,
     "collector publishes the concentrated attack budget (cheapest-1 of a 1-case basket: 0.5×1311×0.15≈$98)");
+  // ── integration wiring pins (perpmark publication + market-universe budget) ──
+  // The fixture's case series is a flat founding run of 100-marks, so the
+  // published PERPMARK (median of the last ≤5 prints, 2% step guard) must be
+  // exactly 100 with zero guarded updates — hand-computed, time-stable.
+  ok(setPub.latest.perpmark && setPub.latest.perpmark.name === "PERPMARK-CASE"
+    && setPub.latest.perpmark.experimental === true
+    && setPub.latest.perpmark.value === 100 && setPub.latest.perpmark.guardedUpdates === 0,
+    "collector publishes PERPMARK-CASE in the non-canonical latest area (flat series → mark 100, 0 guards)");
+  ok("marketUniverse" in setPub.latest.budget
+    && (setPub.latest.budget.marketUniverse === null
+      || (setPub.latest.budget.marketUniverse.centerCapture.weightNeeded === 0.5
+        && Number.isInteger(setPub.latest.budget.marketUniverse.concentrated.costMove1pctDay))),
+    "budget carries the SMLX-7 preview market-universe economics slot (null or well-formed)");
   const frW = c1.manifest.items.find((i) => /Fracture/.test(i.name));
   ok(frW && frW.weight === 1 && cCon.weighted === true,
     "manifest items carry the published index weight; the budget prices on it (single case → weight 1)");

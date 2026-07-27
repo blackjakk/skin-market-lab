@@ -168,6 +168,47 @@
           + a2.k + " heaviest names here)",
       };
     }
+    // ── market-universe (SMLX-7 preview) capture economics ───────────────
+    // Informational only: the combined cases+liquids universe has NO fixings
+    // yet, so no oiCapacity is published for it — these numbers exist to
+    // show what the broader basket buys (kMin and capture cost multiply).
+    // Weights come from the overview's marketPreview (name → weight map).
+    let marketUniverse = null;
+    if (opts.marketWeights && Object.keys(opts.marketWeights).length >= 3) {
+      const mMenu = [];
+      let mDollarVol = 0, mCovered = 0;
+      const mTotal = Object.keys(opts.marketWeights).length;
+      for (const it of items || []) {
+        const w = opts.marketWeights[it.name];
+        if (w == null || !isFinite(w) || it.tier === "art") continue;
+        if (it.latest != null && it.vol24h != null) {
+          const dv = it.latest * it.vol24h;
+          mDollarVol += dv; mCovered++;
+          mMenu.push({ dv: dv, w: w });
+        }
+      }
+      if (mMenu.length >= 3) {
+        mMenu.sort((a, b) => (a.dv / Math.max(a.w, 1e-12)) - (b.dv / Math.max(b.w, 1e-12)));
+        const mAccumulate = (targetWeight) => {
+          let cumW = 0, cost = 0, k = 0;
+          for (const c of mMenu) {
+            if (cumW >= targetWeight - 1e-12) break;
+            cumW += c.w; cost += washFraction * c.dv * feeSteam; k++;
+          }
+          return { k: k, cost: cost };
+        };
+        const m1 = mAccumulate(targetMove / clampLog), m2 = mAccumulate(0.5);
+        marketUniverse = {
+          label: "SMLX-7 draft preview universe (cases + liquids) — no fixings, no capacity line",
+          dailyDollarVolume: Math.round(mDollarVol),
+          coverage: mCovered + "/" + mTotal + " constituents priced",
+          concentrated: { kMin: m1.k, weightNeeded: targetMove / clampLog,
+            costMove1pctDay: Math.round(m1.cost), costMove1pctFix30d: Math.round(m1.cost * 30) },
+          centerCapture: { kMin: m2.k, weightNeeded: 0.5,
+            costPerDay: Math.round(m2.cost), costFix30d: Math.round(m2.cost * 30) },
+        };
+      }
+    }
     const ratioBurn30d = washFraction * ratioLegDollarVol30d * feeCash;
     const r2 = (v) => Math.round(v);
     // ── open-interest capacity, per fixing ───────────────────────────────
@@ -235,6 +276,7 @@
         "SETTLE-CASE-90D": concentrated ? oiFromCosts(concentrated.costMove1pctFix90d, centerCapture.costFix90d) : null,
         "SETTLE-RATIO-30D": oiFromCosts(r2(ratioBurn30d), null),
       },
+      marketUniverse: marketUniverse,
     };
   }
 

@@ -15,6 +15,44 @@ Studies are pure derivations of committed artifacts — no network, never
 inputs to the live index. Re-run `node corr.js` whenever the backtest
 artifacts refresh.
 
+SETTLEMENT SCALE-UP (2026-07-27) — OI capacity + contracts:
+- HASH-STABILITY RULE (the invariant everything hangs on): `METHODOLOGY`
+  stays "SMLX-6" — it is embedded in every fixing's canonical form, so
+  changing it re-hashes history and forks every witness. New fixings are
+  ADDITIVE catalog entries (SETTLE-CASE-90D, added 2026-07-27, minDays 30)
+  with their own accrual; witness/server/collector pick them up dynamically
+  (they iterate computeAll's keys). A canonical-preimage byte pin in probe.js
+  fails CI on any drift. Probe fixtures must be TIME-STABLE: never pin a
+  value that flips when the wall-clock date crosses a fixture threshold
+  (the 2026-07-27 date-rollover bug — pins now derive expectations from the
+  fixture's own published state).
+- `budget.oiCapacity` (settlement.js): per-fixing OI line — safety condition
+  C(Δ) > N×Δ; boundConcentrated = cost1pct/1%, boundCapture = captureCost/5%
+  (Δcap under a dispute layer), capacityLinear = min/3 (κ=3). Bounds divide
+  the PUBLISHED rounded costs so the line re-derives from the record's own
+  bytes. methodology.html §5b renders it. LISTING.md is the venue-facing
+  parameter sheet (read capacity live, linear-only, no near-money binaries).
+- PERPMARK-CASE (settlement.js S.perpMark): EXPERIMENTAL perp-grade mark —
+  median of last ≤5 daily prints + 2% step guard, pure fold over the
+  published series, NON-canonical (latest.perpmark, no hash), nothing
+  settles on it. methodology §5c.
+- SMLX-7 DRAFT PREVIEW (analytics.js): `marketIdx` = cases+liquids under
+  the exact SMLX-6 rules — additive fields only, labeled "NOT a settlement
+  input" everywhere; center-corroboration INTEG lane (steam clamp center vs
+  Skinport cash-implied center, |dev|>0.03 log ⇒ flag-only) publishes
+  daysObserved/daysWouldBind — the observation phase gating the future
+  SMLX-7 hardening (center must corroborate or the day carries).
+  budget.marketUniverse publishes the combined universe's capture economics
+  (informational; no fixings → no capacity line).
+- CONTRACTS (contracts/, hardhat devDeps ONLY — runtime stays zero-dep):
+  SkindexSettlement.sol (bonded propose → challenge window → resolver →
+  finalize; getFixing reverts unless finalized) + WitnessOracle.sol
+  (curated registry, quorum median). 58 tests, `npm ci && npx hardhat test`
+  (a `contracts` job in gates.yml). Deploy = user action (DEPLOY.md).
+- Collector cadence: every 3h (hourly is the M5 end-state, noted in
+  collect.yml). Known one-shot: first 3-hourly run after a new fixing ships
+  may show one self-healing witness MISMATCH cycle (≤3h window).
+
 CS skin market research tracker. Zero-dependency Node server (`server.js`,
 port 8790) + static dashboard (`index.html`), no build step. `npm start`.
 The dashboard deploys to GitHub Pages (pages.yml, gh-pages branch mirror)

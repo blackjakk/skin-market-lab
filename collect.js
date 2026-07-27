@@ -273,7 +273,9 @@ async function collect(opts) {
   const detail = S.computeAll(manifest.market.series);
   const integ = manifest.market.integrity;
   const fix = { t: Date.now(), day: A.dayKey(Date.now()), methodology: S.METHODOLOGY, fixings: {},
-    budget: S.manipulationBudget(manifest.items),
+    budget: S.manipulationBudget(manifest.items,
+      { marketWeights: manifest.market.marketPreview && manifest.market.marketPreview.weights }),
+    perpmark: S.perpMark(manifest.market.series),
     integrity: integ ? { version: integ.version, summary: integ.summary, flags: integ.flags } : null };
   for (const name of Object.keys(detail)) {
     const f = detail[name];
