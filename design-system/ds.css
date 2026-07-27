@@ -28,6 +28,99 @@
 .ds-tile.up .ds-tile-v, .ds-tile.good .ds-tile-v { color: var(--ds-good); }
 .ds-tile.dn .ds-tile-v, .ds-tile.bad .ds-tile-v { color: var(--ds-bad); }
 
+/* ── hero + status rail row ────────────────────────────────────────────── */
+/* The home page's primary object and its trust sidecar. minmax(0,1fr) on the
+   hero track: the bled canvas inside must never dictate the page width. */
+.ds-hero-row { display: grid; grid-template-columns: minmax(0, 1fr) 250px;
+  gap: 16px; align-items: start; margin-bottom: 16px; }
+@media (max-width: 860px) { .ds-hero-row { grid-template-columns: minmax(0, 1fr); } }
+
+/* HERO — the one surface in the system that takes editorial space
+   (DESIGN.md §4 amendment). overflow:hidden lets the chart bleed to the card
+   edges and be clipped by the card's own radius. */
+.ds-hero { background: var(--ds-surface-1); border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-xl); padding: var(--ds-space-6); overflow: hidden; }
+.ds-hero-top { display: flex; gap: var(--ds-space-4); align-items: flex-start;
+  justify-content: space-between; flex-wrap: wrap; }
+.ds-hero-id { min-width: 0; }
+.ds-hero-eyebrow { font-size: var(--ds-fs-cap); letter-spacing: 1.6px;
+  color: var(--ds-text-muted); }
+.ds-hero-valrow { display: flex; align-items: baseline; gap: var(--ds-space-3);
+  flex-wrap: wrap; margin-top: 4px; }
+.ds-hero-val { font-size: var(--ds-fs-hero); font-weight: 600; line-height: 1;
+  font-variant-numeric: tabular-nums; color: var(--ds-text); }
+.ds-hero-delta { font-size: var(--ds-fs-txt); font-weight: 700; white-space: nowrap;
+  font-variant-numeric: tabular-nums; color: var(--ds-neutral);
+  border: 1px solid var(--ds-line); border-radius: var(--ds-radius-pill); padding: 3px 10px; }
+.ds-hero-delta.up { color: var(--ds-good); }
+.ds-hero-delta.dn { color: var(--ds-bad); }
+.ds-hero-sub { font-size: var(--ds-fs-lbl); color: var(--ds-text-muted); margin-top: 6px; }
+/* the chart IS the card's background: bled to the card edges, no inner box,
+   no second border — the hero surface is the chart surface. */
+.ds-hero-chart { margin: var(--ds-space-4) calc(-1 * var(--ds-space-6)) 0; }
+.ds-hero-chart canvas { width: 100%; display: block; }
+.ds-hero-foot { display: flex; gap: var(--ds-space-3); align-items: center;
+  flex-wrap: wrap; margin-top: var(--ds-space-2); }
+@media (max-width: 560px) {
+  .ds-hero { padding: var(--ds-space-4); }
+  .ds-hero-val { font-size: var(--ds-fs-hero-sm); }
+  .ds-hero-chart { margin-left: calc(-1 * var(--ds-space-4));
+    margin-right: calc(-1 * var(--ds-space-4)); }
+}
+
+/* STATUS RAIL — permanently-visible trust/provenance. Read-only by design:
+   no focusable controls, so it never competes for the keyboard either. */
+.ds-rail { background: var(--ds-surface-1); border: 1px solid var(--ds-line);
+  border-radius: var(--ds-radius-lg); padding: var(--ds-space-4); }
+.ds-rail-h { margin: 0 0 var(--ds-space-3); font-size: 12px; letter-spacing: 1.8px;
+  color: var(--ds-text-2); font-weight: 700; }
+.ds-rail-row { padding: var(--ds-space-2) 0; border-top: 1px solid var(--ds-line); }
+.ds-rail-row:first-of-type { border-top: 0; padding-top: 0; }
+.ds-rail-row:last-child { padding-bottom: 0; }
+.ds-rail-lb { font-size: var(--ds-fs-cap); letter-spacing: 1.2px; color: var(--ds-text-muted); }
+/* break-word, NOT anywhere: these strings are hyphenated identifiers
+   ("SETTLE-RATIO-30D", "SMLX-6") that `anywhere` guillotines mid-token. */
+.ds-rail-v { font-size: var(--ds-fs-txt); font-weight: 700; margin-top: 2px;
+  font-variant-numeric: tabular-nums; color: var(--ds-text); overflow-wrap: break-word; }
+.ds-rail-row.good .ds-rail-v { color: var(--ds-good); }
+.ds-rail-row.bad .ds-rail-v { color: var(--ds-bad); }
+.ds-rail-row.warn .ds-rail-v { color: var(--ds-accent); }
+.ds-rail-sub { font-size: var(--ds-fs-cap); color: var(--ds-text-muted); margin-top: 2px;
+  overflow-wrap: break-word; }  /* muted on --surface-1 = 5.31:1 (darker than the 4.83 tile case) */
+
+/* ── segmented control (one number, N lenses) ──────────────────────────── */
+/* Real <button>s carrying aria-pressed — Tab reaches each, Enter/Space
+   activates natively. No roving tabindex is promised, so none is owed. */
+.ds-seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--ds-radius-pill);
+  border: 1px solid var(--ds-line); background: var(--ds-surface-2); }
+.ds-seg-btn { border: 0; background: none; font: inherit; font-size: var(--ds-fs-lbl);
+  color: var(--ds-text-muted); cursor: pointer; padding: 5px 12px; white-space: nowrap;
+  border-radius: var(--ds-radius-pill); }
+.ds-seg-btn:hover { color: var(--ds-text); }
+.ds-seg-btn.on, .ds-seg-btn[aria-pressed="true"] { background: var(--ds-surface-1);
+  color: var(--ds-accent); font-weight: 700; }
+
+/* ── tab bar (ARIA tablist: aria-selected + roving tabindex + arrow keys) ── */
+.ds-tabs { display: flex; gap: var(--ds-space-1); flex-wrap: wrap;
+  border-bottom: 1px solid var(--ds-line);
+  padding-bottom: var(--ds-space-2); margin-bottom: var(--ds-space-3); }
+.ds-tab { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px;
+  border: 1px solid transparent; border-radius: var(--ds-radius-pill);
+  background: none; font: inherit; font-size: var(--ds-fs-txt);
+  color: var(--ds-text-muted); cursor: pointer; }
+.ds-tab:hover { color: var(--ds-text); }
+.ds-tab.on, .ds-tab[aria-selected="true"] { border-color: var(--ds-accent);
+  color: var(--ds-accent); font-weight: 700; }
+.ds-tab-n { font-size: var(--ds-fs-cap); font-variant-numeric: tabular-nums;
+  color: var(--ds-text-muted); }
+.ds-tab[aria-selected="true"] .ds-tab-n { color: var(--ds-accent); }
+
+/* ── demoted (secondary) tile scale — context, not competition ─────────── */
+.ds-tiles.secondary { grid-template-columns: repeat(auto-fit, minmax(126px, 1fr));
+  gap: var(--ds-space-2); }
+.ds-tiles.secondary .ds-tile { padding: 7px 9px; }
+.ds-tiles.secondary .ds-tile-v { font-size: var(--ds-fs-sec); }
+
 /* ── chip (pill; + interactive button variant) ─────────────────────────── */
 .ds-chip { display: inline-flex; gap: 7px; align-items: center; padding: 5px 11px;
   border-radius: var(--ds-radius-pill); border: 1px solid var(--ds-line);
@@ -111,6 +204,7 @@
 
 /* ── keyboard focus (matches the app's .btn:focus-visible ring) ────────── */
 .ds-btn:focus-visible, .ds-chip:focus-visible, .ds-toggle:focus-visible,
+.ds-seg-btn:focus-visible, .ds-tab:focus-visible,
 .ds-topnav a:focus-visible {
   outline: 2px solid var(--ds-focus); outline-offset: 1px; }
 
@@ -118,5 +212,6 @@
 @media (pointer: coarse) {
   .ds-btn:not(.compact), .ds-toggle { min-height: 44px; }
   .ds-btn.compact, .ds-chip { min-height: 32px; }
+  .ds-seg-btn, .ds-tab { min-height: 44px; }
   .ds-topnav a { display: inline-block; padding: 10px 8px; }
 }

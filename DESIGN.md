@@ -93,8 +93,14 @@ for DATA. Never use them for chrome, buttons, or emphasis text.
 - **Scale** (the `--ds-fs-*` tokens — pick a step, never a fresh px):
   `cap 10.5px` (tile labels, captions, uppercase w/ letter-spacing) ·
   `lbl 11.5px` (chips, small labels, data tables) · `txt 12.5px` (rows,
-  buttons, cells) · body `14px` · `val 17px` (tile values) ·
-  `val-lg 20px` (doc-page stat tiles) · page `h1` 20–22px.
+  buttons, cells) · `sec 13px` (**demoted** secondary-row tile values) ·
+  body `14px` · `val 17px` (tile values) · `val-lg 20px` (doc-page stat
+  tiles) · page `h1` 20–22px · `hero 40px` / `hero-sm 28px` (**the hero
+  level only** — §4a).
+- **The two ends carry the hierarchy.** `hero` and `sec` are a matched
+  pair: the home page reads correctly because the headline number went UP
+  to 40px *and* the context metrics went DOWN to 13px. Reaching for one
+  without the other just makes the page louder.
 - **Weight discipline:** headings and values sit at 600 — never 800+, no
   display bolding. Labels get their hierarchy from size + letter-spacing
   + muted color, not weight.
@@ -103,17 +109,49 @@ for DATA. Never use them for chrome, buttons, or emphasis text.
 
 Base unit 4px approximated by the `--ds-space-*` scale: `1: 4px`
 (chip-row gaps) · `2: 8px` (control gaps, form grids) · `3: 10px` (tile
-grids) · `4: 14px` (panel padding, legends) · `5: 20px` (page gutter).
+grids) · `4: 14px` (panel padding, legends) · `5: 20px` (page gutter) ·
+`6: 24px` (**hero card padding only** — see below).
 Panels stack with 16px between. Density is the point — this is a
 terminal, not a marketing page; do not add editorial whitespace inside
 panels.
 
+### 4a. The hero exception (amended 2026-07-27)
+
+**Amendment.** The density rule above governs panels, tables and tiles —
+and still does, unchanged. It now carries exactly one exception: the
+page's **single primary object** may take editorial space.
+
+*Why.* The rule was written against a page of uniform panels, where the
+only failure mode was padding bloat. It produced a second failure mode we
+had not priced: with no surface allowed to be bigger than any other,
+nothing could be *more important* than anything else. The home page ended
+up rendering eleven equal-weight stat tiles in one strip, so the Skindex —
+the entire product — carried exactly the same visual authority as
+`TRACKED: 64`. That is not density, it is flatness. Density means *high
+information per pixel*; it does not mean *uniform emphasis*. A Bloomberg
+page is dense AND ranked.
+
+*The exception, precisely.* The hero card (`.ds-hero`, `DS.hero`) is the
+one surface that may use `--ds-space-6` (24px) padding, `--ds-radius-xl`
+(16px), and the `--ds-fs-hero` (40px) / `--ds-fs-hero-sm` (28px) type
+step. Its chart bleeds to the card edges and IS the card's background —
+one object, not a tile plus a chart panel. One hero per page, and only for
+a number that is genuinely the page's subject.
+
+*What did NOT change.* Everything below the hero stays dense: panels keep
+`--ds-space-4`, tables keep their row rhythm, and the demoted context row
+goes the other way — a `secondary` tile variant at `--ds-fs-sec` (13px),
+*tighter* than the standard 17px tile. The generosity is a hierarchy
+device spent once at the top, and it is paid for immediately below. If a
+diff wants a second generous surface, it wants a new rule, not this one.
+
 ## 5. Radius
 
 `--ds-radius-sm 6px` (compact chips, chart corners) · `md 8px` (inputs,
-tiles, tooltips) · `lg 10px` (panels) · `pill 99px`. **Every CTA is a
-pill**: `.ds-btn`, `.ds-toggle`, `.ds-warmup`, mover chips. Sharp corners
-(0px) do not exist in the system.
+tiles, tooltips) · `lg 10px` (panels) · `xl 16px` (**hero card only** —
+§4a) · `pill 99px`. **Every CTA is a pill**: `.ds-btn`, `.ds-toggle`,
+`.ds-warmup`, mover chips. Sharp corners (0px) do not exist in the
+system.
 
 ## 6. Elevation
 
@@ -135,7 +173,28 @@ tiers.
 - **Range chips / toggles** (`DS.rangeChips`, `DS.toggle`): pills with
   `aria-pressed`; active = accent border + brighter text.
 - **Stat tiles** (`DS.tile`): `--surface-2`, radius-md, muted 10.5px
-  uppercase label over 17px tabular value.
+  uppercase label over 17px tabular value. The `secondary` variant
+  (`DS.tiles(…, "secondary")`) keeps the same surface and label — only the
+  value drops to `--ds-fs-sec` — so its contrast floors are unchanged.
+- **Hero** (`DS.hero`): the page's primary object — see §4a. Eyebrow over
+  a `--ds-fs-hero` level, delta pill beside it, lens control top-right,
+  the chart bled to the card edges as the card's own background, range
+  chips on the bottom edge. `overflow: hidden` clips the bleed to the
+  card radius. One per page.
+- **Segmented control** (`DS.segmented`): a LENS on one number, never a
+  filter and never a basket switch — every option must be the same
+  quantity read a different way. Different baskets are different tiles.
+  Real buttons with `aria-pressed`; the active thumb is `--surface-1` with
+  accent TEXT (never an orange fill).
+- **Tabs** (`DS.tabs` + `DS.tabPanel` + `DS.tabsKeyNav`): a real ARIA
+  tablist over one dense table. `aria-selected` + `aria-controls` +
+  roving tabindex (the bar is ONE tab stop); ←/→ wrap, Home/End jump, and
+  each move activates. Wire the key handler or don't use the role.
+- **Status rail** (`DS.statusRail`): permanently-visible trust/provenance
+  beside the hero. **Read-only by contract** — it emits no focusable
+  control, so it never competes with the data for attention or for the
+  keyboard. Every row must be read off published data; it is a provenance
+  surface, so it may never show a number the artifacts don't carry.
 - **Panels** (`DS.panel`): `--surface-1`, radius-lg, 14px padding, h2 in
   small caps.
 - **Tables**: hairline row dividers, tabular numerals, sortable headers
@@ -156,15 +215,22 @@ tiers.
 ## 8. Responsive & touch
 
 Breakpoint 900px: two-column (`330px minmax(0,1fr)`) → single column
-(`minmax(0,1fr)`). Grid tracks around tables/canvases are always
-`minmax(0,…)`; canvases pin `style.width` and handle dpr. No horizontal
-page scroll at any width — scroll lives inside `.scrollX`/`.ds-scroll-x`
-wrappers. Coarse pointers get the 44/32px target floors via
-`@media (pointer: coarse)` only.
+(`minmax(0,1fr)`). The hero row (`.ds-hero-row`, `minmax(0,1fr) 250px`)
+collapses to one column at 860px, and the hero drops to `--ds-space-4`
+padding + `--ds-fs-hero-sm` at 560px. Grid tracks around tables/canvases
+are always `minmax(0,…)`; canvases pin `style.width` and handle dpr. No
+horizontal page scroll at any width — scroll lives inside
+`.scrollX`/`.ds-scroll-x` wrappers, and the hero's bled chart is contained
+by the card's own `overflow: hidden`. Coarse pointers get the 44/32px
+target floors via `@media (pointer: coarse)` only — segments and tabs sit
+at 44px there.
 
 ## 9. Do / Don't
 
 **Do**
+- Give each page ONE primary object and rank everything else below it
+  (§4a). A screen where every number is the same size has no hierarchy,
+  only uniformity.
 - Reserve `--accent` orange for actions, links, active states, focus.
 - Draw every series from the rarity ramp; differentiate near-luminance
   pairs by weight/dash.
@@ -174,6 +240,10 @@ wrappers. Coarse pointers get the 44/32px target floors via
   touching any token.
 
 **Don't**
+- Spend the hero steps (`--ds-space-6`, `--ds-radius-xl`, `--ds-fs-hero*`)
+  on anything but the one hero, or add a second generous surface to a page.
+- Put different baskets behind one segmented control — a lens re-reads a
+  number, it does not swap the subject.
 - Introduce a second action color, or use rarity colors for chrome.
 - Fill buttons or backgrounds with orange, green, or red.
 - Inline a raw hex/font outside the token layer (ds-guard blocks it).

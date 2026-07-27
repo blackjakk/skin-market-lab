@@ -149,6 +149,134 @@
       (o.body || "") + "</div>";
   }
 
+  // hero({ eyebrow, value, delta, deltaTone, sub, controls, chart, foot, after,
+  //        labelId, cls, attrs }) — the page's PRIMARY object: one big level,
+  //   its delta chip beside it, a lens control top-right, and the chart living
+  //   INSIDE the card as its own background (bled to the card edges) with the
+  //   range chips on the bottom edge.
+  //   eyebrow / value / delta / sub are ESCAPED; controls / chart / foot /
+  //   after are TRUSTED slots (factory output by construction).
+  //   deltaTone: "" | "up" | "dn".
+  function hero(o) {
+    o = o || {};
+    return '<section class="' + cx("ds-hero", o.cls) + '"' +
+      (o.labelId ? ' aria-labelledby="' + esc(o.labelId) + '"' : "") + attrs(o.attrs) + ">" +
+      '<div class="ds-hero-top"><div class="ds-hero-id">' +
+        '<div class="ds-hero-eyebrow"' + (o.labelId ? ' id="' + esc(o.labelId) + '"' : "") + ">" +
+          esc(o.eyebrow) + "</div>" +
+        '<div class="ds-hero-valrow"><span class="ds-hero-val">' + esc(o.value) + "</span>" +
+          (o.delta != null ? '<span class="' + cx("ds-hero-delta", o.deltaTone) + '">' +
+            esc(o.delta) + "</span>" : "") +
+        "</div>" +
+        (o.sub != null ? '<div class="ds-hero-sub">' + esc(o.sub) + "</div>" : "") +
+      "</div>" + (o.controls || "") + "</div>" +
+      (o.chart ? '<div class="ds-hero-chart">' + o.chart + "</div>" : "") +
+      (o.foot ? '<div class="ds-hero-foot">' + o.foot + "</div>" : "") +
+      (o.after || "") + "</section>";
+  }
+
+  // segmented({ label, options: [{ value, label, title }], active, dataKey,
+  //            cls, attrs }) — a LENS switch: same number, different view.
+  //   Emits role="group" + real <button aria-pressed> children carrying
+  //   data-<dataKey>="<value>". STATE CONTRACT (as DS.toggle): aria-pressed
+  //   and the "on" class move together. Native Tab/Enter/Space operation —
+  //   no roving tabindex is claimed, so none is owed. For a control that
+  //   swaps a PANEL rather than a value, use DS.tabs instead.
+  function segmented(o) {
+    o = o || {};
+    const key = o.dataKey || "seg";
+    return '<div class="' + cx("ds-seg", o.cls) + '" role="group"' +
+      (o.label ? ' aria-label="' + esc(o.label) + '"' : "") + attrs(o.attrs) + ">" +
+      (o.options || []).map(function (op) {
+        const on = op.value === o.active;
+        return '<button type="button" class="' + cx("ds-seg-btn", on && "on") +
+          '" data-' + key + '="' + esc(op.value) + '" aria-pressed="' + on + '"' +
+          (op.title ? ' title="' + esc(op.title) + '"' : "") + ">" + esc(op.label) + "</button>";
+      }).join("") + "</div>";
+  }
+
+  // tabs({ label, tabs: [{ value, label, count, title }], active, dataKey,
+  //       idPrefix, panelId, cls, attrs }) — a real ARIA tablist.
+  //   Each tab is a <button role="tab"> with aria-selected, aria-controls and
+  //   ROVING TABINDEX (active = 0, rest = −1) so the whole bar is ONE tab
+  //   stop. The arrow-key half of the contract is DS.tabsKeyNav — a tablist
+  //   without it is an unfulfilled ARIA promise; wire both or use neither.
+  //   Pair with DS.tabPanel so aria-controls/aria-labelledby actually resolve.
+  function tabs(o) {
+    o = o || {};
+    const key = o.dataKey || "tab";
+    const pre = o.idPrefix || "ds-tab";
+    return '<div class="' + cx("ds-tabs", o.cls) + '" role="tablist"' +
+      (o.label ? ' aria-label="' + esc(o.label) + '"' : "") + attrs(o.attrs) + ">" +
+      (o.tabs || []).map(function (tb) {
+        const on = tb.value === o.active;
+        return '<button type="button" role="tab" id="' + esc(pre + "-" + tb.value) + '" class="' +
+          cx("ds-tab", on && "on") + '" data-' + key + '="' + esc(tb.value) +
+          '" aria-selected="' + on + '" tabindex="' + (on ? "0" : "-1") + '"' +
+          (o.panelId ? ' aria-controls="' + esc(o.panelId) + '"' : "") +
+          (tb.title ? ' title="' + esc(tb.title) + '"' : "") + ">" + esc(tb.label) +
+          (tb.count != null ? ' <span class="ds-tab-n">' + esc(tb.count) + "</span>" : "") +
+          "</button>";
+      }).join("") + "</div>";
+  }
+
+  // tabPanel({ id, labelledBy, body, cls, attrs }) — the region a DS.tabs bar
+  //   controls. `labelledBy` must be the ACTIVE tab's id (that is what makes
+  //   aria-controls/aria-labelledby a real pair). `body` is TRUSTED.
+  function tabPanel(o) {
+    o = o || {};
+    return '<div class="' + cx("ds-tabpanel", o.cls) + '" id="' + esc(o.id) + '" role="tabpanel"' +
+      (o.labelledBy ? ' aria-labelledby="' + esc(o.labelledBy) + '"' : "") + attrs(o.attrs) + ">" +
+      (o.body || "") + "</div>";
+  }
+
+  // tabsKeyNav(tablistEl, onSelect) — the keyboard half of the tablist
+  //   contract: ←/→ wrap through the tabs, Home/End jump to the ends, and each
+  //   move ACTIVATES (automatic activation, the pattern for cheap panels).
+  //   Moves focus itself, then calls onSelect(tabEl) so the consumer reads its
+  //   own data-* key and re-renders. Click activation stays the consumer's
+  //   (clicks bubble to a delegated listener exactly like the sort headers).
+  function tabsKeyNav(listEl, onSelect) {
+    if (!listEl) return;
+    const items = Array.prototype.slice.call(listEl.querySelectorAll('[role="tab"]'));
+    items.forEach(function (el, i) {
+      el.addEventListener("keydown", function (e) {
+        let j = -1;
+        if (e.key === "ArrowRight" || e.key === "ArrowDown") j = (i + 1) % items.length;
+        else if (e.key === "ArrowLeft" || e.key === "ArrowUp") j = (i - 1 + items.length) % items.length;
+        else if (e.key === "Home") j = 0;
+        else if (e.key === "End") j = items.length - 1;
+        else return;
+        e.preventDefault();
+        items[j].focus();
+        if (onSelect) onSelect(items[j]);
+      });
+    });
+  }
+
+  // statusRail({ title, rows: [{ label, value, sub, subHtml, tone }], labelId,
+  //             cls, attrs }) — a permanently-visible trust/provenance column.
+  //   READ-ONLY BY CONTRACT: it renders no focusable controls, so it never
+  //   competes with the data for attention or for the keyboard.
+  //   tone: "" | "good" | "bad" | "warn" (colors the value).
+  //   label / value / sub are ESCAPED; `subHtml` is the TRUSTED alternative.
+  function statusRail(o) {
+    o = o || {};
+    return '<section class="' + cx("ds-rail", o.cls) + '"' +
+      (o.labelId ? ' aria-labelledby="' + esc(o.labelId) + '"' : "") + attrs(o.attrs) + ">" +
+      (o.title != null
+        ? '<h2 class="ds-rail-h"' + (o.labelId ? ' id="' + esc(o.labelId) + '"' : "") + ">" +
+          esc(o.title) + "</h2>" : "") +
+      (o.rows || []).map(function (r) {
+        return '<div class="' + cx("ds-rail-row", r.tone) + '">' +
+          '<div class="ds-rail-lb">' + esc(r.label) + "</div>" +
+          '<div class="ds-rail-v">' + esc(r.value) + "</div>" +
+          (r.sub != null || r.subHtml != null
+            ? '<div class="ds-rail-sub">' + (r.subHtml != null ? r.subHtml : esc(r.sub)) + "</div>"
+            : "") + "</div>";
+      }).join("") + "</section>";
+  }
+
   // hint("text") or hint({ text, html, cls }) — muted helper line. `html` TRUSTED.
   function hint(o) {
     if (typeof o === "string") o = { text: o };
@@ -211,5 +339,7 @@
     tile: tile, tiles: tiles, chip: chip, toggle: toggle, btn: btn,
     rangeChips: rangeChips, legendItem: legendItem, panel: panel, hint: hint,
     badge: badge, specTable: specTable, keyActivate: keyActivate,
+    hero: hero, segmented: segmented, tabs: tabs, tabPanel: tabPanel,
+    tabsKeyNav: tabsKeyNav, statusRail: statusRail,
   };
 });

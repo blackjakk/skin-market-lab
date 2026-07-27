@@ -69,6 +69,51 @@ const server = http.createServer((req, res) => {
     "DS.toggle emits aria-pressed state + data-* hooks");
   ok(DS.hint("plain & <text>").includes("plain &amp; &lt;text&gt;"), "DS.hint(string) escapes");
 
+  // ── home-hierarchy factories (hero / segmented / tabs / status rail) ────
+  console.log("home-hierarchy factory pins:");
+  ok(["hero", "segmented", "tabs", "tabPanel", "tabsKeyNav", "statusRail"]
+      .every((k) => typeof DS[k] === "function"),
+    "UMD node export exposes the 6 home-hierarchy API functions");
+  ok(DS.hero({ eyebrow: "<b>", value: "<i>", delta: "+1%", sub: "<s>" }).includes("&lt;b&gt;") &&
+     DS.hero({ eyebrow: "E", value: "<i>", delta: "+1%" }).includes("&lt;i&gt;") &&
+     DS.hero({ eyebrow: "E", value: "v", delta: "+1%", deltaTone: "up" }).includes('class="ds-hero-delta up"'),
+    "DS.hero escapes eyebrow/value/sub and applies the delta tone class");
+  ok(DS.hero({ eyebrow: "E", value: "v", chart: "<canvas id=c></canvas>" })
+       .includes('<div class="ds-hero-chart"><canvas id=c></canvas></div>') &&
+     DS.hero({ eyebrow: "E", value: "v", foot: "<b>f</b>" }).includes('<div class="ds-hero-foot"><b>f</b></div>'),
+    "DS.hero chart/foot are TRUSTED slots rendered verbatim");
+  ok(DS.hero({ eyebrow: "E", value: "v", labelId: "hx" }).startsWith('<section class="ds-hero" aria-labelledby="hx">') &&
+     DS.hero({ eyebrow: "E", value: "v", labelId: "hx" }).includes('<div class="ds-hero-eyebrow" id="hx">'),
+    "DS.hero labelId names the section via its own eyebrow");
+  ok(DS.segmented({ label: "L", active: "a", dataKey: "lens",
+       options: [{ value: "a", label: "A" }, { value: "b", label: "B" }] })
+       .startsWith('<div class="ds-seg" role="group" aria-label="L">') &&
+     DS.segmented({ active: "a", dataKey: "lens", options: [{ value: "a", label: "A" }] })
+       .includes('class="ds-seg-btn on" data-lens="a" aria-pressed="true"'),
+    "DS.segmented emits role=group + data-<key> + .on/aria-pressed together");
+  ok(DS.segmented({ active: "a", options: [{ value: "b", label: "B" }] }).includes('aria-pressed="false"') &&
+     !DS.segmented({ active: "a", options: [{ value: "b", label: "B" }] }).includes("ds-seg-btn on"),
+    "DS.segmented inactive option: aria-pressed=false and no .on");
+  const TB = DS.tabs({ label: "Seg", active: "all", dataKey: "mt", idPrefix: "mtab", panelId: "mp",
+    tabs: [{ value: "all", label: "All", count: 64 }, { value: "art", label: "<b>", count: 9, title: "grails" }] });
+  ok(TB.startsWith('<div class="ds-tabs" role="tablist" aria-label="Seg">') &&
+     TB.includes('role="tab" id="mtab-all"') && TB.includes('aria-controls="mp"'),
+    "DS.tabs emits a role=tablist of role=tab buttons with ids + aria-controls");
+  ok(TB.includes('aria-selected="true" tabindex="0"') && TB.includes('aria-selected="false" tabindex="-1"'),
+    "DS.tabs uses ROVING tabindex (active 0, rest −1) — the bar is ONE tab stop");
+  ok(TB.includes('<span class="ds-tab-n">64</span>') && TB.includes('title="grails"') && TB.includes("&lt;b&gt;"),
+    "DS.tabs renders counts + titles and escapes tab labels");
+  ok(DS.tabPanel({ id: "mp", labelledBy: "mtab-all", body: "<b>t</b>" }) ===
+      '<div class="ds-tabpanel" id="mp" role="tabpanel" aria-labelledby="mtab-all"><b>t</b></div>',
+    "DS.tabPanel exact shape (role=tabpanel + aria-labelledby, TRUSTED body)");
+  ok(DS.statusRail({ title: "S", rows: [{ label: "<l>", value: "<v>", sub: "<s>", tone: "good" }] })
+       .includes("&lt;l&gt;") &&
+     DS.statusRail({ rows: [{ label: "L", value: "V", tone: "good" }] }).includes('class="ds-rail-row good"'),
+    "DS.statusRail escapes label/value/sub and applies the tone class");
+  ok(!/<button|tabindex|<a /.test(DS.statusRail({ title: "S",
+       rows: [{ label: "L", value: "V", sub: "s" }, { label: "L2", value: "V2" }] })),
+    "DS.statusRail is READ-ONLY by contract (emits no focusable control)");
+
   // ── browser side ────────────────────────────────────────────────────────
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage({ viewport: { width: 1280, height: 1700 } });
@@ -206,6 +251,99 @@ const server = http.createServer((req, res) => {
       el.textContent.includes("<script>alert('xss')</script>") && el.querySelector("script") === null),
     "specTable plain cell renders the attacker string as TEXT (no script element)");
   ok(await page.$("#g-spec .ds-spec-table td b") !== null, "specTable { html } trusted cell renders markup");
+
+  // ── hero + segmented + rail (the home hierarchy, live) ────────────────
+  console.log("home hierarchy (hero / segmented / tabs / rail):");
+  ok(await page.$("#g-hero .ds-hero-row > .ds-hero") !== null &&
+     await page.$("#g-hero .ds-hero-row > .ds-rail") !== null,
+    "hero + status rail render side by side in .ds-hero-row");
+  ok((await cs("#g-hero .ds-hero-row", "display")) === "grid", ".ds-hero-row is a CSS grid");
+  ok((await cs("#g-hero .ds-hero-val", "fontSize")) === "40px", "hero level pins --ds-fs-hero (40px)");
+  ok((await cs("#g-hero .ds-hero", "borderRadius")) === "16px", "hero pins --ds-radius-xl (16px)");
+  ok((await cs("#g-hero .ds-hero", "padding")) === "24px", "hero pins --ds-space-6 (24px, the one generous step)");
+  ok((await cs("#g-hero .ds-hero", "overflow")) === "hidden",
+    "hero clips its bled chart to the card radius (overflow: hidden)");
+  ok((await cs("#g-hero .ds-hero-delta.up", "color")) === "rgb(63, 174, 106)",
+    "hero delta tone up → --ds-good");
+  // the bleed IS the "chart as the card's background" contract: the chart
+  // block is exactly 2 × --ds-space-6 wider than the hero's content box, and
+  // the card still never overflows its own border box (overflow: hidden).
+  const bleed = await page.$eval("#g-hero .ds-hero-chart", (el) => {
+    const hero = el.closest(".ds-hero");
+    const pad = parseFloat(getComputedStyle(hero).paddingLeft);
+    return { chart: el.clientWidth, content: hero.clientWidth - 2 * pad, pad: pad, hero: hero.clientWidth };
+  });
+  ok(bleed.chart === bleed.content + 2 * bleed.pad && bleed.chart <= bleed.hero,
+    "hero chart bleeds to both card edges without overflowing it (" +
+      bleed.content + " content + 2×" + bleed.pad + " = " + bleed.chart + "px)");
+  const heroPainted = await page.$eval("#g-hero-chart", (cv) => {
+    const d = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+    let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i] > 0) n++;
+    return n;
+  });
+  ok(heroPainted > 100, "hero chart canvas actually painted (" + heroPainted + " px)");
+
+  const SEG_W = '#g-hero [data-lens="wallet"]', SEG_R = '#g-hero [data-lens="real"]';
+  ok(await page.$eval(SEG_W, (el) => el.tagName === "BUTTON" && el.getAttribute("aria-pressed") === "true" && el.classList.contains("on")),
+    "active segment is a real <button> with aria-pressed=true + .on");
+  ok((await cs(SEG_W, "color")) === "rgb(222, 155, 53)", "active segment uses --ds-accent as TEXT (never a fill)");
+  ok(await page.$eval("#g-hero .ds-seg", (el) => el.getAttribute("role") === "group" && !!el.getAttribute("aria-label")),
+    "segmented control is a labelled role=group");
+  await page.click(SEG_R);
+  ok(await page.$eval(SEG_R, (el) => el.getAttribute("aria-pressed") === "true" && el.classList.contains("on")) &&
+     await page.$eval(SEG_W, (el) => el.getAttribute("aria-pressed") === "false" && !el.classList.contains("on")),
+    "segment click moves aria-pressed AND .on to the new lens");
+  ok((await txt("#g-hero .ds-hero-val")) === "118.3" && /cash-adjusted/.test(await txt("#g-hero .ds-hero-sub")),
+    "the lens re-reads the SAME number (level + sub follow the segment)");
+  ok(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute("data-lens") === "real"),
+    "focus is restored to the activated segment across the re-render");
+  await page.click(SEG_W);
+  ok((await txt("#g-hero .ds-hero-val")) === "100.7", "the lens round-trips back to wallet $");
+
+  ok(await page.$$eval("#g-hero .ds-rail-row", (els) => els.length === 5), "status rail renders one row per status");
+  ok((await cs("#g-hero .ds-rail-row.good .ds-rail-v", "color")) === "rgb(63, 174, 106)", "rail tone good → --ds-good");
+  ok((await cs("#g-hero .ds-rail-row.warn .ds-rail-v", "color")) === "rgb(222, 155, 53)", "rail tone warn → --ds-accent");
+  ok(await page.$$eval("#g-hero .ds-rail", (els) =>
+      els.every((r) => r.querySelectorAll('button, a, input, select, textarea, [tabindex]').length === 0)),
+    "status rail contains NO focusable control (the read-only contract holds in the DOM)");
+  ok(await page.$eval("#g-hero .ds-rail-row.bad", (el) =>
+      el.querySelector(".ds-rail-v").textContent === "<script>alert('xss')</script>" &&
+      el.querySelector("script") === null && el.querySelector("img") === null),
+    "status rail renders attacker strings as TEXT in value and sub");
+
+  // ── tabs (the ARIA tablist contract, end to end) ───────────────────────
+  ok(await page.$eval('#g-tabs [role="tablist"]', (el) => !!el.getAttribute("aria-label")) &&
+     await page.$$eval("#g-tabs [data-mt]", (els) => els.length === 4 && els.every((e) => e.getAttribute("role") === "tab")),
+    "tab bar is a labelled tablist of four role=tab buttons");
+  ok(await page.$$eval("#g-tabs [data-mt]", (els) => els.map((e) => e.getAttribute("tabindex")).join(",") === "0,-1,-1,-1"),
+    "roving tabindex in the DOM: four tabs, ONE tab stop");
+  ok(await page.$eval("#g-tabpanel", (el) => el.getAttribute("role") === "tabpanel" &&
+      el.getAttribute("aria-labelledby") === "g-mtab-all"),
+    "tabpanel is labelled by the ACTIVE tab id");
+  await page.focus('#g-tabs [data-mt="all"]');
+  await page.keyboard.press("ArrowRight");
+  ok(await page.evaluate(() => document.activeElement && document.activeElement.getAttribute("data-mt") === "case"),
+    "ArrowRight moves tab focus (DS.tabsKeyNav)");
+  ok(await page.$eval('#g-tabs [data-mt="case"]', (el) => el.getAttribute("aria-selected") === "true") &&
+     await page.$eval('#g-tabs [data-mt="all"]', (el) => el.getAttribute("aria-selected") === "false"),
+    "arrow movement ACTIVATES (aria-selected follows focus)");
+  ok((await txt("#g-tab-out")) === "case" &&
+     await page.$eval("#g-tabpanel", (el) => el.getAttribute("aria-labelledby") === "g-mtab-case"),
+    "the panel body + aria-labelledby track the selected tab");
+  await page.keyboard.press("End");
+  ok(await page.evaluate(() => document.activeElement.getAttribute("data-mt") === "art"), "End jumps to the last tab");
+  await page.keyboard.press("Home");
+  ok(await page.evaluate(() => document.activeElement.getAttribute("data-mt") === "all"), "Home jumps to the first tab");
+  await page.keyboard.press("ArrowLeft");
+  ok(await page.evaluate(() => document.activeElement.getAttribute("data-mt") === "art"),
+    "ArrowLeft wraps from the first tab to the last");
+  await page.click('#g-tabs [data-mt="all"]');
+
+  // ── secondary (demoted) tile scale ────────────────────────────────────
+  ok((await cs("#g-secondary .ds-tiles.secondary .ds-tile-v", "fontSize")) === "13px",
+    "secondary tiles pin --ds-fs-sec (13px) — demoted below the 17px tile scale");
+  ok((await cs("#g-secondary .ds-tile", "backgroundColor")) === "rgb(28, 30, 36)",
+    "secondary tiles keep the --ds-surface-2 backing (contrast floors unchanged)");
 
   // chartbox
   ok(await page.$("#g-chartbox .ds-chartbox canvas") !== null, "chartbox renders its canvas");
