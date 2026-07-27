@@ -77,6 +77,34 @@ STEAM INVENTORY (2026-07-27) — "value my inventory, chart it, beat the index":
   historyless items from the line rather than interpolating them.
 - Steam rate-limits inventory reads: go through `polite()` and the ≥10-minute
   server cache; a cached read must not re-fetch (probe-pinned).
+- CORS IS AN ALLOWLIST, NEVER `*` (adversarial review, BLOCKER). This API
+  answers with personal data — portfolio lots, SteamID64, holdings. A
+  wildcard ACAO let ANY page the user had open read all of it via a
+  no-preflight GET, and a `text/plain` POST rewrite stored state (CSRF);
+  both reproduced end-to-end. `corsOrigin()` reflects only the Pages
+  origin / localhost / `SKIN_ALLOW_ORIGIN`, a foreign origin is refused
+  403 BEFORE any handler runs (omitting the header still lets the request
+  EXECUTE), and the socket binds 127.0.0.1 unless `SKIN_HOST` opens it.
+  Probe-pinned in both directions — never reintroduce `*`.
+- LIKE-FOR-LIKE RETURNS (adversarial review, BLOCKER). The reconstruction
+  admits each item on its OWN first mark, so a return measured from
+  `days[0]` books an item ENTERING the basket as a gain — a flat portfolio
+  in a flat market printed +900pp alpha, and real data +23,842pp. Every
+  return leg opens at `max(recon.fullFrom, index inception)` and truncates
+  the index at the inventory's last day; where no like-for-like window
+  exists, print NOTHING rather than a number. `spanDays` is a DURATION,
+  not a count of marked days. The server and client copies must stay
+  identical (cross-surface probe check).
+- SNAPSHOT SERIES ARE IDENTITY-KEYED: `{t,value,count,id,sig}` — `id` the
+  SteamID64 (digested client-side so it never enters localStorage), `sig`
+  a fingerprint of the sorted name×qty composition. A line joins like with
+  like only; anonymous pastes key on composition. Without this a second
+  person's inventory extended your line and printed a nonsense loss.
+- THE USER CAN ERASE EVERYTHING: `POST /api/skins/inventory/forget` (+ the
+  🧹 UI control) deletes the stored profile/SteamID, the fetch cache and
+  the whole recorded history; POST-only so no link or prefetch can fire
+  it. Any new personal-data storage must extend it — storing what cannot
+  be withdrawn makes the panel's privacy copy false.
 
 CS skin market research tracker. Zero-dependency Node server (`server.js`,
 port 8790) + static dashboard (`index.html`), no build step. `npm start`.

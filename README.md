@@ -71,7 +71,17 @@ vanity name, or SteamID64** and that's the whole flow.
 **Privacy:** a SteamID is personal data. Nothing is uploaded anywhere —
 the local tracker keeps inventory data in gitignored `local-data/`, the
 hosted page keeps it in your own browser, and the only outbound request is
-to Steam itself.
+to Steam itself. The tracker answers only its own dashboard (an origin
+allowlist, never a wildcard) and listens on loopback unless you set
+`SKIN_HOST`. **🧹 Forget** erases the stored SteamID, the cached inventory
+and the whole recorded value history — from the tracker's disk and from
+this browser.
+
+**Your alpha is measured honestly.** Because each item joins the
+reconstruction on its own first price mark, a naive return would count an
+item *appearing* as a gain. The window therefore opens only once every
+holding has history (it is shown on the tile), and where no like-for-like
+window exists the app prints nothing rather than a flattering number.
 
 **Honest coverage:** an inventory holds items far outside the 64-name
 tracked set. Items we can price are priced (tracked marks first, then the
