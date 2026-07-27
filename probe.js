@@ -807,6 +807,32 @@ async function fixtureTransport(url, headers) {
     "14d spark backfills from committed deep history (display-only splice; ends at the collected mark)");
   ok(c1.manifest.market.today.btcSessions && c1.manifest.market.today.btcSessions.ready === false,
     "today publishes the BTC session-split slot (accruing until 3h-cadence samples exist)");
+  // ── embed API + benchmark pins ─────────────────────────────────────────
+  const emb = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "skindex.json"), "utf8"));
+  ok(emb.v === 1 && emb.name === "Skindex" && emb.methodology === "SMLX-6"
+    && emb.level === 100 && emb.fixings["SETTLE-CASE-7D"]
+    && /^https:/.test(emb.links.site) && /attribution/i.test(emb.terms),
+    "collector publishes the stable embed JSON (v1, level from the founding series, fixings + terms)");
+  const bdg = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "badge.json"), "utf8"));
+  ok(bdg.schemaVersion === 1 && bdg.label === "Skindex" && /^100\.0/.test(bdg.message),
+    "collector publishes the shields.io endpoint badge");
+  // benchmarkGrowth — hand-computed: index 100 → 105 → 110 over three days;
+  // lot A ($100 at day 1) grows ×1.10, lot B ($300 at day 2) ×(110/105);
+  // cost-weighted factor = (100×1.10 + 300×110/105) / 400 = 1.06071…
+  {
+    const D1 = Date.UTC(2026, 0, 1), DD = 86400000;
+    const ser = [
+      { day: "2026-01-01", caseIdx: 100 },
+      { day: "2026-01-02", caseIdx: 105 },
+      { day: "2026-01-03", caseIdx: 110 }];
+    const bg = A.benchmarkGrowth(
+      [{ t: D1, cost: 100 }, { t: D1 + DD, cost: 300 }, { t: null, cost: 50 }], ser);
+    ok(near(bg.factor, (100 * 1.10 + 300 * 110 / 105) / 400, 1e-9)
+      && bg.idxPct === 6.1 && bg.covered === 2 && bg.total === 3,
+      "benchmarkGrowth: cost-weighted index growth since each lot's day (undated lots excluded, never fabricated)");
+    const clamp = A.benchmarkGrowth([{ t: D1 - 30 * DD, cost: 100 }], ser);
+    ok(near(clamp.factor, 1.10, 1e-9), "benchmarkGrowth: pre-index lots clamp to inception (×1.10)");
+  }
   // btcSessionSplit unit pins — fixed-clock synthetic samples, hand-computed:
   // one UTC day sampled every 3h; Asia leg compounds 1% per 3h step
   // (ends 03/06/09 UTC → +3.0301% ≈ 3.0), US leg round-trips to 0.

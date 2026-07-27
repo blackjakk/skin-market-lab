@@ -790,11 +790,41 @@
       windowDays: windowDays, ready: days >= minDays && aN > 0 && uN > 0 };
   }
 
+  // ── benchmark-relative portfolio (the "did you beat the Skindex" number) ──
+  // entries = [{ t, cost }] — one per lot, t = acquisition time, cost = the
+  // lot's cost basis. For each entry the benchmark factor is
+  // (latest index level ÷ the level on the lot's day, nearest EARLIER index
+  // day; lots predating the index clamp to its first day). Returns the
+  // COST-WEIGHTED factor — the growth the same money would have had in the
+  // index over the same holding periods — plus coverage (entries without a
+  // usable timestamp are excluded, never given a fabricated date).
+  // Display-only: alpha = portfolio return − (factor − 1).
+  function benchmarkGrowth(entries, series, key) {
+    key = key || "caseIdx";
+    const days = (series || []).filter((s) => s && s[key] != null && isFinite(s[key]) && s[key] > 0);
+    const total = (entries || []).length;
+    if (!days.length || !total) return { factor: null, idxPct: null, covered: 0, total: total };
+    const last = days[days.length - 1][key];
+    let wSum = 0, wg = 0, covered = 0;
+    for (const e of entries) {
+      if (!e || e.t == null || !(e.cost > 0)) continue;
+      const day = dayKey(e.t);
+      let lvl = days[0][key];                       // pre-index lots clamp to inception
+      for (const d of days) { if (d.day <= day) lvl = d[key]; else break; }
+      wSum += e.cost; wg += e.cost * (last / lvl); covered++;
+    }
+    if (!wSum) return { factor: null, idxPct: null, covered: 0, total: total };
+    const factor = wg / wSum;
+    return { factor: factor, idxPct: Math.round((factor - 1) * 1000) / 10,
+      covered: covered, total: total };
+  }
+
   return {
     parseMoney: parseMoney, parseCount: parseCount, dayKey: dayKey, median: median, toDaily: toDaily,
     marketOverview: marketOverview, includedFromDay: includedFromDay, INDEX_RULES: INDEX_RULES,
     deepHistoryBase: deepHistoryBase,
     cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily, btcSessionSplit: btcSessionSplit,
+    benchmarkGrowth: benchmarkGrowth,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,
     maxDrawdown: maxDrawdown, currentDrawdown: currentDrawdown,

@@ -106,6 +106,39 @@ backfill to the hosted dashboard, commit the resulting
   shows the Asia−US spread. Accrues once the 3h collector samples exist —
   measured, not vibed.
 
+## Embed the Skindex (stable JSON API)
+
+The index is free to embed — one small JSON, refreshed every collector run
+(3-hourly), served straight from this repo:
+
+```
+https://raw.githubusercontent.com/blackjakk/skin-market-lab/main/data/skindex.json
+```
+
+| Field | Meaning |
+|---|---|
+| `v` | schema version — within `1`, fields are never renamed or removed, only added |
+| `level` / `chg24hPct` | the Skindex (base 100 at 2026-07-25 adoption) and its 24h move |
+| `cashRatio` | the wallet-dollar exchange rate (realized cash ÷ Steam price) |
+| `liquidsIdx` / `artIdx` | the commodity-skins and grail layers |
+| `players` | live CS2 player count |
+| `fixings` | every settlement fixing: value (or accruing state) + canonical SHA-256 |
+| `updatedAt` / `day` / `methodology` | provenance |
+
+Badge (shields.io endpoint):
+
+```
+![Skindex](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Fblackjakk%2Fskin-market-lab%2Fmain%2Fdata%2Fbadge.json)
+```
+
+Attribution ("Skindex" + a link here) appreciated. Every number is
+re-derivable from the committed `data/` files — don't trust the JSON,
+verify it (methodology page, one click). Not financial advice.
+
+The portfolio panel scores your lots against the index —
+**VS SKINDEX: ±pp α** is your money-weighted out/under-performance over
+the same money and holding periods (lots are timestamped at add).
+
 ## Settlement fixings (SMLX-6)
 
 Dated settlement marks computed from the committed series by fixed rules —
