@@ -32,10 +32,17 @@
   --ds-space-4: 14px;   /* panel padding, legend gap */
   --ds-space-5: 20px;   /* page gutter */
 
+  /* HERO STEP (DESIGN.md §4 amendment): the ONE generous spacing step in the
+     system. It exists so the page's single primary object can breathe; panels
+     and tables below keep the 1–5 terminal density. Do not consume it inside
+     a panel, a table, or a tile. */
+  --ds-space-6: 24px;   /* hero card padding only */
+
   /* ── radius scale ── */
   --ds-radius-sm: 6px;            /* compact chips, chart corners */
   --ds-radius-md: 8px;            /* buttons, tiles, tooltips, inputs */
   --ds-radius-lg: var(--radius);  /* panels (10px, aliases the app radius) */
+  --ds-radius-xl: 16px;           /* hero card ONLY — the one object above panel scale */
   --ds-radius-pill: 99px;         /* pills (.warmup, .moverChip, .cash) */
 
   /* ── type-size scale (the 10px–20px band skins.css uses) ── */
@@ -44,6 +51,12 @@
   --ds-fs-txt: 12.5px;   /* rows / buttons / table cells / reasons */
   --ds-fs-val: 17px;     /* tile values (.tile .v) */
   --ds-fs-val-lg: 20px;  /* stat-tile values (.tile2 .v on the doc pages) */
+  /* HERO / DEMOTED steps (DESIGN.md §3): the home page's hierarchy is carried
+     by these two ends of the scale — the hero level reads as THE number, the
+     secondary strip reads as context. */
+  --ds-fs-hero: 40px;    /* hero index level (desktop) */
+  --ds-fs-hero-sm: 28px; /* hero index level (narrow viewports) */
+  --ds-fs-sec: 13px;     /* demoted secondary-row tile value */
 
   /* ── elevation (matches the skins.css popover/toast shadow) ── */
   --ds-shadow: 0 8px 24px rgba(0, 0, 0, .5);

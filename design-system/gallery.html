@@ -42,8 +42,70 @@
   const IMG = '<img src=x onerror="document.title=\'pwned\'">';
 
   const state = { range: "ALL", ranges: ["1Y", "5Y", "ALL"] };
+  const segState = { lens: "wallet" };
+  const tabState = { seg: "all" };
+  const MTABS = [
+    { value: "all", label: "All", count: 64, title: "every tracked item" },
+    { value: "case", label: "Cases", count: 42, title: "the case family" },
+    { value: "liquid", label: "Liquids", count: 13, title: "skins, knives, gloves and stickers" },
+    { value: "art", label: "Art", count: 9, title: "grails, marked to 30d realized sales" },
+  ];
+  const heroHtml = function () {
+    const real = segState.lens === "real";
+    return D.hero({
+      labelId: "g-hero-lb", eyebrow: "SKINDEX",
+      value: real ? "118.3" : "100.7",
+      delta: real ? "+0.9% 24h" : "+0.4% 24h", deltaTone: "up",
+      sub: (real ? "cash-adjusted through the published cash ratio" : "Steam wallet marks") +
+        " · base 100 at first collection",
+      controls: D.segmented({
+        label: "Skindex lens", active: segState.lens, dataKey: "lens",
+        options: [
+          { value: "wallet", label: "Wallet $", title: "the published Skindex — Steam wallet marks" },
+          { value: "real", label: "Real $", title: "the same basket through the published cash ratio" },
+        ] }),
+      chart: '<canvas id="g-hero-chart" height="190" role="img" aria-label="Demo index over time (' +
+        (real ? "cash-adjusted real $" : "wallet $") + ' lens)"></canvas>',
+      foot: '<div class="ds-legend">' +
+          D.legendItem({ swatch: "var(--ds-series-price)", label: "Skindex (wallet $)" }) +
+          D.legendItem({ swatch: "var(--ds-series-sma7)", label: "Cash-adjusted (real $)" }) +
+        "</div>" +
+        D.rangeChips({ ranges: state.ranges, active: state.range, dataKey: "hr", cls: "idxRangeRow" }),
+    });
+  };
 
   document.getElementById("gallery").innerHTML =
+    // ── hero + status rail (the home page's primary object + trust sidecar) ──
+    D.panel({ title: "HERO + STATUS RAIL — DS.hero / DS.segmented / DS.statusRail", attrs: { id: "g-hero" }, body:
+      '<div class="ds-hero-row" id="g-hero-row">' + heroHtml() +
+      D.statusRail({ title: "STATUS", labelId: "g-rail-lb", rows: [
+        { label: "MARK INTEGRITY", value: "✓ CLEAN", sub: "ratio 12/14 · book 8/10 corroborated", tone: "good" },
+        { label: "COLLECTOR", value: "8h ago", sub: "latest marked day 2026-07-27" },
+        { label: "FIXING ACCRUAL", value: "1 of 4 fixed", sub: "accruing — CASE-30D 3/10 days", tone: "warn" },
+        { label: "WITNESS", value: "ATTESTED", sub: "3/3 days re-derived · 4/4 fixings match", tone: "good" },
+        { label: "ESCAPING", value: XSS, sub: IMG, tone: "bad" },
+      ] }) + "</div>" +
+      D.hint({ html: 'active lens: <b id="g-lens-out">wallet</b> — the segmented control switches the LENS on one number, never the basket' }) }) +
+
+    // ── tabs ──
+    D.panel({ title: "TABS — DS.tabs + DS.tabPanel + DS.tabsKeyNav (real ARIA tablist)", attrs: { id: "g-tabs" }, body:
+      '<div id="g-tabs-mount">' +
+        D.tabs({ label: "Market segment", tabs: MTABS, active: tabState.seg,
+          dataKey: "mt", idPrefix: "g-mtab", panelId: "g-tabpanel" }) +
+        D.tabPanel({ id: "g-tabpanel", labelledBy: "g-mtab-" + tabState.seg,
+          body: D.hint({ html: 'segment <b id="g-tab-out">all</b> — 64 rows' }) }) +
+      "</div>" +
+      D.hint("← / → wrap through the tabs, Home / End jump; each move activates. One tab stop (roving tabindex).") }) +
+
+    // ── secondary (demoted) tile scale ──
+    D.panel({ title: 'SECONDARY TILES — DS.tiles(…, "secondary") (the demoted context row)', attrs: { id: "g-secondary" }, body:
+      D.tiles(
+        D.tile({ label: "LIQUIDS INDEX", value: "98.9", sub: "commodity skins & knives" }) +
+        D.tile({ label: "ART INDEX", value: "100.3", sub: "grails, 30d realized sales" }) +
+        D.tile({ label: "CASH RATIO", value: "74%", sub: "cash sale vs steam price" }) +
+        D.tile({ label: "CS2 PLAYERS", value: "616k", sub: "in game right now" }),
+      "secondary") }) +
+
     // ── tiles ──
     D.panel({ title: "TILES — DS.tile + DS.tiles", attrs: { id: "g-tiles" }, body:
       D.tiles(
@@ -143,6 +205,68 @@
       D.hint({ html: 'TRUSTED slot demo (html/labelHtml/body/…): <b id="g-trusted">this bold tag is intentional</b>' }) });
 
   // ── bindings (house style: addEventListener after innerHTML) ──
+  // hero lens: re-render the hero in place, then re-bind + repaint (the same
+  // render→bind→paint cycle renderHome runs). Focus is restored to the
+  // activated segment, exactly as the app does across an innerHTML swap.
+  function paintHeroChart() {
+    const cv = document.getElementById("g-hero-chart");
+    if (!cv) return;
+    const w = cv.parentElement.clientWidth - 8, h = 190;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    cv.width = Math.round(w * dpr); cv.height = Math.round(h * dpr);
+    cv.style.width = w + "px"; cv.style.height = h + "px";
+    const c = cv.getContext("2d");
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const rootCs = getComputedStyle(document.documentElement);
+    const real = segState.lens === "real";
+    [["--ds-series-price", real ? 1.2 : 2, 0], ["--ds-series-sma7", real ? 2 : 1.5, 14]].forEach(function (s) {
+      c.strokeStyle = rootCs.getPropertyValue(s[0]).trim();
+      c.lineWidth = s[1]; c.lineJoin = "round"; c.beginPath();
+      for (let i = 0; i <= 80; i++) {
+        const x = 40 + (i / 80) * (w - 50), y = h - 30 - s[2] - Math.sin(i / 9) * 30 - i * 0.5;
+        if (i) c.lineTo(x, y); else c.moveTo(x, y);
+      }
+      c.stroke();
+    });
+  }
+  function bindHero() {
+    document.querySelectorAll("#g-hero [data-lens]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        segState.lens = b.dataset.lens;
+        document.querySelector("#g-hero .ds-hero").outerHTML = heroHtml();
+        document.getElementById("g-lens-out").textContent = segState.lens;
+        bindHero();
+        paintHeroChart();
+        const back = document.querySelector('#g-hero [data-lens="' + segState.lens + '"]');
+        if (back) back.focus();
+      });
+    });
+  }
+  bindHero();
+  paintHeroChart();
+
+  // tabs: click + the DS.tabsKeyNav arrow contract, both through one selector
+  function bindTabs() {
+    const pick = function (el) {
+      if (!el.dataset.mt || el.dataset.mt === tabState.seg) return;
+      tabState.seg = el.dataset.mt;
+      const t = MTABS.find(function (x) { return x.value === tabState.seg; });
+      document.getElementById("g-tabs-mount").innerHTML =
+        D.tabs({ label: "Market segment", tabs: MTABS, active: tabState.seg,
+          dataKey: "mt", idPrefix: "g-mtab", panelId: "g-tabpanel" }) +
+        D.tabPanel({ id: "g-tabpanel", labelledBy: "g-mtab-" + tabState.seg,
+          body: D.hint({ html: 'segment <b id="g-tab-out">' + D.esc(tabState.seg) + "</b> — " + t.count + " rows" }) });
+      bindTabs();
+      const back = document.querySelector('#g-tabs [data-mt="' + tabState.seg + '"]');
+      if (back) back.focus();
+    };
+    document.querySelectorAll("#g-tabs [data-mt]").forEach(function (b) {
+      b.addEventListener("click", function () { pick(b); });
+    });
+    D.tabsKeyNav(document.querySelector('#g-tabs [role="tablist"]'), pick);
+  }
+  bindTabs();
+
   document.querySelectorAll("#g-toggles .ds-toggle").forEach(function (b) {
     b.addEventListener("click", function () {
       const on = b.getAttribute("aria-pressed") === "true";

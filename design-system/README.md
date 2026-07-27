@@ -125,6 +125,78 @@ DS.specTable({
 DS.keyActivate(rootEl, ".mrow", (e, el) => selectItem(el.dataset.name));
 ```
 
+## Home-hierarchy components
+
+The home page leads with ONE object instead of a strip of equal tiles. These
+four factories are that hierarchy — use them on any page with a single
+headline number.
+
+### DS.hero — the page's primary object
+
+Big level + delta chip + a lens control, with the chart living INSIDE the card
+as its own background (bled to the card edges) and the range chips on the
+bottom edge. `eyebrow`/`value`/`delta`/`sub` are escaped; `controls`, `chart`,
+`foot` and `after` are TRUSTED slots.
+
+```js
+DS.hero({
+  labelId: "heroIdxLb", eyebrow: "SKINDEX", value: "100.7",
+  delta: "+0.4% 24h", deltaTone: "up",           // "" | "up" | "dn"
+  sub: "Steam wallet marks · base 100 at first collection",
+  controls: DS.segmented({ … }),                  // TRUSTED
+  chart: '<canvas id="idxChart" height="190" role="img" aria-label="…"></canvas>',
+  foot: legendHtml + DS.rangeChips({ … }),        // TRUSTED
+  after: dataTableHtml,                           // TRUSTED (outside the foot)
+})
+```
+
+### DS.segmented — one number, N lenses
+
+A LENS switch, not a filter: every option must be the *same* quantity read a
+different way (wallet-$ vs cash-adjusted real-$). Different baskets belong in
+separate tiles. Real `<button>`s with `aria-pressed`, native Tab + Enter/Space
+(no roving tabindex is claimed, so none is owed). `aria-pressed` and `.on` move
+together, exactly as in `DS.toggle`.
+
+```js
+DS.segmented({ label: "Skindex lens", active: "wallet", dataKey: "lens",
+  options: [{ value: "wallet", label: "Wallet $", title: "the published Skindex" },
+            { value: "real",   label: "Real $",   title: "through the cash ratio" }] })
+```
+
+### DS.tabs / DS.tabPanel / DS.tabsKeyNav — a real ARIA tablist
+
+Splits one long table into readable segments. `DS.tabs` emits `role="tab"`
+buttons with `aria-selected`, `aria-controls` and **roving tabindex** (the
+whole bar is ONE tab stop). `DS.tabsKeyNav` is the other half of the contract —
+←/→ wrap, Home/End jump, each move activates. **Wire both or use neither:** a
+tablist without arrow keys is an unfulfilled ARIA promise.
+
+```js
+DS.tabs({ label: "Market segment", active: tab, dataKey: "mt",
+  idPrefix: "mtab", panelId: "mktTabPanel",
+  tabs: [{ value: "all", label: "All", count: 64 }, …] }) +
+DS.tabPanel({ id: "mktTabPanel", labelledBy: "mtab-" + tab, body: tableHtml })
+
+DS.tabsKeyNav(root.querySelector('[role="tablist"]'), (el) => { … });
+```
+
+`labelledBy` must name the ACTIVE tab so `aria-controls`/`aria-labelledby`
+stay a real pair across re-renders.
+
+### DS.statusRail — permanently-visible trust/provenance
+
+READ-ONLY by contract: it emits no focusable control, so it never competes with
+the data for attention or for the keyboard. `label`/`value`/`sub` are escaped
+(`subHtml` is the TRUSTED alternative); `tone` is `"" | "good" | "bad" | "warn"`.
+
+```js
+DS.statusRail({ title: "STATUS", labelId: "homeRailLb", rows: [
+  { label: "MARK INTEGRITY", value: "✓ CLEAN", sub: "ratio 12/14 corroborated", tone: "good" },
+  { label: "WITNESS", value: "ATTESTED", sub: "SMLX-6 · 3/3 days re-derived", tone: "good" },
+] })
+```
+
 ## Class-only components
 
 No factory needed — apply the class to your own markup:

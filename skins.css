@@ -242,9 +242,11 @@ table.dt th { color: var(--text-muted); }
   border: 1px solid var(--accent); color: var(--accent); font-size: 11.5px; letter-spacing: .3px; }
 
 /* ── market home ─────────────────────────────────────────────────────────── */
-.strip { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); margin-bottom: 6px; }
 .tile .sub2 { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
-#idxChart { width: 100%; display: block; margin-top: 6px; }
+/* #idxChart now lives INSIDE the hero card — .ds-hero-chart owns its bleed,
+   its width:100% and its spacing (the old freestanding-panel margin is gone).
+   The legacy .strip grid retired with the eleven-equal-tiles home strip. */
+.secondaryPanel .ds-panel-h { margin-bottom: var(--ds-space-2); }
 .moversRow { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; }
 .moverChip { display: inline-flex; gap: 7px; align-items: center; padding: 5px 11px; border-radius: 99px;
   border: 1px solid var(--line); background: var(--surface-2); color: var(--text-primary);

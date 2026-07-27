@@ -30,6 +30,15 @@
     portfolio: null, range: "3M", hover: -1, view: "home", sort: { key: "vol24h", dir: -1 },
     backtest: null, idxRange: "ALL", macroHist: null, corrStudy: null,
     overlays: { players: true, btc: true },
+    // home hero LENS on the one index number: "wallet" (the published Skindex,
+    // Steam wallet marks) vs "real" (that same basket marked through the
+    // published cash ratio). NOT two baskets — one number, two views.
+    idxLens: "wallet",
+    // market-table segment tab ("all" | "case" | "liquid" | "art")
+    mktTab: "all",
+    // the collector's committed self-attestation (data/witness.json), read for
+    // the home status rail; null until it lands, or on a host without one
+    witness: null,
     // Steam inventory panel (display layer only — never an index/fixing input).
     // `report` holds an INV_REPORT; the SteamID inside it stays in memory.
     inv: { report: null, busy: false, error: "" } };
@@ -165,6 +174,53 @@
   // the fallback computes it client-side so pre-refresh manifests render too
   const dvolOf = (w) => w.dvol != null ? w.dvol
     : (w.latest != null && w.vol24h != null ? Math.round(w.latest * w.vol24h) : null);
+  // Market-table segments. The precedence MIRRORS the index's own basket
+  // assignment (analytics.js: art tier first, then the case family, then the
+  // rest) so a row can never show up under two tabs. These are TABLE FILTERS
+  // over the tracked set — the liquids INDEX additionally gates on realized
+  // liquidity, which a row's published fields can't reproduce, hence the
+  // title's plain-English scope note rather than a claim of equality.
+  const MKT_TABS = [
+    { value: "all", label: "All", title: "every tracked item" },
+    { value: "case", label: "Cases", title: "the case family — the Skindex basket" },
+    { value: "liquid", label: "Liquids", title: "skins, knives, gloves and stickers — the tracked non-case, non-art set" },
+    { value: "art", label: "Art", title: "grails, marked to 30d realized sales" },
+  ];
+  const mktSeg = (w) => (w.tier === "art" ? "art" : w.cat === "case" ? "case" : "liquid");
+
+  // 24h / 7d change of a daily {t,v} index series, mirroring the published
+  // today.idx1/idx7 discipline EXACTLY (last vs previous sample; the 7d leg
+  // reaches back ≥7d and is dropped below 5d as too shallow to call "7d").
+  // Used only to give the cash-adjusted LENS the same two deltas the wallet
+  // lens already publishes — same series, same rule, no new inputs.
+  function idxDeltas(pts) {
+    const n = (pts || []).length;
+    const last = n ? pts[n - 1] : null, prev = n > 1 ? pts[n - 2] : null;
+    let back7 = null;
+    if (last) for (let i = n - 2; i >= 0; i--) { back7 = pts[i]; if (last.t - pts[i].t >= 7 * 86400000) break; }
+    if (back7 && last.t - back7.t < 5 * 86400000) back7 = null;
+    return {
+      level: last ? last.v : null,
+      d1: last && prev && prev.v ? last.v / prev.v - 1 : null,
+      d7: last && back7 && back7 !== last && back7.v ? last.v / back7.v - 1 : null,
+    };
+  }
+
+  // One-line summary of the committed witness attestation for the status rail.
+  // Reads only what witness.json already carries — no re-derivation here.
+  // The methodology tag leads: it is hyphenated ("SMLX-6") and CSS offers a
+  // break after a hyphen wherever it lands, so at the END of a 250px rail line
+  // it split across rows. First position, it can never be the wrap point.
+  function witnessSub(w) {
+    const c = w.checks || {}, s = c.series || {}, fx = c.fixings || {};
+    const names = Object.keys(fx), okN = names.filter((k) => fx[k]).length;
+    const bits = [];
+    if (w.methodology) bits.push(String(w.methodology));
+    if (s.publishedDays != null) bits.push(s.rederivedDays + "/" + s.publishedDays + " days re-derived");
+    if (names.length) bits.push(okN + "/" + names.length + " fixings match");
+    return bits.join(" · ") || "self-witness published";
+  }
+
   function sortedRows() {
     const { key, dir } = state.sort;
     return state.watch.slice().sort((a, b) => {
@@ -179,7 +235,7 @@
   function renderHome() {
     state.view = "home";
     const t = state.market && state.market.today;
-    const rows = sortedRows();
+    const allRows = sortedRows();   // the full sorted set; the segment tab slices it below
     const movers = state.watch.filter((w) => w.mom1 != null).sort((a, b) => b.mom1 - a.mom1);
     const gain = movers.filter((w) => w.mom1 > 0).slice(0, 3);
     const lose = movers.filter((w) => w.mom1 < 0).slice(-3).reverse();
@@ -233,9 +289,10 @@
       const f = 100 / vis[0].v;
       return vis.map((p) => ({ t: p.t, v: p.v * f }));
     };
+    const cashRaw = cashPts.map((p) => ({ t: p.t, v: p.cashIdx }));
     const reconVis = scaleG(reconPts);
     const idxVis = scaleG(idxRaw);
-    const cashVis = scaleG(cashPts.map((p) => ({ t: p.t, v: p.cashIdx })));
+    const cashVis = scaleG(cashRaw);
     const playersVis = rebase(playersAll);
     const btcVis = rebase(btcAll);
     const hasIdxChart = idxVis.length >= 2 || reconVis.length >= 2 || playersVis.length >= 2 || btcVis.length >= 2;
@@ -246,10 +303,35 @@
     // ds.css `[aria-pressed="false"] .ds-sw` rule dims the off swatch).
     const ovChip = (key, label, col, avail) => !avail ? "" :
       DS.toggle({ label: label, swatch: col, on: !!state.overlays[key], data: { ov: key }, cls: "ovToggle" });
-    const strip =
-      tile2("SKINDEX", t && t.caseIdx != null ? t.caseIdx.toFixed(1) : "—",
-        t && t.idx1 != null ? fmtPct(t.idx1) + " 24h" + (t.idx7 != null ? " · " + fmtPct(t.idx7) + " 7d" : "") : "base 100 at first collection",
-        t && t.idx1 != null ? cls(t.idx1) : "") +
+    // ── HERO LENS ────────────────────────────────────────────────────────
+    // The segmented control switches the LENS on the one index number, not
+    // the basket: "wallet" is the published Skindex (Steam wallet marks);
+    // "real" is that same case basket marked through the published cash
+    // ratio (A.cashAdjustedIndex) — which is why it belongs on the hero and
+    // the liquids / art / market indices do NOT (different baskets → the
+    // secondary row). Falls back to wallet whenever the cash series is too
+    // short to draw, so the hero never shows "—" for a missing lens.
+    const hasCash = cashRaw.length >= 2;
+    const lens = state.idxLens === "real" && hasCash ? "real" : "wallet";
+    const cashD = idxDeltas(cashRaw);
+    const heroLevel = lens === "real" ? cashD.level : (t && t.caseIdx != null ? t.caseIdx : null);
+    const heroD1 = lens === "real" ? cashD.d1 : (t ? t.idx1 : null);
+    const heroD7 = lens === "real" ? cashD.d7 : (t ? t.idx7 : null);
+    const lensNote = lens === "real"
+      ? "cash-adjusted through the published cash ratio"
+      : "Steam wallet marks";
+    const heroSub = (heroD7 != null ? fmtPct(heroD7) + " 7d · " : "") +
+      lensNote + " · base 100 at first collection";
+    const heroSeg = hasCash ? DS.segmented({
+      label: "Skindex lens", active: lens, dataKey: "lens", cls: "idxLens",
+      options: [
+        { value: "wallet", label: "Wallet $", title: "the published Skindex — Steam wallet marks" },
+        { value: "real", label: "Real $", title: "the same basket marked through the published cash ratio" },
+      ],
+    }) : "";
+    // the demoted context row: everything that is NOT the headline number.
+    // Still present, still exact — just no longer competing with it.
+    const secondary =
       tile2("LIQUIDS INDEX", t && t.liqIdx != null ? t.liqIdx.toFixed(1) : "—", "commodity skins & knives, steam marks", "") +
       tile2("ART INDEX", t && t.artIdx != null ? t.artIdx.toFixed(1) : "—", "grails, marked to 30d realized sales", "") +
       // SMLX-7 draft preview — NOT a settlement input (label per methodology)
@@ -280,29 +362,64 @@
         (state.corrStudy ? " · 12y " + (state.corrStudy.monthly > 0 ? "+" : "") + state.corrStudy.monthly.toFixed(2) : "") +
         (t && t.btc != null ? " · BTC $" + fmtCompact(t.btc) : ""), "") +
       tile2("TRACKED", String(state.watch.length), state.mode === "static" && state.manifest ? "updated " + ago(state.manifest.generatedAt) : "live tracker", "");
-    $("itemView").innerHTML =
-      '<div class="ds-panel panel"><div class="tiles strip">' + strip + "</div>" +
-        (hasIdxChart ?
-          '<div class="ds-legend idxLegend">' +
-            (reconPts.length >= 2 ? DS.legendItem({ swatch: RECON_COL, html: '2014→ reconstruction (<a href="backtest.html">backtest</a>, rebased)' }) : "") +
-            DS.legendItem({ swatch: COL.price, label: "Skindex (wallet $)" }) +
-            DS.legendItem({ swatch: COL.sma7, label: "Cash-adjusted (real $)" }) +
-            ovChip("players", "CS players", PLAYERS_COL, hasPlayersData) +
-            ovChip("btc", "BTC", COL.sma30, hasBtcData) +
-            (reconPts.length >= 2
-              ? DS.rangeChips({ ranges: Object.keys(IDXR), active: state.idxRange, dataKey: "ir", cls: "idxRangeRow" })
-              : '<span class="ds-hint hint">gap between the first two = wallet inflation / exit pressure</span>') +
-          "</div>" +
-          '<canvas id="idxChart" height="130" aria-label="Skindex over time, with backtest reconstruction and comparison overlays" role="img"></canvas>' +
-          idxDataTableHtml(reconPts, idxRaw, idxCut) : "") +
-      "</div>" +
-      (gain.length || lose.length ?
-        '<div class="ds-panel panel moversRow">' +
-          (gain.length ? '<span class="ds-hint hint">24h gainers</span>' + gain.map(moverChip).join("") : "") +
-          (lose.length ? '<span class="ds-hint hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
-        "</div>" : "") +
-      (state.market && state.market.settlement ? settlementPanel(state.market.settlement, state.market.integrity) : "") +
-      '<div class="ds-panel panel" id="mktPanel" tabindex="-1"><div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
+    // ── STATUS RAIL ──────────────────────────────────────────────────────
+    // Trust/provenance, permanently visible beside the hero and never
+    // competing with it. EVERY row is read straight off the published
+    // manifest / settlement payload (plus the committed witness
+    // attestation) — nothing is computed for display, nothing is invented.
+    const railRows = [];
+    const integ = state.market && state.market.integrity;
+    if (integ && integ.summary) {
+      const sm = integ.summary, nf = (sm.watch || 0) + (sm.alert || 0);
+      railRows.push({
+        label: "MARK INTEGRITY",
+        tone: nf === 0 ? "good" : (sm.alert ? "bad" : "warn"),
+        value: nf === 0 ? "✓ CLEAN" : "⚠ " + nf + " FLAG" + (nf > 1 ? "S" : ""),
+        // the rail is 250px wide — name the WORST flag, then count the rest
+        // (the full list stays one click away on the methodology page)
+        sub: nf === 0
+          ? "ratio " + sm.ratioCorroborated + " · book " + sm.bookCorroborated + " corroborated"
+          : (() => {
+            const fl = (integ.flags || []).slice().sort((a, b) =>
+              (b.severity === "alert" ? 1 : 0) - (a.severity === "alert" ? 1 : 0));
+            const top = fl[0];
+            return (top ? top.severity + " " + top.lane + ": " + shortName(top.name) : "") +
+              (nf > 1 ? " · +" + (nf - 1) + " more" : "");
+          })(),
+      });
+    }
+    railRows.push({
+      label: "COLLECTOR",
+      value: state.mode === "static" && state.manifest ? ago(state.manifest.generatedAt) : "live tracker",
+      sub: t && t.day ? "latest marked day " + t.day : "no marked day yet",
+    });
+    const stl = state.market && state.market.settlement;
+    if (stl && stl.fixings) {
+      const fxNames = Object.keys(stl.fixings);
+      const fxFixed = fxNames.filter((k) => stl.fixings[k].value != null);
+      const fxAccr = fxNames.filter((k) => stl.fixings[k].value == null && stl.fixings[k].accruing);
+      railRows.push({
+        label: "FIXING ACCRUAL",
+        tone: fxFixed.length ? "" : "warn",
+        value: fxFixed.length + " of " + fxNames.length + " fixed",
+        sub: fxAccr.length
+          ? "accruing — " + fxAccr.map((k) => k.replace(/^SETTLE-/, "") + " " + stl.fixings[k].accruing).join(" · ")
+          : "all marks published for " + (stl.day || "the latest day"),
+      });
+    }
+    railRows.push({
+      label: "WITNESS",
+      tone: state.witness ? (state.witness.verdict === "ATTESTED" ? "good" : "bad") : "",
+      value: state.witness ? String(state.witness.verdict) : "—",
+      sub: state.witness ? witnessSub(state.witness) : "no published attestation on this host",
+    });
+
+    // ── MARKET TABLE SEGMENTS ────────────────────────────────────────────
+    const activeTab = MKT_TABS.some((x) => x.value === state.mktTab) ? state.mktTab : "all";
+    const rows = activeTab === "all" ? allRows : allRows.filter((w) => mktSeg(w) === activeTab);
+    const tabCount = (v) => (v === "all" ? allRows.length : allRows.filter((w) => mktSeg(w) === v).length);
+    const mktTableHtml =
+      '<div class="scrollX"><table class="mkt"><thead><tr><th>#</th>' +
         // sortable headers: a real <button class="thbtn"> inside the th gives
         // native focus + Enter/Space activation (A2-1/A3-9); data-k stays on
         // the th (probe contract) and rides on the button too; aria-sort only
@@ -314,20 +431,79 @@
             : '<button type="button" class="thbtn" data-k="' + c.key + '">' + c.label +
               (state.sort.key === c.key ? (state.sort.dir < 0 ? " ↓" : " ↑") : "") + "</button>") + "</th>").join("") +
       "</tr></thead><tbody>" +
-      rows.map((w, i) =>
-        '<tr class="mrow" data-i="' + i + '" tabindex="0" aria-label="' + esc(w.name) + '">' +
-        "<td>" + (i + 1) + "</td>" +
-        '<td class="nm" title="' + esc(w.name) + '">' + esc(w.name) + ((w.tier || w.cat) ? ' <span class="catChip">' + esc(w.tier === "art" ? "art" : w.cat) + "</span>" : "") + "</td>" +
-        '<td class="r">' + fmt$(w.latest) + "</td>" +
-        '<td class="r chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</td>" +
-        '<td class="r chg ' + cls(w.mom7) + '">' + fmtPct(w.mom7) + "</td>" +
-        '<td class="r chg ' + cls(w.mom30) + '">' + fmtPct(w.mom30) + "</td>" +
-        '<td class="r">' + fmtCompact(w.vol24h) + "</td>" +
-        '<td class="r">' + (dvolOf(w) != null ? "$" + fmtCompact(dvolOf(w)) : "—") + "</td>" +
-        '<td><canvas class="spark" width="90" height="26" data-i="' + i + '" aria-hidden="true"></canvas></td>' +
-        '<td class="r">' + DS.badge({ label: w.verdict || "—", tone: w.score >= 12 ? "good" : w.score <= -12 ? "bad" : "", cls: "sigMini" }) + "</td>" +
-        "</tr>").join("") +
-      "</tbody></table></div>" +
+      (rows.length
+        ? rows.map((w, i) =>
+          '<tr class="mrow" data-i="' + i + '" tabindex="0" aria-label="' + esc(w.name) + '">' +
+          "<td>" + (i + 1) + "</td>" +
+          '<td class="nm" title="' + esc(w.name) + '">' + esc(w.name) + ((w.tier || w.cat) ? ' <span class="catChip">' + esc(w.tier === "art" ? "art" : w.cat) + "</span>" : "") + "</td>" +
+          '<td class="r">' + fmt$(w.latest) + "</td>" +
+          '<td class="r chg ' + cls(w.mom1) + '">' + fmtPct(w.mom1) + "</td>" +
+          '<td class="r chg ' + cls(w.mom7) + '">' + fmtPct(w.mom7) + "</td>" +
+          '<td class="r chg ' + cls(w.mom30) + '">' + fmtPct(w.mom30) + "</td>" +
+          '<td class="r">' + fmtCompact(w.vol24h) + "</td>" +
+          '<td class="r">' + (dvolOf(w) != null ? "$" + fmtCompact(dvolOf(w)) : "—") + "</td>" +
+          '<td><canvas class="spark" width="90" height="26" data-i="' + i + '" aria-hidden="true"></canvas></td>' +
+          '<td class="r">' + DS.badge({ label: w.verdict || "—", tone: w.score >= 12 ? "good" : w.score <= -12 ? "bad" : "", cls: "sigMini" }) + "</td>" +
+          "</tr>").join("")
+        // an empty segment still owes the user a sentence, not a blank table
+        : '<tr><td colspan="' + (COLS.length + 1) + '">' +
+          DS.hint("No tracked items in this segment yet — the watchlist decides what is collected.") + "</td></tr>") +
+      "</tbody></table></div>";
+
+    $("itemView").innerHTML =
+      // HERO + RAIL: the page's primary object, and the trust sidecar.
+      '<div class="ds-hero-row">' +
+      DS.hero({
+        labelId: "heroIdxLb", eyebrow: "SKINDEX",
+        value: heroLevel != null ? heroLevel.toFixed(1) : "—",
+        delta: heroD1 != null ? fmtPct(heroD1) + " 24h" : null,
+        deltaTone: heroD1 != null ? cls(heroD1) : "",
+        sub: heroSub,
+        controls: heroSeg,
+        // the chart lives INSIDE the hero as its own background (bled to the
+        // card edges by .ds-hero-chart) — one object, not a tile plus a panel
+        chart: hasIdxChart
+          ? '<canvas id="idxChart" height="' + IDX_HERO_H + '" role="img" aria-label="Skindex over time (' +
+            (lens === "real" ? "cash-adjusted real $" : "wallet $") +
+            ' lens), with backtest reconstruction and comparison overlays"></canvas>'
+          : "",
+        // legend + overlay toggles + range chips ride the card's bottom edge
+        foot: hasIdxChart
+          ? '<div class="ds-legend idxLegend">' +
+              (reconPts.length >= 2 ? DS.legendItem({ swatch: RECON_COL, html: '2014→ reconstruction (<a href="backtest.html">backtest</a>, rebased)' }) : "") +
+              DS.legendItem({ swatch: COL.price, label: "Skindex (wallet $)" }) +
+              DS.legendItem({ swatch: COL.sma7, label: "Cash-adjusted (real $)" }) +
+              ovChip("players", "CS players", PLAYERS_COL, hasPlayersData) +
+              ovChip("btc", "BTC", COL.sma30, hasBtcData) +
+            "</div>" +
+            (reconPts.length >= 2
+              ? DS.rangeChips({ ranges: Object.keys(IDXR), active: state.idxRange, dataKey: "ir", cls: "idxRangeRow" })
+              : '<span class="ds-hint hint">gap between the first two = wallet inflation / exit pressure</span>')
+          : "",
+        after: hasIdxChart ? idxDataTableHtml(reconPts, idxRaw, idxCut) : "",
+      }) +
+      DS.statusRail({ title: "STATUS", labelId: "homeRailLb", rows: railRows }) +
+      "</div>" +
+      // the demoted context row — smaller, still present, no longer competing
+      DS.panel({ title: "MARKET CONTEXT", cls: "secondaryPanel",
+        body: DS.tiles(secondary, "secondary") }) +
+      (gain.length || lose.length ?
+        '<div class="ds-panel panel moversRow">' +
+          (gain.length ? '<span class="ds-hint hint">24h gainers</span>' + gain.map(moverChip).join("") : "") +
+          (lose.length ? '<span class="ds-hint hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
+        "</div>" : "") +
+      (state.market && state.market.settlement ? settlementPanel(state.market.settlement) : "") +
+      '<div class="ds-panel panel" id="mktPanel" tabindex="-1">' +
+      // segment tabs: a real ARIA tablist (aria-selected + roving tabindex +
+      // arrow keys via DS.tabsKeyNav) over ONE table, so the 64-row wall
+      // becomes four readable books. Default "all" keeps every legacy
+      // row-count contract intact.
+      DS.tabs({
+        label: "Market segment", active: activeTab, dataKey: "mt",
+        idPrefix: "mtab", panelId: "mktTabPanel",
+        tabs: MKT_TABS.map((x) => ({ value: x.value, label: x.label, count: tabCount(x.value), title: x.title })),
+      }) +
+      DS.tabPanel({ id: "mktTabPanel", labelledBy: "mtab-" + activeTab, body: mktTableHtml }) +
       (state.watch.some((w) => w.days < 30)
         ? '<div class="ds-hint hint" style="margin-top:8px">Some items are still warming up (under 30 days of history) — momentum fills in as the collector accrues data.</div>' : "") +
       "</div>";
@@ -345,22 +521,44 @@
     });
     $("itemView").querySelectorAll(".moverChip").forEach((b) =>
       b.addEventListener("click", () => { pendingFocus = focusBack; selectItem(b.dataset.name); }));
+    // hero lens (wallet $ / real $): swaps the READING of the same number —
+    // the level, both deltas, and which index line the chart draws heavy.
+    $("itemView").querySelectorAll("[data-lens]").forEach((b) =>
+      b.addEventListener("click", () => {
+        state.idxLens = b.dataset.lens;
+        pendingFocus = '[data-lens="' + b.dataset.lens + '"]'; // survives the re-render (A2-6)
+        renderHome();
+      }));
+    // market segment tabs: click + the tablist's arrow-key contract. Both
+    // land on the same selector, and both restore focus to the chosen tab.
+    const mktTabSelect = (el) => {
+      const v = el.dataset.mt;
+      if (!v || v === activeTab) return;
+      state.mktTab = v;
+      pendingFocus = '[data-mt="' + v + '"]'; // (A2-6)
+      renderHome();
+    };
+    $("itemView").querySelectorAll("[data-mt]").forEach((b) =>
+      b.addEventListener("click", () => mktTabSelect(b)));
+    DS.tabsKeyNav($("itemView").querySelector('[role="tablist"]'), mktTabSelect);
     rows.forEach((w, i) => drawSpark($("itemView").querySelector('.spark[data-i="' + i + '"]'), w.spark));
     sparkRows = rows; // resize redraw source (A1-8)
     idxChartArgs = null;
     if (hasIdxChart) {
       const lines = [];
       if (reconVis.length >= 2) lines.push({ pts: reconVis, col: RECON_COL, w: 1.5, dash: [4, 3] });
-      if (idxVis.length >= 2) lines.push({ pts: idxVis, col: COL.price, w: 2 });
-      if (cashVis.length >= 2) lines.push({ pts: cashVis, col: COL.sma7, w: 1.5 });
+      // the ACTIVE lens draws heavy, the other stays as context — same two
+      // lines either way, so the wallet-vs-real gap never disappears
+      if (idxVis.length >= 2) lines.push({ pts: idxVis, col: COL.price, w: lens === "real" ? 1.2 : 2 });
+      if (cashVis.length >= 2) lines.push({ pts: cashVis, col: COL.sma7, w: lens === "real" ? 2 : 1.5 });
       if (playersVis.length >= 2) lines.push({ pts: playersVis, col: PLAYERS_COL, w: 1.5, dash: [2, 3] });
       if (btcVis.length >= 2) lines.push({ pts: btcVis, col: COL.sma30, w: 1.5, dash: [5, 4] });
       // log scale whenever any visible line spans a big ratio (a 1000x
       // players range or 40x index range flattens to nothing on linear)
       const vals = lines.flatMap((l) => l.pts.map((p) => p.v)).filter((v) => v > 0);
       const useLog = vals.length && Math.max.apply(null, vals) / Math.min.apply(null, vals) > 6;
-      idxChartArgs = { lines, opts: { log: useLog } }; // resize redraw source (A1-8)
-      drawIdxChart($("idxChart"), lines, { log: useLog });
+      idxChartArgs = { lines, opts: { log: useLog, h: IDX_HERO_H } }; // resize redraw source (A1-8)
+      drawIdxChart($("idxChart"), lines, idxChartArgs.opts);
       $("itemView").querySelectorAll("[data-ir]").forEach((b) =>
         b.addEventListener("click", () => {
           state.idxRange = b.dataset.ir;
@@ -377,7 +575,10 @@
     }
     applyPendingFocus();
   }
-  function settlementPanel(st, integ) {
+  // The fixings panel. MARK INTEGRITY used to live here as a tile; it is the
+  // home page's headline trust signal, so it moved to the status rail beside
+  // the hero (renderHome) — one home for it, not two.
+  function settlementPanel(st) {
     const fx = st.fixings || {};
     const ft = (name, label) => {
       const f = fx[name];
@@ -386,16 +587,6 @@
         f.value != null ? "hash " + (f.hash || "").slice(0, 12) + "…" : "accruing — " + (f.accruing || ""), "");
     };
     const b = st.budget && st.budget.caseIndex;
-    let integTile = "";
-    if (integ && integ.summary) {
-      const sm = integ.summary, n = (sm.watch || 0) + (sm.alert || 0);
-      integTile = tile2("MARK INTEGRITY",
-        n === 0 ? "✓ CLEAN" : "⚠ " + n + " FLAG" + (n > 1 ? "S" : ""),
-        n === 0
-          ? "ratio " + sm.ratioCorroborated + " · book " + sm.bookCorroborated + " corroborated"
-          : (integ.flags || []).slice(0, 3).map((f) => f.severity + " " + f.lane + ": " + shortName(f.name)).join(" · "),
-        n === 0 ? "up" : (sm.alert ? "dn" : ""));
-    }
     return '<div class="ds-panel panel"><h2>SETTLEMENT FIXINGS · ' + esc(st.methodology) + "</h2>" +
       '<div class="tiles">' +
       ft("SETTLE-CASE-7D", "SETTLE-CASE-7D") +
@@ -403,7 +594,6 @@
       ft("SETTLE-RATIO-30D", "SETTLE-RATIO-30D") +
       (b ? tile2("MANIP BUDGET (7D FIX)", "$" + fmtCompact(b.concentrated ? b.concentrated.costMove1pctFix7d : b.costMove1pctFix7d),
         "cheapest-attack fee-burn floor to move the 7d fixing 1%", "") : "") +
-      integTile +
       "</div>" +
       '<div class="ds-hint hint">Dated settlement marks, re-derivable bit-exactly from the committed data — ' +
       '<a href="methodology.html">methodology &amp; verification</a>. A measurement, not an offer of any instrument.</div></div>';
@@ -473,7 +663,11 @@
   // label formatter, so a second consumer (the inventory chart, which plots
   // dollars rather than an index level) reuses this helper instead of forking
   // the dpr / axis / dash discipline. Both default to the home-chart values.
-  const IDX_H = 130; // CSS height of #idxChart (matches the height="130" markup)
+  const IDX_H = 130; // default chart height (the inventory chart's scale)
+  // The home chart is the HERO's background, not a strip under a tile — it
+  // gets the card's vertical room. Keep in sync with the height="…" attribute
+  // renderHome writes on #idxChart (the pre-paint reservation).
+  const IDX_HERO_H = 190;
   const idxAxisFmt = (gv) => gv >= 1e6 ? (gv / 1e6).toFixed(1) + "M" : gv >= 1000 ? (gv / 1000).toFixed(1) + "k" : gv.toFixed(1);
   function drawIdxChart(cv, lines, opts) {
     if (!cv || !lines.length) return;
@@ -2071,7 +2265,19 @@
         if (j && j.corr && j.corr.monthly != null) state.corrStudy = j.corr;
       }
     } catch (e) { /* no correlation study available */ }
-    if ((state.backtest || state.macroHist || state.corrStudy) && state.view === "home" && state.market) renderHome();
+    // The collector's committed self-attestation (data/witness.json), read for
+    // the home status rail's WITNESS row. Optional exactly like the three
+    // above — a host that publishes none just shows the row as unattested.
+    // Deliberately in THIS chain so all optional garnish costs ONE re-render.
+    try {
+      const r = await fetchTimeout("data/witness.json", 6000, { cache: "no-store" });
+      if (r.ok) {
+        const j = await r.json();
+        if (j && j.verdict) state.witness = j;
+      }
+    } catch (e) { /* no published attestation */ }
+    if ((state.backtest || state.macroHist || state.corrStudy || state.witness) &&
+      state.view === "home" && state.market) renderHome();
   }
   async function boot() {
     $("netStatus").textContent = "connecting…";

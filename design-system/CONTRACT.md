@@ -11,9 +11,13 @@ The rules every DS consumer and contributor follows. The component test
   on `.ds-badge.card`, which inherits `currentColor` by CSS spec (the legacy
   `.sigBadge` trick).
 - `tokens.css` is ADDITIVE: `--ds-*` semantic aliases onto the raw palette in
-  `skins.css :root`, plus new spacing (`--ds-space-1..5`), radius
-  (`--ds-radius-sm/md/lg/pill`), and type (`--ds-fs-cap/lbl/txt/val/val-lg`)
-  scales. **Never redefine a raw palette value** (`--accent`, `--surface-*`,
+  `skins.css :root`, plus new spacing (`--ds-space-1..6`), radius
+  (`--ds-radius-sm/md/lg/xl/pill`), and type
+  (`--ds-fs-cap/lbl/txt/val/val-lg/sec/hero/hero-sm`) scales.
+  `--ds-space-6`, `--ds-radius-xl` and `--ds-fs-hero*` are the HERO steps —
+  the one deliberately generous surface in the system (DESIGN.md §4); never
+  consume them inside a panel, a table or a tile.
+  **Never redefine a raw palette value** (`--accent`, `--surface-*`,
   `--status-*`, `--series-*`, …) — hue changes belong in `skins.css` and flow
   through the aliases. The chart palette is dataviz-validated (see repo
   CLAUDE.md); aliasing it is fine, substituting hues is not.

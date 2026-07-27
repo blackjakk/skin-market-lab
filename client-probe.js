@@ -243,6 +243,78 @@ M.setTransport(async (url) => {
       "CS players + BTC comparison overlays render as toggles (players default-on, toggles off live)");
     await pageD.click('[data-ov="players"]'); // back on for the screenshot
     await pageD.click('[data-ir="ALL"]');
+
+    // ── ADDITIVE (home information hierarchy): hero / lens / rail / tabs ────
+    // The home page leads with ONE object — the Skindex hero, its chart living
+    // inside the card — with trust status in a permanent rail, and the market
+    // table split into segments. These assert the hierarchy exists and, more
+    // importantly, that the lens RE-READS THE SAME NUMBER rather than swapping
+    // in a different basket, and that every segment tab is honest about what
+    // it holds. Fixture: 3 tracked items = 2 cases + 1 skin + 0 art.
+    const heroTxt = await pageD.textContent(".ds-hero");
+    ok((await pageD.$(".ds-hero-row > .ds-hero")) != null &&
+       (await pageD.$(".ds-hero-row > .ds-rail")) != null && /SKINDEX/.test(heroTxt),
+      "home leads with a SKINDEX hero card and a status rail beside it");
+    ok((await pageD.$(".ds-hero .ds-hero-chart #idxChart")) != null,
+      "the index chart lives INSIDE the hero card (its own background), not in a separate panel");
+    const railTxt = await pageD.textContent(".ds-rail");
+    ok(/MARK INTEGRITY/.test(railTxt) && /COLLECTOR/.test(railTxt) &&
+       /FIXING ACCRUAL/.test(railTxt) && /WITNESS/.test(railTxt),
+      "status rail carries mark integrity, collector recency, fixing accrual and the witness verdict");
+    ok(await pageD.$eval(".ds-rail", (el) =>
+        el.querySelectorAll("button, a, input, select, textarea, [tabindex]").length === 0),
+      "status rail is read-only — it never competes for the keyboard");
+    // The lens: one number, two readings (published index vs cash-adjusted).
+    // BOTH branches are contracts. A host whose series carries no cash ratio
+    // must not render a dead control — it degrades to the wallet reading and
+    // drops the segment entirely; a host that has one must re-read the SAME
+    // number rather than swap in a different basket.
+    const walletLevel = await pageD.textContent(".ds-hero-val");
+    if ((await pageD.$("[data-lens]")) == null) {
+      ok(/Steam wallet marks/.test(await pageD.textContent(".ds-hero-sub")) && walletLevel !== "",
+        "no cash-ratio series → the hero drops the lens control instead of offering a dead one (wallet " + walletLevel + ")");
+    } else {
+      ok(await pageD.$eval('[data-lens="wallet"]', (b) =>
+          b.getAttribute("aria-pressed") === "true" && b.classList.contains("on")),
+        "hero lens defaults to the published wallet-$ Skindex");
+      await pageD.click('[data-lens="real"]');
+      await pageD.waitForFunction(() => {
+        const b = document.querySelector('[data-lens="real"]');
+        return b && b.getAttribute("aria-pressed") === "true";
+      }, { timeout: 6000 });
+      const realLevel = await pageD.textContent(".ds-hero-val");
+      ok(/cash-adjusted/.test(await pageD.textContent(".ds-hero-sub")) &&
+         /cash-adjusted real \$/.test(await pageD.$eval("#idxChart", (cv) => cv.getAttribute("aria-label"))) &&
+         realLevel !== "—",
+        "real-$ lens re-reads the same index through the cash ratio (" + walletLevel + " → " + realLevel + ")");
+      await pageD.click('[data-lens="wallet"]');
+      await pageD.waitForFunction(() =>
+        document.querySelector('[data-lens="wallet"]').getAttribute("aria-pressed") === "true", { timeout: 6000 });
+      ok((await pageD.textContent(".ds-hero-val")) === walletLevel, "the lens round-trips back to the wallet-$ level");
+    }
+    // segment tabs over the one table
+    const tabState = await pageD.$$eval("[data-mt]", (els) => els.map((e) =>
+      e.dataset.mt + ":" + e.getAttribute("role") + ":" + e.getAttribute("aria-selected") + ":" + e.getAttribute("tabindex")));
+    ok(tabState.join(" ") === "all:tab:true:0 case:tab:false:-1 liquid:tab:false:-1 art:tab:false:-1",
+      "market tabs are a real tablist with roving tabindex, one tab stop (" + tabState.join(" ") + ")");
+    ok(await pageD.$eval("#mktTabPanel", (el) => el.getAttribute("role") === "tabpanel" &&
+        el.getAttribute("aria-labelledby") === "mtab-all"),
+      "the market table sits in a tabpanel labelled by the active tab");
+    await pageD.click('[data-mt="case"]');
+    await pageD.waitForFunction(() => document.querySelectorAll("tr.mrow").length === 2, { timeout: 6000 });
+    ok((await pageD.$$eval("tr.mrow .nm", (els) => els.map((e) => e.textContent))).every((n) => /Case/.test(n)),
+      "the Cases tab filters the table to the case family (2 of the 3 fixture rows)");
+    await pageD.click('[data-mt="art"]');
+    await pageD.waitForTimeout(350);
+    ok((await pageD.$$eval("tr.mrow", (els) => els.length)) === 0 &&
+       /No tracked items in this segment/.test(await pageD.textContent("#mktTabPanel")),
+      "an empty segment says so in words instead of rendering a blank table");
+    await pageD.click('[data-mt="all"]'); // restore: the checks below click a Redline row
+    await pageD.waitForFunction(() => document.querySelectorAll("tr.mrow").length === 3, { timeout: 6000 });
+    ok((await pageD.$$eval(".ds-tiles.secondary .ds-tile-lb", (els) => els.map((e) => e.textContent)))
+        .join("|").includes("CS2 PLAYERS"),
+      "the demoted metrics survive the rework in a quieter secondary row");
+
     await pageD.screenshot({ path: "/tmp/skin_lab_static.png", fullPage: true });
     console.log("  📸 /tmp/skin_lab_static.png");
     await pageD.click('.mrow:has-text("Redline")');
