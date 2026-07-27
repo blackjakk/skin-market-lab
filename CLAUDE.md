@@ -53,6 +53,31 @@ SETTLEMENT SCALE-UP (2026-07-27) — OI capacity + contracts:
   collect.yml). Known one-shot: first 3-hourly run after a new fixing ships
   may show one self-healing witness MISMATCH cycle (≤3h window).
 
+STEAM INVENTORY (2026-07-27) — "value my inventory, chart it, beat the index":
+- NO SIGN-IN BY DESIGN. CS2 inventories are PUBLIC JSON
+  (`steamcommunity.com/inventory/<id>/730/2`); Steam OpenID would only prove
+  identity (useless here) and needs a backend callback the static Pages build
+  cannot have. Input is a profile URL / vanity / SteamID64. Do NOT "add login"
+  as an improvement — it removes capability and adds attack surface.
+- ONE CANONICAL JOIN: `A.parseSteamInventory` (analytics.js, UMD) is the only
+  assets×descriptions implementation; market.js DELEGATES to it so the Node
+  fetch path and the browser paste path cannot drift (same rule as
+  `assembleSeries`). Rows key on `classid_instanceid` — one market_hash_name
+  may appear on several rows (floats/stickers); `A.inventoryValue` is where
+  names are aggregated, so build UI tables off ITS rows, never raw `items`.
+- FIREWALL: inventory data is display-only. It never enters marketOverview,
+  the published series, a fixing, or a hash — same status as item-view deep
+  history.
+- PRIVACY: a SteamID is personal data. Live mode stores under `local-data/`
+  (gitignored), static mode in localStorage; nothing is uploaded; the only
+  outbound call is to Steam. Probe fixtures use the fake id
+  76561190000000001 — never commit a real one.
+- NEVER FABRICATE: unpriceable items are counted as unpriced, not guessed;
+  the reconstruction publishes a VALUE-weighted `coveragePct` and omits
+  historyless items from the line rather than interpolating them.
+- Steam rate-limits inventory reads: go through `polite()` and the ≥10-minute
+  server cache; a cached read must not re-fetch (probe-pinned).
+
 CS skin market research tracker. Zero-dependency Node server (`server.js`,
 port 8790) + static dashboard (`index.html`), no build step. `npm start`.
 The dashboard deploys to GitHub Pages (pages.yml, gh-pages branch mirror)

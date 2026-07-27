@@ -47,6 +47,39 @@ bootstrap, and a server-side portfolio. Private data lives in `local-data/`
 On first boot the tracker seeds its watchlist from `watchlist.json`, so it
 opens populated.
 
+## Track your own inventory (no sign-in)
+
+Point the app at a Steam profile and it values the whole CS2 inventory,
+charts what it has been worth over time, and scores it against the
+Skindex — the same ±pp α the portfolio panel shows, for everything you own.
+
+**There is no sign-in, no password, and no API key** — and that is a design
+decision, not a missing feature. CS2 inventories are already public JSON
+(`steamcommunity.com/inventory/<steamid64>/730/2`), so identity proof buys
+nothing here; Steam's OpenID would only add a login screen and force a
+backend this project deliberately doesn't have. Paste a **profile URL,
+vanity name, or SteamID64** and that's the whole flow.
+
+- **Local tracker** — the server resolves the profile, fetches the public
+  inventory (cached, so Steam's rate limits are respected), prices every
+  item, and appends a value snapshot each time you load it.
+- **Hosted page** — browsers can't read steamcommunity.com directly (no
+  CORS headers), so the app gives you the URL, you paste the JSON back in,
+  and the identical math runs in your browser. Snapshots live in
+  localStorage.
+
+**Privacy:** a SteamID is personal data. Nothing is uploaded anywhere —
+the local tracker keeps inventory data in gitignored `local-data/`, the
+hosted page keeps it in your own browser, and the only outbound request is
+to Steam itself.
+
+**Honest coverage:** an inventory holds items far outside the 64-name
+tracked set. Items we can price are priced (tracked marks first, then the
+Skinport dump); items we can't are reported as unpriced rather than
+guessed. The value-over-time reconstruction says what share of your
+current value it can actually back-price — the rest is left out of the
+line instead of being invented.
+
 ## Getting deep history immediately
 
 Snapshots only build history going forward. Two ways to backfill years of
