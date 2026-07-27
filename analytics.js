@@ -798,6 +798,23 @@
   // NOTE: rows are keyed by classid_instanceid, so an inventory CAN carry
   // several rows sharing one market_hash_name (different floats/stickers);
   // inventoryValue() aggregates them by name, which is where value is summed.
+  //
+  // THREE THINGS THIS RETURN SHAPE MUST MAKE VISIBLE (adversarial review):
+  //  · `unknown` — assets whose description is missing join NOTHING. They are
+  //    still dropped (a name is never invented), but the DROP IS REPORTED: a
+  //    payload where every asset dropped is a BROKEN read, not an empty
+  //    inventory, and a caller that cannot tell those apart records a
+  //    successful "$0 / 0 items" into an append-only series.
+  //  · `truncatedBy` — WHICH of the three causes fired ("cap" = we stopped
+  //    reading, "more_items" = Steam has further pages, "short_payload" =
+  //    Steam sent fewer assets than it declared). One flag for three causes
+  //    forced the UI to blame Steam's 5000-item page cap for all of them.
+  //  · `max` is now a REAL cap on the work done, not just a flag: it used to
+  //    parse, sort and serialize every asset of an unbounded paste and only
+  //    then admit it was truncated.
+  // `amount` is clamped at BOTH ends: a hand-edited "1e9" would otherwise
+  // write an absurd valuation permanently into the snapshot series.
+  const MAX_ASSET_QTY = 5000;   // Steam's own page cap; no real 730/2 stack is near it
   function parseSteamInventory(payload, steamid64, max) {
     let p = payload;
     if (typeof p === "string") {
@@ -818,13 +835,15 @@
       if (!byKey.has(k)) byKey.set(k, d);
     }
     const rows = new Map();
-    let count = 0;
-    for (const a of assets) {
+    let count = 0, unknown = 0, capped = false;
+    for (let ai = 0; ai < assets.length; ai++) {
+      if (max > 0 && ai >= max) { capped = true; break; }   // a real cap, not just a flag
+      const a = assets[ai];
       if (!a) continue;
       const d = byKey.get(String(a.classid) + "_" + String(a.instanceid));
-      if (!d || typeof d.market_hash_name !== "string" || !d.market_hash_name) continue; // never invent a name
+      if (!d || typeof d.market_hash_name !== "string" || !d.market_hash_name) { unknown++; continue; } // never invent a name
       const n = Number(a.amount);
-      const qty = isFinite(n) && n > 0 ? Math.round(n) : 1;
+      const qty = isFinite(n) && n > 0 ? Math.min(Math.round(n), MAX_ASSET_QTY) : 1;
       const k = String(a.classid) + "_" + String(a.instanceid);
       const cur = rows.get(k);
       if (cur) cur.qty += qty;   // duplicate stack of the SAME item → one row, qty summed
@@ -833,12 +852,16 @@
       count += qty;
     }
     const declared = Number(p.total_inventory_count);
+    const truncatedBy = capped ? "cap"
+      : p.more_items ? "more_items"
+        : (isFinite(declared) && declared > assets.length) ? "short_payload" : null;
     return {
       steamid64: String(steamid64 == null ? "" : steamid64),
       count: count,
       items: Array.from(rows.values()),
-      truncated: Boolean(p.more_items) || (isFinite(declared) && declared > assets.length) ||
-        (max > 0 && assets.length >= max),
+      unknown: unknown,
+      truncated: !!truncatedBy,
+      truncatedBy: truncatedBy,
     };
   }
 
