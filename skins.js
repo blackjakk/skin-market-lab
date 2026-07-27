@@ -154,13 +154,18 @@
     { key: "mom7", label: "7d", num: true },
     { key: "mom30", label: "30d", num: true },
     { key: "vol24h", label: "Sold 24h", num: true },
+    { key: "dvol", label: "$/day", num: true },
     { key: "spark", label: "14d", num: false, nosort: true },
     { key: "score", label: "Signal", num: true },
   ];
+  // dollar volume (units × price paid): rows publish `dvol` since 2026-07-27;
+  // the fallback computes it client-side so pre-refresh manifests render too
+  const dvolOf = (w) => w.dvol != null ? w.dvol
+    : (w.latest != null && w.vol24h != null ? Math.round(w.latest * w.vol24h) : null);
   function sortedRows() {
     const { key, dir } = state.sort;
     return state.watch.slice().sort((a, b) => {
-      const av = a[key], bv = b[key];
+      const av = key === "dvol" ? dvolOf(a) : a[key], bv = key === "dvol" ? dvolOf(b) : b[key];
       if (av == null && bv == null) return 0;
       if (av == null) return 1;         // nulls sink regardless of direction
       if (bv == null) return -1;
@@ -249,9 +254,24 @@
       tile2("CASH RATIO", t && t.cashRatio != null ? Math.round(t.cashRatio * 100) + "%" : "—",
         "cash sale vs steam price", "") +
       tile2("UNITS SOLD / DAY", t ? fmtCompact(t.volTotal) : "—", "across tracked items", "") +
+      tile2("$ VOLUME / DAY", (() => {
+        const dv = state.watch.reduce((s, w) => s + (dvolOf(w) || 0), 0);
+        return dv > 0 ? "$" + fmtCompact(dv) : "—";
+      })(), "units × price paid, tracked set", "") +
       tile2("CS2 PLAYERS", t && t.players != null ? fmtCompact(t.players) : "—", "in game right now", "") +
       tile2("CN / US ACTIVITY", t && t.cnus != null ? t.cnus.toFixed(2) : "—",
         t && t.cnus != null ? "Asia-evening ÷ US-evening peak" : "measuring — needs a full day of samples", "") +
+      tile2("BTC CN / US (30D)", (() => {
+        const bs = t && t.btcSessions;
+        if (!bs || !bs.ready) return "—";
+        const spread = Math.round((bs.asiaPct - bs.usPct) * 10) / 10;
+        return (spread > 0 ? "+" : "") + spread + "pp";
+      })(), (() => {
+        const bs = t && t.btcSessions;
+        if (!bs || !bs.ready) return "measuring: " + (bs ? bs.days : 0) + "/" + (bs ? bs.minDays : 5) + " days of 3h sessions";
+        const f = (v) => (v > 0 ? "+" : "") + v + "%";
+        return "Asia " + f(bs.asiaPct) + " vs US " + f(bs.usPct) + " · session-attributed";
+      })(), "") +
       tile2("VS BITCOIN (30D)", btcCorr.corr != null ? (btcCorr.corr > 0 ? "+" : "") + btcCorr.corr.toFixed(2) : "—",
         (btcCorr.corr != null ? "return correlation" : "measuring: " + btcCorr.n + "/10 days") +
         (state.corrStudy ? " · 12y " + (state.corrStudy.monthly > 0 ? "+" : "") + state.corrStudy.monthly.toFixed(2) : "") +
@@ -300,6 +320,7 @@
         '<td class="r chg ' + cls(w.mom7) + '">' + fmtPct(w.mom7) + "</td>" +
         '<td class="r chg ' + cls(w.mom30) + '">' + fmtPct(w.mom30) + "</td>" +
         '<td class="r">' + fmtCompact(w.vol24h) + "</td>" +
+        '<td class="r">' + (dvolOf(w) != null ? "$" + fmtCompact(dvolOf(w)) : "—") + "</td>" +
         '<td><canvas class="spark" width="90" height="26" data-i="' + i + '" aria-hidden="true"></canvas></td>' +
         '<td class="r">' + DS.badge({ label: w.verdict || "—", tone: w.score >= 12 ? "good" : w.score <= -12 ? "bad" : "", cls: "sigMini" }) + "</td>" +
         "</tr>").join("") +
@@ -726,6 +747,8 @@
           tile("VOLATILITY /YR", an.vol30 == null ? "—" : Math.round(an.vol30 * 100) + "%", "") +
           tile("OFF PEAK", an.curDD == null ? "—" : "−" + (an.curDD * 100).toFixed(1) + "%", "") +
           tile("SOLD/DAY (30D)", an.liq30 == null ? "—" : Math.round(an.liq30), "") +
+          tile("≈ $/DAY", an.liq30 != null && it.quote && it.quote.price != null
+            ? "$" + fmtCompact(Math.round(an.liq30 * it.quote.price)) : "—", "") +
         "</div>" +
         (usedAgg ? '<div class="ds-hint hint" style="margin:-6px 0 12px">* from Skinport realized-sale medians — an instant read while price history builds</div>' : "") +
         (it.deepDays > 0 ? '<div class="ds-hint hint" style="margin:-4px 0 12px">Chart &amp; analytics include ' + it.deepDays.toLocaleString("en-US") +

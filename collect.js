@@ -170,13 +170,29 @@ async function collect(opts) {
       sales30: sales && sales.last30d ? sales.last30d.volume : null,
       ratioDays, book: bookStore[s] || null,
     });
+    // DISPLAY-ONLY spark backfill (the item-view deepHistoryBase discipline):
+    // when collected history is under 14 days, committed deep closes extend
+    // the sparkline strictly BEFORE the first collected day. mi.daily — the
+    // analytics/index input — never sees deep data.
+    let sparkDaily = mi.daily;
+    if (mi.daily.length < 14) {
+      const deep = readJson(path.join(root, "backtest", "history", s + ".json"), null);
+      if (deep && Array.isArray(deep.rows) && deep.rows.length) {
+        const deepRows = deep.rows.map((r) => ({ t: r[0], price: r[1], vol: r[2] }));
+        const steamLines = lines.filter((l) => l.src === "steam");
+        const base = A.deepHistoryBase(deepRows, imported && imported.rows, steamLines);
+        sparkDaily = A.assembleSeries(base, steamLines).daily;
+      }
+    }
+    const rowLatest = an.latest != null ? an.latest : m30latest;
     manifest.items.push({
       name, slug: s, cat, tier,
       quote, skinport: sales, imported: !!imported,
-      days: an.days, latest: an.latest != null ? an.latest : m30latest,
+      days: an.days, latest: rowLatest,
       mom1: A.momentum(mi.daily, 1), mom7: an.mom7, mom30: an.mom30,
       vol24h: quote ? quote.vol : null,
-      spark: mi.daily.slice(-14).map((d) => d.price),
+      dvol: rowLatest != null && quote && quote.vol != null ? Math.round(rowLatest * quote.vol) : null,
+      spark: sparkDaily.slice(-14).map((d) => d.price),
       verdict: an.signal.verdict, score: an.signal.score,
       book: bookStore[s] || null,
     });
@@ -265,6 +281,9 @@ async function collect(opts) {
     btc: latest.btc != null ? latest.btc : null,
     eth: latest.eth != null ? latest.eth : null,
     cnus: latest.cnus != null ? latest.cnus : null,
+    // BTC session split (CN/US sibling for the benchmark): attributed from
+    // the per-run readings this same file accumulates. Display-only.
+    btcSessions: A.btcSessionSplit(readLines(macroFile)),
   });
 
   // settlement fixings (SMLX-5): computed from the published series and

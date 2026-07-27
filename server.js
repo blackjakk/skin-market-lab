@@ -232,16 +232,31 @@ function startServer(opts) {
       const daily = dailyFor(name);
       const an = A.analyze(daily);
       const last = latestSteam(name);
+      // DISPLAY-ONLY spark backfill (mirrors the collector + itemReport's
+      // deepHistoryBase discipline): deep closes fill the 14d sparkline when
+      // collected history is short; `daily` itself never sees deep data.
+      let sparkDaily = daily;
+      if (daily.length < 14) {
+        const deep = readJson(path.join(ROOT, "backtest", "history", slug(name) + ".json"), null);
+        if (deep && Array.isArray(deep.rows) && deep.rows.length) {
+          const deepRows = deep.rows.map((r) => ({ t: r[0], price: r[1], vol: r[2] }));
+          const snapRows = snaps(name);
+          const base = A.deepHistoryBase(deepRows, null, snapRows);
+          sparkDaily = A.assembleSeries(base, snapRows).daily;
+        }
+      }
+      const rowLatest = last ? last.price : an.latest;
       return {
         name,
         cat: catOf(name),
         tier: artSet.has(name) ? "art" : null,
-        latest: last ? last.price : an.latest,
+        latest: rowLatest,
         vol24h: last ? last.vol : null,
+        dvol: rowLatest != null && last && last.vol != null ? Math.round(rowLatest * last.vol) : null,
         t: last ? last.t : null,
         days: an.days,
         mom1: A.momentum(daily, 1), mom7: an.mom7, mom30: an.mom30,
-        spark: daily.slice(-14).map((d) => d.price),
+        spark: sparkDaily.slice(-14).map((d) => d.price),
         verdict: an.signal.verdict, score: an.signal.score,
       };
     });

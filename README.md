@@ -79,6 +79,9 @@ backfill to the hosted dashboard, commit the resulting
   ~70–85% is normal; climbing toward 100% = strong real-money demand,
   collapsing = sellers trapped in Steam wallet funds.
 - **Units sold/day** — total Steam sales across the tracked set (liquidity).
+- **$ volume/day** — units × price paid across the tracked set (the dollar
+  turnover the manipulation budgets and OI capacity are priced from); each
+  market-table row carries its own sortable `$/day` column.
 - **CS2 players** — live in-game count, the market's demand fundamental.
 - **Liquids index** — same methodology over the commodity skins/knives
   with real Steam liquidity (≥5 sold/day) — the market's "currency" layer.
@@ -97,6 +100,11 @@ backfill to the hosted dashboard, commit the resulting
   (the collector's 11:17/23:17 UTC samples). A crude but real gauge of the
   regional demand mix — Chinese demand is this market's biggest swing
   factor.
+- **BTC CN/US (30D)** — the same regional lens on the benchmark: each 3h
+  BTC return is attributed to the session it ended in (Asia ≈ 09:00–18:00
+  Beijing vs US ≈ 09:00–18:00 ET) and cumulated over 30 days; the tile
+  shows the Asia−US spread. Accrues once the 3h collector samples exist —
+  measured, not vibed.
 
 ## Settlement fixings (SMLX-6)
 
