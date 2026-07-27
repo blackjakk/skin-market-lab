@@ -264,6 +264,14 @@ M.setTransport(async (url) => {
     ok(await pageD.$eval(".ds-rail", (el) =>
         el.querySelectorAll("button, a, input, select, textarea, [tabindex]").length === 0),
       "status rail is read-only — it never competes for the keyboard");
+    // The clean-state coverage line is a CONTRACT, not cosmetics: the rail is
+    // the surface most people read, so it must report coverage by evidence
+    // TIER. Ask agreement is free to buy — if it ever reappears here as
+    // "corroborated", the rail is overstating how well-evidenced the marks
+    // are, which is exactly what the 2026-07-27 revision removed.
+    ok(/strong \d+\/\d+ · medium \d+\/\d+ corroborated/.test(railTxt) &&
+       !/venue .*corroborated/.test(railTxt),
+      "clean-state rail reports coverage by evidence tier (strong realized sales / medium standing bids) and never counts ask agreement");
     // The lens: one number, two readings (published index vs cash-adjusted).
     // BOTH branches are contracts. A host whose series carries no cash ratio
     // must not render a dead control — it degrades to the wallet reading and

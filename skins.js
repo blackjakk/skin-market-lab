@@ -376,9 +376,18 @@
         tone: nf === 0 ? "good" : (sm.alert ? "bad" : "warn"),
         value: nf === 0 ? "✓ CLEAN" : "⚠ " + nf + " FLAG" + (nf > 1 ? "S" : ""),
         // the rail is 250px wide — name the WORST flag, then count the rest
-        // (the full list stays one click away on the methodology page)
+        // (the full list stays one click away on the methodology page).
+        // Clean-state coverage reports the TIERS, never one summed count:
+        // strong = realized sales (faking burns a venue fee), medium =
+        // standing bids. Asks are deliberately absent — they are checked and
+        // they still flag on divergence, but agreement there is free to buy,
+        // so it must not read as coverage on the surface most people see.
+        // `corroboration` is absent from pre-2026-07-27 artifacts; those fall
+        // back to the flat lane counts they were published with.
         sub: nf === 0
-          ? "ratio " + sm.ratioCorroborated + " · book " + sm.bookCorroborated + " corroborated"
+          ? (sm.corroboration
+            ? "strong " + sm.corroboration.strong.items + " · medium " + sm.corroboration.medium.items + " corroborated"
+            : "ratio " + sm.ratioCorroborated + " · book " + sm.bookCorroborated + " corroborated")
           : (() => {
             const fl = (integ.flags || []).slice().sort((a, b) =>
               (b.severity === "alert" ? 1 : 0) - (a.severity === "alert" ? 1 : 0));
