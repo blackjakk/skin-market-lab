@@ -313,6 +313,100 @@ ok(wbud.caseIndex.centerCapture && wbud.caseIndex.centerCapture.weighted === tru
   && wbud.caseIndex.centerCapture.kMin === 9 && wbud.caseIndex.centerCapture.costPerDay === 25650,
   "SMLX-5 center-capture budget: seizing >50% of index weight (9 heaviest names, $25,650/day) is the price of UNBOUNDED control");
 
+// ══ LANE M1 pin block — SETTLE-CASE-90D + oiCapacity + PERPMARK-CASE ═══════
+// One contiguous, self-contained block (OI_SPEC invariant 5): every fixture
+// is defined inside it (m1-prefixed), every expected value is HAND-COMPUTED,
+// all dates fixed (no clock dependence).
+// (1) catalog additivity: 90D is a NEW SMLX-6 entry; shipped names/specs and
+//     the methodology id are untouched (hash-stability contract)
+ok(S.METHODOLOGY === "SMLX-6"
+  && S.FIXINGS.map((f) => f.name).join(",") === "SETTLE-CASE-7D,SETTLE-CASE-30D,SETTLE-CASE-90D,SETTLE-RATIO-30D",
+  "M1: SETTLE-CASE-90D is an ADDITIVE SMLX-6 catalog entry (methodology id unchanged, shipped fixings untouched)");
+const m1Spec90 = S.FIXINGS.find((f) => f.name === "SETTLE-CASE-90D");
+ok(m1Spec90.key === "caseIdx" && m1Spec90.window === 90 && m1Spec90.minDays === 30 && m1Spec90.decimals === 2,
+  "M1: 90D spec — mean of last ≤90 daily case values, min 30 days, 2 decimals (30D precision)");
+// (2) canonical preimage BYTES of a shipped fixing pinned literally — any
+//     drift here re-hashes history and forks every witness (invariant 1)
+const m1c3 = [{ day: "2026-01-01", caseIdx: 100 }, { day: "2026-01-02", caseIdx: 101 }, { day: "2026-01-03", caseIdx: 102 }];
+ok(S.canonical(S.computeFixing(m1c3, S.FIXINGS[0]))
+  === '{"methodology":"SMLX-6","name":"SETTLE-CASE-7D","window":7,"days":["2026-01-01","2026-01-02","2026-01-03"],"values":[100,101,102],"value":101}',
+  "M1: canonical preimage bytes of a shipped fixing pinned literally (hash stability)");
+// (3) 90D arithmetic: 100 days caseIdx 100..199 → last 90 = 110..199,
+//     mean = (110+199)/2 = 154.5
+const m1S100 = Array.from({ length: 100 }, (_, i) => ({ day: A.dayKey(T0 + i * D), caseIdx: 100 + i }));
+const m1f90 = S.computeFixing(m1S100, m1Spec90);
+ok(m1f90.value === 154.5 && m1f90.days.length === 90 && m1f90.days[0] === A.dayKey(T0 + 10 * D)
+  && m1f90.methodology === "SMLX-6",
+  "M1: SETTLE-CASE-90D = mean of last ≤90 daily values (110..199 → 154.5)");
+const m1f90sh = S.computeFixing(m1S100.slice(0, 29), m1Spec90);
+ok(m1f90sh.value === null && /29\/30/.test(m1f90sh.accruing),
+  "M1: 90D accrues until 30 days (29/30 → null) — never fabricated, never backfilled");
+ok(Object.keys(S.computeAll(m1S100)).length === 4 && S.computeAll(m1S100)["SETTLE-CASE-7D"].value === 196,
+  "M1: computeAll carries 4 fixings; shipped 7D unchanged by the addition (193..199 → 196)");
+// (4) 90d budget costs on the SMLX-4 weighted fixture (42 cases, dv $1k..$42k,
+//     weights ∝ dv²): uniform basket $903,000 dv → 0.5×0.15×903000 = $67,725/day
+//     ×90 = $6,095,250; concentrated $12,150/day ×90 = $1,093,500; capture
+//     $25,650/day ×90 = $2,308,500
+const m1sq = Array.from({ length: 42 }, (_, i) => (i + 1) * (i + 1));
+const m1sqTot = m1sq.reduce((a, b) => a + b, 0);
+const m1wbud = S.manipulationBudget(
+  Array.from({ length: 42 }, (_, i) => ({ cat: "case", tier: null, latest: 1000 * (i + 1), vol24h: 1,
+    weight: m1sq[i] / m1sqTot, skinport: null })));
+ok(m1wbud.caseIndex.costMove1pctFix90d === 6095250
+  && m1wbud.caseIndex.concentrated.costMove1pctFix90d === 1093500
+  && m1wbud.caseIndex.centerCapture.costFix90d === 2308500,
+  "M1: 90d budget costs published (uniform $6,095,250 / concentrated $1,093,500 / capture $2,308,500)");
+// (5) oiCapacity: N < C(Δ)/Δ. Weighted fixture, 7d: concentrated $85,050/0.01
+//     → 8,505,000; capture $179,550/0.05 → 3,591,000 BINDS; /κ=3 → 1,197,000
+const m1cap7 = m1wbud.oiCapacity["SETTLE-CASE-7D"];
+ok(m1cap7.boundConcentrated === 8505000 && m1cap7.boundCapture === 3591000 && m1cap7.capacityLinear === 1197000,
+  "M1: oiCapacity 7D — capture bound binds: min(8,505,000, 3,591,000)/3 = $1,197,000");
+//     30d: capture 769,500/0.05 = 15,390,000 vs con 36,450,000 → 5,130,000;
+//     90d: capture 2,308,500/0.05 = 46,170,000 vs con 109,350,000 → 15,390,000
+ok(m1wbud.oiCapacity["SETTLE-CASE-30D"].capacityLinear === 5130000
+  && m1wbud.oiCapacity["SETTLE-CASE-90D"].capacityLinear === 15390000,
+  "M1: oiCapacity 30D/90D — attack cost scales ×N days, so capacity does too ($5.13M / $15.39M)");
+// (6) min() flips: equal-weight fixture — concentrated = 9 thinnest
+//     ($3,375/day → 7d $23,625 → bound 2,362,500); capture = cheapest 21
+//     (Σdv $231,000 → $17,325/day → 7d $121,275 → bound 2,425,500) →
+//     CONCENTRATED binds → /3 = 787,500
+const m1kbud = S.manipulationBudget(
+  Array.from({ length: 42 }, (_, i) => ({ cat: "case", tier: null, latest: 1000 * (i + 1), vol24h: 1, skinport: null })));
+const m1kcap7 = m1kbud.oiCapacity["SETTLE-CASE-7D"];
+ok(m1kcap7.boundConcentrated === 2362500 && m1kcap7.boundCapture === 2425500 && m1kcap7.capacityLinear === 787500,
+  "M1: oiCapacity min() — equal-weight fixture flips to the concentrated bound (2,362,500/3 = $787,500)");
+// (7) RATIO: thin-leg 30d burn 0.5×(10×30)×0.12 = $18 → bound 1,800; no
+//     capture model → null; capacity 600
+const m1rbud = S.manipulationBudget([
+  { cat: "case", tier: null, latest: 2, vol24h: 100000, skinport: null },
+  { cat: "skin", tier: null, latest: 50, vol24h: 10, skinport: { last30d: { median: 10, volume: 30 } } },
+]);
+const m1rcap = m1rbud.oiCapacity["SETTLE-RATIO-30D"];
+ok(m1rcap.boundConcentrated === 1800 && m1rcap.boundCapture === null && m1rcap.capacityLinear === 600
+  && /1% cost alone/.test(m1rcap.assumptions.deltaCap),
+  "M1: oiCapacity RATIO — thin-leg 1% cost only (no capture model): $18×… → bound 1,800 → capacity 600");
+ok(/linear/.test(m1cap7.assumptions.payoffs) && /binary/.test(m1cap7.assumptions.payoffs)
+  && /single-party/.test(m1cap7.assumptions.attacker) && /fee-burn/.test(m1cap7.assumptions.costs)
+  && /5%/.test(m1cap7.assumptions.deltaCap) && /κ = 3/.test(m1cap7.assumptions.kappa)
+  && /daily \$ volume/.test(m1cap7.assumptions.hedging),
+  "M1: oiCapacity assumptions name the whole frame (linear-only, single-party, fee-burn floors, Δcap 5%, κ=3, hedging ceiling)");
+// (8) PERPMARK-CASE (EXPERIMENTAL, non-canonical): median-of-≤5 + 2% step guard
+const m1pm = (vals) => S.perpMark(vals.map((v, i) => ({ day: A.dayKey(T0 + i * D), caseIdx: v })));
+const m1clean = m1pm([100, 101, 102, 103, 104, 105]);
+ok(m1clean.value === 103 && m1clean.guarded === false && m1clean.experimental === true
+  && m1clean.name === "PERPMARK-CASE" && !("hash" in m1clean) && /NOT a settlement fixing/.test(m1clean.label),
+  "M1: PERPMARK-CASE clean drift — median of last 5 (101..105 → 103), unguarded, labeled experimental, NO hash");
+const m1one = m1pm([100, 100, 100, 100, 100, 130]);
+ok(m1one.value === 100 && m1one.guarded === false,
+  "M1: PERPMARK — ONE corrupted print (+30%) cannot move the mark (median absorbs it)");
+const m1atk = m1pm([100, 100, 100, 100, 100, 130, 130, 130]);
+ok(m1atk.value === 100 && m1atk.guarded === true && m1atk.guardedUpdates === 1,
+  "M1: PERPMARK — 3-of-5 print corruption breaches the median but the 2% step guard carries the prior mark (guarded:true)");
+const m1move = m1pm([100, 101.5, 103, 104.5, 106]);
+ok(m1move.value === 103 && m1move.guarded === false,
+  "M1: PERPMARK — a genuine steady move passes the step guard (every update ≤2%)");
+// ══ end LANE M1 pin block ══════════════════════════════════════════════════
+
 // ── INTEG-1 mark integrity: the tamper detector (flag-only) ────────────────
 const NOWI = Date.UTC(2026, 6, 20, 12);
 const rdFlat = (last) => Array.from({ length: 11 }, (_, i) => ({ day: "d" + i, r: i === 10 ? last : 0.8 }));
@@ -666,9 +760,17 @@ async function fixtureTransport(url, headers) {
     "skinport sales store + rotation cursor persisted (8-per-run budget)");
   const setPub = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "settlement.json"), "utf8"));
   const fxPub = setPub.latest.fixings["SETTLE-CASE-7D"];
-  ok(fxPub && fxPub.value === null && /2\/3/.test(fxPub.accruing)
+  // TIME-STABLE (fixed 2026-07-27, was pinned to "2/3 days"): the founding
+  // seed sits at the adoption date and the fixture case's flat level CARRIES
+  // across every day since, so the series grows one flat 100-mark per real
+  // day — below minDays the fixing must accrue, at/after it must value at
+  // exactly 100 (mean of a flat founding series), forever.
+  const fxDaysN = setPub.detail["SETTLE-CASE-7D"].days.length;
+  ok(fxPub && (fxDaysN < 3
+      ? fxPub.value === null && new RegExp("^" + fxDaysN + "/3").test(fxPub.accruing || "")
+      : fxPub.value === 100 && fxPub.accruing === null)
     && fxPub.hash === crypto.createHash("sha256").update(S.canonical(setPub.detail["SETTLE-CASE-7D"])).digest("hex"),
-    "collector publishes settlement.json; hash re-derives from canonical detail");
+    "collector publishes settlement.json; hash re-derives from canonical detail (flat founding series: accrue below 3 days, value 100 after)");
   ok(fs.existsSync(path.join(CROOT, "data", "settlements.jsonl"))
     && c1.manifest.market.settlement && c1.manifest.market.settlement.budget.caseIndex.dailyDollarVolume === 1311,
     "fixing history appended; manipulation budget from live volumes (23×57=$1,311)");

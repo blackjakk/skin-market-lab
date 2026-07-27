@@ -15,7 +15,7 @@ build. (Grew up inside the hashmark-heroes repo; now lives here.)
 **https://blackjakk.github.io/skin-market-lab/**
 
 That's the whole product for most use: a GitHub Actions collector
-(`collect.yml`) snapshots every item in `watchlist.json` every 6 hours **on
+(`collect.yml`) snapshots every item in `watchlist.json` every 3 hours **on
 GitHub's servers** and commits the data; the page reads those files. Charts,
 momentum, signals, cross-market fee math, and a portfolio (stored in your
 browser) — no install, nothing to keep running, works on your phone.
@@ -102,7 +102,9 @@ backfill to the hosted dashboard, commit the resulting
 
 Dated settlement marks computed from the committed series by fixed rules —
 what a cash-settled future or scalar market would settle against:
-**SETTLE-CASE-7D/30D** (means of the daily Skindex) and
+**SETTLE-CASE-7D/30D/90D** (means of the daily Skindex; 90D is the
+quarterly-dated tenor, added 2026-07-27 as an additive SMLX-6 catalog
+entry — new fixings accrue forward and never re-hash history) and
 **SETTLE-RATIO-30D** (mean daily cash ratio). Each publishes with a
 SHA-256 hash over its canonical form so any counterparty re-derives it
 bit-exactly from `data/`; fixings show "accruing" until their minimum day
@@ -114,6 +116,19 @@ attack), and one-click in-browser
 verification — is on the site at
 [methodology.html](https://blackjakk.github.io/skin-market-lab/methodology.html).
 A measurement, not an offer of any instrument.
+
+**Open-interest capacity** — each settlement record now also publishes
+`budget.oiCapacity`: the per-fixing OI a linear instrument could carry
+before corrupting the fixing pays (safety condition C(Δ) > N×Δ; bounds
+from the concentrated 1% attack and the center-capture attack under a
+5%-credible-print dispute layer; published capacity = min(bounds)/3 as
+corruption margin; hedging ceiling ≈ the basket's daily $ volume rides
+as an independent cap). Assumptions are published inside every entry;
+methodology §5b explains the model. Alongside it, **PERPMARK-CASE** is
+an *experimental* perp-grade mark preview (median of the last ≤5 daily
+prints + a 2% max-step guard, so one corrupted print cannot move it) —
+clearly labeled, non-canonical, no hash, not a settlement fixing
+(methodology §5c).
 
 **Mark integrity (INTEG-1)** — because every mark is single-venue at its
 source, each collector run also publishes a tamper report: every Steam

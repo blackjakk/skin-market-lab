@@ -1,13 +1,20 @@
 name: Collect market data
 
-# The always-on tracker: snapshots the watchlist.json items every 6 hours on
+# The always-on tracker: snapshots the watchlist.json items every 3 hours on
 # GitHub's servers and commits the data files the dashboard reads — so the
 # Pages link keeps accruing history with nobody's laptop involved.
 # "Run workflow" (workflow_dispatch) = the dashboard's "snapshot now".
+#
+# Cadence: every 3 hours (was 6) — more prints per day thickens each fixing
+# window and tightens the PERPMARK-CASE preview; HOURLY is the M5 end-state
+# once per-run API budgets (skinport 8-item rotation, book 10-item rotation)
+# are re-sized for it. The CN/US gauge windows (10-15 / 22-03 UTC) still get
+# their regional peaks: :17 samples at 12/15 UTC (Beijing evening) and
+# 00/03 UTC (US evening) land inside both windows.
 
 on:
   schedule:
-    - cron: "17 */6 * * *"
+    - cron: "17 */3 * * *"
   workflow_dispatch:
 
 permissions:
