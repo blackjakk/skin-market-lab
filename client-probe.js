@@ -318,6 +318,213 @@ M.setTransport(async (url) => {
   } else { console.log("  ~ static-mode checks skipped (a real tracker owns :8790)"); }
   stat.close();
 
+  // ── ADDITIVE (lane S3): Steam inventory panel, static-mode paste flow ─────
+  // Self-contained scenario on the S3 port range (5510-5519) with its own
+  // collected root, so it runs whether or not :8790 is free. Tracker
+  // discovery is route-aborted (the a11y-probe guard) so the page is
+  // deterministically in STATIC mode: no server, no CORS reads of
+  // steamcommunity.com — the user pastes the public inventory JSON and the
+  // whole valuation + reconstruction runs in the browser.
+  //
+  // PRIVACY: the fixture SteamID64 is obviously fake (76561190000000001) and
+  // is never persisted by the UI — only {t,value,count} snapshots are.
+  //
+  // HAND-COMPUTED EXPECTATIONS (the fixture transport quotes every item at a
+  // median of $43.25, which is what the collector records):
+  //   Redline: two assets on c1_0 (an identical stack → ONE row, qty 2) plus
+  //     one on c1_5 (same market_hash_name, different instanceid = a different
+  //     float, so the parse keeps it as its OWN row). inventoryValue collapses
+  //     by NAME → a single Redline line at qty 3          → $129.75
+  //   Fracture ×1                                          → $43.25
+  //   "Dreams & Nightmares Case" ×1 — NOT in the watchlist → UNPRICED (no
+  //     fabricated price, no contribution to value)
+  //   one asset (classid zz) has NO description → DROPPED, never named
+  //   total = $173.00, count = 5 UNITS over 3 distinct names.
+  //   pricedCount/unpricedCount are UNIT counts summing to count: 4 priced
+  //   units (3 Redline + 1 Fracture) + 1 unpriced unit = 5.
+  //   Fracture's collected history jsonl is DELETED after collect (and the
+  //   static server already 404s its backtest deep file), so it is priced but
+  //   has NO usable history → reconstruction coverage = 129.75/173.00 = 75%.
+  const IROOT = path.join(os.tmpdir(), "hh-skin-inv-" + Date.now());
+  {
+    const { collect } = require("./collect.js");
+    const { slug } = require(path.join(__dirname, "server.js"));
+    fs.mkdirSync(path.join(IROOT, "data", "import"), { recursive: true });
+    fs.writeFileSync(path.join(IROOT, "watchlist.json"), JSON.stringify({ items: [NAME, "Fracture Case"] }));
+    const impRows = Array.from({ length: 120 }, (_, i) =>
+      ({ t: Date.now() - (120 - i) * D, price: 30 * Math.exp(0.003 * i) * (1 + 0.05 * Math.sin(i / 6)), vol: 40 + (i % 20) }));
+    fs.writeFileSync(path.join(IROOT, "data", "import", slug(NAME) + ".json"), JSON.stringify({ t: Date.now(), source: "probe", rows: impRows }));
+    await collect({ root: IROOT });
+    // priced-but-no-history case: drop Fracture's collected marks AFTER the
+    // manifest was written, so it keeps a quote but loses every history source
+    fs.rmSync(path.join(IROOT, "data", "history", slug("Fracture Case") + ".jsonl"), { force: true });
+
+    const statI = makeStatic(5510, path.join(IROOT, "data"));
+    const ctxI = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+    await ctxI.route(/^https?:\/\/(localhost|127\.0\.0\.1):8790\//, (r) => r.abort());
+    const pageI = await ctxI.newPage();
+    const errorsI = [];
+    pageI.on("pageerror", (e) => errorsI.push(String(e)));
+    await pageI.goto("http://localhost:5510/", { waitUntil: "networkidle" });
+    await pageI.waitForSelector(".mrow", { timeout: 10000 });
+
+    ok(/no sign-in, no password, no API key/i.test(await pageI.textContent("#invPanel")),
+      "inventory panel states the no-sign-in / no-API-key reassurance in plain English");
+
+    // primary action on a static host routes to the paste flow with the exact
+    // public inventory URL prefilled from the entered SteamID64
+    await pageI.fill("#invInput", "76561190000000001");
+    await pageI.click("#invGo");
+    await pageI.waitForSelector("#invPasteModal.open", { timeout: 4000 });
+    const pasteUrl = await pageI.textContent("#invPasteUrl");
+    ok(/76561190000000001\/730\/2/.test(pasteUrl) && /steamcommunity\.com\/inventory/.test(pasteUrl),
+      "paste modal prefills the public inventory URL for the entered SteamID64");
+    ok(await pageI.evaluate(() => document.activeElement && document.activeElement.id === "invPasteText"),
+      "paste modal moves focus into the textarea on open");
+
+    // Esc closes the dialog and hands the keyboard back to the opener
+    await pageI.keyboard.press("Escape");
+    await pageI.waitForFunction(() => !document.getElementById("invPasteModal").classList.contains("open"), { timeout: 4000 });
+    ok(await pageI.evaluate(() => document.activeElement && document.activeElement.id === "invGo"),
+      "paste modal: Esc closes and focus returns to the opener (#invGo)");
+
+    const INV_FIXTURE = JSON.stringify({
+      assets: [
+        { appid: 730, contextid: "2", assetid: "1", classid: "c1", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "2", classid: "c1", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "3", classid: "c2", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "4", classid: "c3", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "5", classid: "zz", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "6", classid: "c1", instanceid: "5", amount: "1" },
+      ],
+      descriptions: [
+        { classid: "c1", instanceid: "0", market_hash_name: NAME, marketable: 1, tradable: 1 },
+        { classid: "c1", instanceid: "5", market_hash_name: NAME, marketable: 1, tradable: 0 },
+        { classid: "c2", instanceid: "0", market_hash_name: "Fracture Case", marketable: 1, tradable: 1 },
+        { classid: "c3", instanceid: "0", market_hash_name: "Dreams & Nightmares Case", marketable: 1, tradable: 0 },
+      ],
+      total_inventory_count: 6,
+    });
+    await pageI.click("#invPasteBtn");
+    await pageI.waitForSelector("#invPasteModal.open", { timeout: 4000 });
+    await pageI.fill("#invPasteText", "not json at all");
+    await pageI.click("#invPasteGo");
+    ok(/valid JSON/i.test(await pageI.textContent("#invPasteErr")) &&
+      await pageI.evaluate(() => document.getElementById("invPasteModal").classList.contains("open")),
+      "bad paste reports a plain-English error inline and keeps the dialog open");
+    await pageI.fill("#invPasteText", INV_FIXTURE);
+    await pageI.click("#invPasteGo");
+    await pageI.waitForSelector("#invTotals .ds-tile", { timeout: 10000 });
+
+    const totalsTxt = await pageI.textContent("#invTotals");
+    ok(/INVENTORY VALUE/.test(totalsTxt) && /\$173\.00/.test(totalsTxt) && /5 items · 3 distinct names/.test(totalsTxt),
+      "inventory value tile folds the pasted holdings ($173.00 = 5 units over 3 distinct names; the description-less asset is dropped)");
+    // the parse layer keys by classid_instanceid (c1_0 qty 2 + c1_5 qty 1),
+    // so a by-name collapse is what turns those into ONE qty-3 Redline row
+    const nameRows = await pageI.$$eval("#invTable .ds-spec-table tbody tr",
+      (els) => els.map((tr) => Array.from(tr.cells).map((td) => td.textContent.trim())));
+    ok(nameRows.length === 3 && nameRows.filter((r) => /Redline/.test(r[0])).length === 1 &&
+      nameRows.find((r) => /Redline/.test(r[0]))[1] === "3",
+      "holdings collapse BY NAME: two instanceids of one skin render as a single qty-3 row, not two lines");
+    ok(nameRows.some((r) => r[0] === "AK-47 | Redline (Field-Tested)"),
+      "holdings table keeps the FULL market_hash_name (the wear suffix is a different item)");
+    // priced/unpriced are UNIT counts that sum to the inventory's unit count
+    ok(/PRICED/.test(totalsTxt) && /4 \/ 5/.test(totalsTxt) && /1 not in the tracked set/.test(totalsTxt),
+      "priced tile counts UNITS and sums to the total (4 / 5); the untracked unit is reported, never guessed");
+    ok(/SINCE FIRST LOAD/.test(totalsTxt) && /VS SKINDEX/.test(totalsTxt),
+      "since-first-load and VS SKINDEX tiles render");
+
+    const invPainted = await pageI.evaluate(() => {
+      const cv = document.getElementById("invChart");
+      if (!cv || cv.closest("#invChartWrap").hidden) return 0;
+      const img = cv.getContext("2d").getImageData(0, 0, cv.width, cv.height).data;
+      let lit = 0;
+      for (let i = 3; i < img.length; i += 40) if (img[i] > 0) lit++;
+      return lit;
+    });
+    ok(invPainted > 200, "inventory value-over-time canvas actually painted (" + invPainted + " sampled px)");
+    ok(await pageI.$eval("#invChart", (cv) => cv.getAttribute("role") === "img" &&
+      /Inventory value over time: \$/.test(cv.getAttribute("aria-label") || "") &&
+      /px$/.test(cv.style.width)),
+      "inventory chart is role=img with a descriptive aria-label and a pinned style.width");
+    ok((await pageI.$$eval("#invChartTable details.dataTable table.dt tr", (els) => els.length)) > 2,
+      "keyboard-reachable <details> data table accompanies the inventory chart");
+    // table.dt's 520px floor is sized for the wide item view — in the 330px
+    // sidebar it hid the Value column behind a horizontal scroll
+    await pageI.$eval("#invChartTable details.dataTable", (d) => { d.open = true; });
+    const dtFit = await pageI.evaluate(() => {
+      const box = document.querySelector("#invChartTable details.dataTable .scroll");
+      const tb = box.querySelector("table.dt");
+      const lastCell = tb.rows[1] && tb.rows[1].cells[1];
+      return { fits: tb.scrollWidth <= box.clientWidth + 1, valueText: lastCell && lastCell.textContent.trim() };
+    });
+    ok(dtFit.fits && /^\$/.test(dtFit.valueText || ""),
+      "the inventory data table fits the sidebar — the value column is visible without scrolling (" + dtFit.valueText + ")");
+
+    const tblTxt = await pageI.textContent("#invTable");
+    ok(/Redline/.test(tblTxt) && /unpriced/.test(tblTxt) && (await pageI.$("#invTable .ds-scroll-x")) != null,
+      "top-holdings table lists holdings (unpriced names labelled, not priced) inside a scroll wrapper");
+    ok(/Reconstruction covers 75% of current value/.test(await pageI.textContent("#invHint")) &&
+      /1 of 3 names have usable price history/.test(await pageI.textContent("#invHint")),
+      "reconstruction coverage is stated as a share of CURRENT VALUE (75% — the priced-but-no-history name is excluded)");
+    ok(await pageI.$eval("#invHint", (el) => el.getAttribute("role") === "status"),
+      "inventory status line is an aria-live status region");
+
+    // the input shares .lotForm's styling, which had only Chromium's
+    // `outline:auto` default (1px near-black = invisible on the dark surface)
+    await pageI.focus("#invInput");
+    const invRing = await pageI.evaluate(() => {
+      const cs = getComputedStyle(document.getElementById("invInput"));
+      return { w: parseFloat(cs.outlineWidth) || 0, style: cs.outlineStyle };
+    });
+    ok(invRing.w >= 2 && invRing.style !== "none",
+      "#invInput carries the house >=2px focus ring (" + invRing.w + "px " + invRing.style + ")");
+
+    // only the RESULT containers re-render, and the sole focusable inside
+    // them is the data table's <summary> — its open state and focus must
+    // survive. A programmatic click does not move focus in Chromium, so the
+    // summary is still focused while the panel rebuilds.
+    await pageI.$eval("#invChartTable details.dataTable", (d) => { d.open = true; d.querySelector("summary").focus(); });
+    await pageI.evaluate((v) => {
+      document.getElementById("invPasteText").value = v;
+      document.getElementById("invPasteGo").click();
+    }, INV_FIXTURE);
+    await pageI.waitForTimeout(1200);
+    const carried = await pageI.evaluate(() => {
+      const d = document.querySelector("#invChartTable details.dataTable");
+      return { open: !!(d && d.open), tag: document.activeElement.tagName.toLowerCase(),
+        inTable: !!(document.activeElement.closest && document.activeElement.closest("#invChartTable")) };
+    });
+    ok(carried.open && carried.tag === "summary" && carried.inTable,
+      "data table open state + focus survive the panel re-render (never dumped to <body>)");
+
+    const snaps = await pageI.evaluate(() => JSON.parse(localStorage.getItem("skinlab_inv_v1") || "[]"));
+    ok(snaps.length === 1 && snaps[0].value === 173 && snaps[0].count === 5,
+      "static mode records a {t,value,count} snapshot in localStorage (" + JSON.stringify(snaps[0] || null) + ")");
+    // re-loading inside the 10-minute window must UPDATE the snapshot, not append
+    await pageI.click("#invPasteBtn");
+    await pageI.waitForSelector("#invPasteModal.open", { timeout: 4000 });
+    await pageI.fill("#invPasteText", INV_FIXTURE);
+    await pageI.click("#invPasteGo");
+    await pageI.waitForFunction(() => /173\.00/.test(document.getElementById("invTotals").textContent), { timeout: 8000 });
+    const snaps2 = await pageI.evaluate(() => JSON.parse(localStorage.getItem("skinlab_inv_v1") || "[]"));
+    ok(snaps2.length === 1, "a second load inside 10 minutes dedupes into one snapshot (" + snaps2.length + ")");
+
+    await pageI.screenshot({ path: "/tmp/skin_lab_inventory.png", fullPage: true });
+    console.log("  📸 /tmp/skin_lab_inventory.png");
+
+    // the loaded panel must not blow the page out on a phone
+    await pageI.setViewportSize({ width: 390, height: 844 });
+    await pageI.waitForTimeout(400);
+    const wInv = await pageI.evaluate(() => document.scrollingElement.scrollWidth);
+    ok(wInv <= 391, "inventory panel: no horizontal page scroll at 390px (scrollWidth=" + wInv + ")");
+    ok(errorsI.length === 0, "inventory flow: zero uncaught page errors" + (errorsI.length ? " — " + errorsI[0] : ""));
+
+    await ctxI.close();
+    statI.close();
+    fs.rmSync(IROOT, { recursive: true, force: true });
+  }
+
   await browser.close();
   await inst.close();
   fs.rmSync(DATA, { recursive: true, force: true });

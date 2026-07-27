@@ -29,7 +29,10 @@
   const state = { mode: "live", manifest: null, watch: [], market: null, selected: null, item: null,
     portfolio: null, range: "3M", hover: -1, view: "home", sort: { key: "vol24h", dir: -1 },
     backtest: null, idxRange: "ALL", macroHist: null, corrStudy: null,
-    overlays: { players: true, btc: true } };
+    overlays: { players: true, btc: true },
+    // Steam inventory panel (display layer only — never an index/fixing input).
+    // `report` holds an INV_REPORT; the SteamID inside it stays in memory.
+    inv: { report: null, busy: false, error: "" } };
   const RANGES = { "1M": 31, "3M": 92, "1Y": 366, "ALL": Infinity };
 
   // Where "edit the watchlist" and "run the collector" live on GitHub.
@@ -464,23 +467,30 @@
     pts.forEach((p, i) => (i ? ctx.lineTo(x(i), y(p)) : ctx.moveTo(x(i), y(p))));
     ctx.stroke();
   }
-  // lines: [{pts:[{t,v}], col, w, dash?}] — all rebased to 100 so ONE axis
-  // serves every series (never two scales on one chart)
+  // lines: [{pts:[{t,v}], col, w, dash?}] — the home index chart rebases every
+  // line to 100 so ONE axis serves them all (never two scales on one chart).
+  // opts: { log, h, fmt } — `h` overrides the CSS height and `fmt` the y-axis
+  // label formatter, so a second consumer (the inventory chart, which plots
+  // dollars rather than an index level) reuses this helper instead of forking
+  // the dpr / axis / dash discipline. Both default to the home-chart values.
   const IDX_H = 130; // CSS height of #idxChart (matches the height="130" markup)
+  const idxAxisFmt = (gv) => gv >= 1e6 ? (gv / 1e6).toFixed(1) + "M" : gv >= 1000 ? (gv / 1000).toFixed(1) + "k" : gv.toFixed(1);
   function drawIdxChart(cv, lines, opts) {
     if (!cv || !lines.length) return;
     const log = !!(opts && opts.log);
+    const CH = (opts && opts.h) || IDX_H;
+    const axisFmt = (opts && opts.fmt) || idxAxisFmt;
     // Same dpr discipline as drawChart (A1-8): backing = CSS px × dpr,
     // style.width/height pinned so the backing-store write can never feed
     // back into layout (the A1-1 lock) and hiDPI stays crisp.
     const cssW = Math.max(1, cv.parentElement.clientWidth - 8);
     const dpr = Math.min(2, window.devicePixelRatio || 1);
-    cv.width = Math.round(cssW * dpr); cv.height = Math.round(IDX_H * dpr);
-    cv.style.width = cssW + "px"; cv.style.height = IDX_H + "px";
+    cv.width = Math.round(cssW * dpr); cv.height = Math.round(CH * dpr);
+    cv.style.width = cssW + "px"; cv.style.height = CH + "px";
     const ctx = cv.getContext("2d");
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, IDX_H);
-    const W = cssW, H = IDX_H, L = 40, R = 8, T = 8, B = 16;
+    ctx.clearRect(0, 0, cssW, CH);
+    const W = cssW, H = CH, L = 40, R = 8, T = 8, B = 16;
     const all = lines.flatMap((l) => l.pts).filter((p) => !log || p.v > 0);
     const tv = (v) => (log ? Math.log(v) : v);
     const t0 = Math.min(...all.map((p) => p.t)), t1 = Math.max(...all.map((p) => p.t)) || t0 + 1;
@@ -494,7 +504,7 @@
       const yy = Math.round(y(gv)) + 0.5;
       ctx.beginPath(); ctx.moveTo(L, yy); ctx.lineTo(W - R, yy); ctx.stroke();
       ctx.textAlign = "right"; ctx.textBaseline = "middle";
-      ctx.fillText(gv >= 1e6 ? (gv / 1e6).toFixed(1) + "M" : gv >= 1000 ? (gv / 1000).toFixed(1) + "k" : gv.toFixed(1), L - 5, yy);
+      ctx.fillText(axisFmt(gv), L - 5, yy);
     }
     const d0 = new Date(t0), d1 = new Date(t1);
     const longSpan = t1 - t0 > 400 * 86400000;
@@ -1203,6 +1213,557 @@
     } catch (e) { toast(e.message, true); }
   });
 
+  // ── Steam inventory ──────────────────────────────────────────────────────
+  // THE DESIGN FINDING: Steam OpenID sign-in is neither used nor needed. A
+  // CS2 inventory is PUBLIC JSON — steamcommunity.com/inventory/<id>/730/2
+  // answers any browser for a profile whose inventory privacy is Public.
+  // OpenID would only prove identity (worthless for a personal analytics
+  // tool) and needs a backend callback URL, which a GitHub Pages build does
+  // not have. So the whole input is a profile URL / vanity name / SteamID64,
+  // and the UI says that in plain English (#invPrivacy).
+  //
+  // TWO MODES, matching the app's existing ladder:
+  //   live   — the tracker resolves + fetches + prices + snapshots server-side
+  //            (GET/POST /api/skins/inventory → INV_REPORT).
+  //   static — browsers CANNOT fetch steamcommunity.com (no CORS headers), so
+  //            the user PASTES the inventory JSON (the same idiom as the
+  //            price-history import modal) and the identical maths runs here,
+  //            with snapshots in localStorage.
+  // PRIVACY: the SteamID lives in memory only — it is never written to
+  // localStorage and never sent anywhere but Steam. Only {t, value, count}
+  // snapshots are persisted.
+  const INV_SNAP_KEY = "skinlab_inv_v1";
+  const INV_DEDUPE_MS = 600000;  // 10 min — matches the server's snapshot dedupe
+  const INV_MAX_SNAPS = 2000;
+  const INV_MAX_HISTORY_FETCH = 60; // never loop-fetch an unbounded item list
+  const INV_TOP_ROWS = 12;
+  const invUrlFor = (id) => "https://steamcommunity.com/inventory/" +
+    (id || "YOUR_STEAMID64") + "/730/2?l=english&count=5000";
+
+  // ── snapshots (static mode) — {t, value, count}, deduped inside 10 min ────
+  function invSnaps() {
+    try {
+      const a = JSON.parse(localStorage.getItem(INV_SNAP_KEY));
+      return Array.isArray(a) ? a.filter((s) => s && isFinite(s.t) && isFinite(s.value)) : [];
+    } catch (e) { return []; }
+  }
+  function invAppendSnap(value, count) {
+    const list = invSnaps();
+    const last = list[list.length - 1];
+    const now = Date.now();
+    if (last && now - last.t < INV_DEDUPE_MS) { last.t = now; last.value = value; last.count = count; }
+    else list.push({ t: now, value: value, count: count });
+    try { localStorage.setItem(INV_SNAP_KEY, JSON.stringify(list.slice(-INV_MAX_SNAPS))); } catch (e) { /* quota */ }
+    return invSnaps();
+  }
+
+  // ── paste parsing: Steam's inventory JSON → the frozen item shape ─────────
+  // ONE implementation rule (the assembleSeries precedent): the assets ×
+  // descriptions join is shared raw→structured assembly, so it belongs to the
+  // UMD analytics module that server, collector and browser all run. This
+  // wrapper PREFERS `A.parseSteamInventory` and falls back to the inline join
+  // below only while a host still serves an analytics.js without it — the two
+  // agree by construction (same join key, same fold, same shape), so nothing
+  // drifts when the shared one takes over.
+  function invParsePaste(raw) {
+    const j = invCoerceJson(raw);
+    return (A && typeof A.parseSteamInventory === "function")
+      ? A.parseSteamInventory(j) : invParseInventoryLocal(j);
+  }
+  // string → object, with the plain-English messages the UI shows. Kept out
+  // of the join itself so both implementations get the same input handling.
+  function invCoerceJson(raw) {
+    let j = raw;
+    if (typeof j === "string") {
+      const s = j.trim();
+      if (!s) throw new Error("Nothing pasted yet — copy the whole inventory page first.");
+      try { j = JSON.parse(s); }
+      catch (e) { throw new Error("That is not valid JSON — select ALL of the inventory page (Ctrl/⌘+A) and copy it whole."); }
+    }
+    if (!j || typeof j !== "object") throw new Error("Unexpected format — paste the JSON object Steam serves at that address.");
+    if (j.success === false || (j.Error && !j.assets)) {
+      throw new Error("Steam refused that inventory — set your inventory privacy to Public and reload the page.");
+    }
+    return j;
+  }
+  // assets × descriptions joined on classid_instanceid, one row PER KEY with
+  // `amount` summed. Rows are deliberately NOT collapsed by name here: the
+  // same skin at different floats/stickers carries different instanceids and
+  // its own marketable/tradable flags, so several rows may legitimately share
+  // one market_hash_name. Collapsing by name happens one layer up, in
+  // inventoryValue — which is why the UI table is built from THOSE rows and
+  // never from raw items. An asset whose description is missing is DROPPED,
+  // never given an invented name; `count` is total UNITS. Shape:
+  // { steamid64, count, items:[{name,qty,marketable,tradable}], truncated }.
+  function invParseInventoryLocal(j) {
+    const assets = Array.isArray(j.assets) ? j.assets : [];
+    const descs = Array.isArray(j.descriptions) ? j.descriptions : [];
+    if (!assets.length || !descs.length) {
+      throw new Error("No items in that JSON — a private or empty inventory returns no assets.");
+    }
+    const byClass = new Map();
+    for (const d of descs) byClass.set(String(d.classid) + "_" + String(d.instanceid), d);
+    const acc = new Map();
+    for (const a of assets) {
+      const key = String(a.classid) + "_" + String(a.instanceid);
+      const d = byClass.get(key);
+      if (!d || !d.market_hash_name) continue;
+      const qty = Math.max(1, Math.round(Number(a.amount)) || 1);
+      const cur = acc.get(key);
+      if (cur) cur.qty += qty;
+      else acc.set(key, { name: d.market_hash_name, qty: qty,
+        marketable: !!Number(d.marketable), tradable: !!Number(d.tradable) });
+    }
+    const items = Array.from(acc.values());
+    if (!items.length) throw new Error("Could not match any items — the assets and descriptions in that JSON do not line up.");
+    const total = Number(j.total_inventory_count);
+    return { steamid64: null, count: items.reduce((s, i) => s + i.qty, 0), items: items,
+      truncated: isFinite(total) && total > assets.length };
+  }
+
+  // ── client-side maths (static mode) ──────────────────────────────────────
+  // These mirror the frozen analytics contract exactly. When the shared
+  // analytics module publishes them (it is the SAME file the server runs) we
+  // defer to it, so both surfaces compute from one implementation; the local
+  // copies keep static mode self-contained on a host serving an older
+  // analytics.js. NEVER fabricate a price or a day: an item we cannot price
+  // is reported unpriced, and reconstruction publishes its coverage.
+  // Holdings are aggregated BY NAME here (the parse layer keys by
+  // classid_instanceid, so a multi-float inventory arrives as several rows of
+  // one skin) — one row per market_hash_name is what gets priced and shown.
+  // COUNT SEMANTICS: pricedCount / unpricedCount are UNITS, not distinct
+  // names, and satisfy pricedCount + unpricedCount === count. The number of
+  // distinct skins is rows.length — never conflate the two in a label.
+  function invValueLocal(items, priceOf) {
+    const byName = new Map();
+    for (const it of (items || [])) {
+      const cur = byName.get(it.name);
+      if (cur) cur.qty += it.qty; else byName.set(it.name, { name: it.name, qty: it.qty });
+    }
+    const rows = [];
+    let total = 0, pricedCount = 0, unpricedCount = 0;
+    for (const it of byName.values()) {
+      const p = priceOf(it.name);
+      if (p == null || !isFinite(p) || p <= 0) {
+        unpricedCount += it.qty;
+        rows.push({ name: it.name, qty: it.qty, price: null, value: null });
+        continue;
+      }
+      const v = A.round2(it.qty * p);
+      total += v; pricedCount += it.qty;
+      rows.push({ name: it.name, qty: it.qty, price: p, value: v });
+    }
+    rows.sort((a, b) => (b.value == null ? -1 : b.value) - (a.value == null ? -1 : a.value));
+    return { total: A.round2(total), pricedCount: pricedCount, unpricedCount: unpricedCount, rows: rows };
+  }
+  // Values TODAY's holdings backwards on each item's OWN history. A day sums
+  // only the items that already have a mark on/before it (carry-forward
+  // within an item's series, never across items), so an item enters the line
+  // when its own history starts — no interpolation, no index-scaled guesses.
+  function invReconLocal(items, historyOf, opts) {
+    const priceOf = (opts && opts.priceOf) || (() => null);
+    // qty folded by name first — history is per market_hash_name, so several
+    // instanceid rows of one skin are ONE reconstructed position
+    const byName = new Map();
+    for (const it of (items || [])) byName.set(it.name, (byName.get(it.name) || 0) + it.qty);
+    const held = [], cursor = [], series = [], qtys = [];
+    for (const [name, qty] of byName) {
+      const h = (historyOf(name) || []).filter((r) => r && r.day && r.price > 0);
+      if (!h.length) continue;
+      h.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : 0));
+      series.push(h); qtys.push(qty); held.push(null); cursor.push(0);
+    }
+    const dayset = new Set();
+    for (const h of series) for (const r of h) dayset.add(r.day);
+    const allDays = Array.from(dayset).sort();
+    const days = [];
+    for (const day of allDays) {
+      let v = 0, any = false;
+      for (let i = 0; i < series.length; i++) {
+        const h = series[i];
+        while (cursor[i] < h.length && h[cursor[i]].day <= day) { held[i] = h[cursor[i]].price; cursor[i]++; }
+        if (held[i] != null) { v += qtys[i] * held[i]; any = true; }
+      }
+      if (any) days.push({ day: day, value: A.round2(v) });
+    }
+    // coverage = the share of TODAY's value that has usable history (by
+    // VALUE, not by count — one grail with no history matters more than ten
+    // cheap stacks that have it)
+    let covered = 0, total = 0, pricedNames = 0;
+    for (const [name, qty] of byName) {
+      const p = priceOf(name);
+      if (p == null || !isFinite(p) || p <= 0) continue;
+      const v = qty * p;
+      total += v;
+      const h = historyOf(name);
+      if (h && h.length) { covered += v; pricedNames++; }
+    }
+    return { days: days, coveragePct: total > 0 ? Math.round((covered / total) * 1000) / 10 : 0,
+      pricedNames: pricedNames, totalNames: byName.size };
+  }
+  const invValue = (items, priceOf) => (A && typeof A.inventoryValue === "function")
+    ? A.inventoryValue(items, priceOf) : invValueLocal(items, priceOf);
+  const invRecon = (items, historyOf, opts) => (A && typeof A.inventoryReconstruction === "function")
+    ? A.inventoryReconstruction(items, historyOf, opts) : invReconLocal(items, historyOf, opts);
+
+  // ── client-side pricing + history sources ────────────────────────────────
+  // Prices come from the same collected quotes the rest of the dashboard
+  // uses; anything outside the tracked set is honestly UNPRICED.
+  function invPriceMap() {
+    const m = new Map();
+    for (const w of (state.watch || [])) if (w.latest != null && isFinite(w.latest)) m.set(w.name, w.latest);
+    return m;
+  }
+  // Per-item daily history for the reconstruction. Same DISPLAY-ONLY sources
+  // the item chart uses (collected jsonl + paste-import + the backtest deep
+  // base) — this never reaches the index, fixings, or the collector.
+  const invHistCache = new Map();
+  async function invLoadHistory(names) {
+    const want = names.filter((n) => !invHistCache.has(n)).slice(0, INV_MAX_HISTORY_FETCH);
+    await Promise.all(want.map(async (name) => {
+      const row = state.manifest && state.manifest.items.find((m) => m.name === name);
+      if (!row || !row.slug) { invHistCache.set(name, null); return; }
+      const lines = [];
+      try {
+        const r = await fetchTimeout("data/history/" + row.slug + ".jsonl", 8000, { cache: "no-store" });
+        if (r.ok) {
+          for (const ln of (await r.text()).split("\n")) {
+            if (!ln.trim()) continue;
+            try { lines.push(JSON.parse(ln)); } catch (e) { /* torn line */ }
+          }
+        }
+      } catch (e) { /* no history file */ }
+      let importRows = null;
+      if (row.imported) {
+        try {
+          const r = await fetchTimeout("data/import/" + row.slug + ".json", 8000, { cache: "no-store" });
+          if (r.ok) importRows = (await r.json()).rows;
+        } catch (e) { /* missing import */ }
+      }
+      let deepRows = null;
+      try {
+        const r = await fetchTimeout("backtest/history/" + row.slug + ".json", 8000, {});
+        if (r.ok) {
+          const dj = await r.json();
+          if (dj && Array.isArray(dj.rows)) deepRows = dj.rows.map((x) => ({ t: x[0], price: x[1], vol: x[2] }));
+        }
+      } catch (e) { /* no deep history */ }
+      const daily = A.assembleSeries(A.deepHistoryBase(deepRows, importRows, lines), lines).daily;
+      const out = daily.filter((d) => d.price > 0).map((d) => ({ day: d.day, price: d.price }));
+      invHistCache.set(name, out.length ? out : null);
+    }));
+  }
+
+  // "did the inventory beat the Skindex over the same span" — the same
+  // benchmarkGrowth the portfolio panel uses, one entry sized to the value
+  // at the first reconstructed (or first recorded) day.
+  function invBenchmark(days, snaps) {
+    const series = state.market && state.market.series;
+    if (!series || !series.length) return null;
+    let first = null, last = null;
+    if (days && days.length >= 2) {
+      first = { t: Date.parse(days[0].day + "T00:00:00Z"), v: days[0].value };
+      last = { t: Date.parse(days[days.length - 1].day + "T00:00:00Z"), v: days[days.length - 1].value };
+    } else if (snaps && snaps.length >= 2) {
+      first = { t: snaps[0].t, v: snaps[0].value };
+      last = { t: snaps[snaps.length - 1].t, v: snaps[snaps.length - 1].value };
+    }
+    if (!first || !last || !(first.v > 0) || !isFinite(first.t)) return null;
+    const bg = A.benchmarkGrowth([{ t: first.t, cost: first.v }], series);
+    if (bg.idxPct == null) return null;
+    const invPct = Math.round((last.v / first.v - 1) * 1000) / 10;
+    return { idxPct: bg.idxPct, invPct: invPct,
+      alpha: Math.round((invPct - bg.idxPct) * 10) / 10,
+      spanDays: Math.max(0, Math.round((last.t - first.t) / 86400000)) };
+  }
+
+  // Static-mode INV_REPORT: identical shape to the server's, computed here.
+  async function invBuildClientReport(parsed, profile) {
+    const prices = invPriceMap();
+    const priceOf = (n) => (prices.has(n) ? prices.get(n) : null);
+    const value = invValue(parsed.items, priceOf);
+    await invLoadHistory(value.rows.filter((r) => r.value != null).map((r) => r.name));
+    const historyOf = (n) => invHistCache.get(n) || null;
+    const recon = invRecon(parsed.items, historyOf, { priceOf: priceOf });
+    const series = invAppendSnap(value.total, parsed.count);
+    return {
+      steamid64: parsed.steamid64, profile: profile || "", fetchedAt: Date.now(), cached: false,
+      count: parsed.count, value: value, recon: recon, series: series,
+      benchmark: invBenchmark(recon.days, series),
+      note: parsed.truncated ? "Steam truncated this inventory — only the first page of items is included." : "",
+    };
+  }
+
+  // ── render ───────────────────────────────────────────────────────────────
+  // Only the RESULT containers re-render; the form controls and both buttons
+  // are never rebuilt, so keyboard focus survives a load without any help.
+  // The one focusable INSIDE a re-rendered container is the data table's
+  // <summary>, so its open state + focus are carried across explicitly.
+  // Deliberately NOT the shared pendingFocus: that belongs to the home/item
+  // renderers, and an async inventory load landing mid-navigation must never
+  // consume (or steal) their pending target.
+  let invChartArgs = null;
+  const invAxisFmt = (gv) => gv >= 1000 ? "$" + (gv / 1000).toFixed(1) + "k"
+    : gv >= 10 ? "$" + gv.toFixed(0) : "$" + gv.toFixed(1);
+  function invDataTableHtml(days, snaps) {
+    const fam = (days || []).map((d) => ({ day: d.day, v: d.value, mark: false }))
+      .concat((snaps || []).map((s) => ({ day: new Date(s.t).toISOString().slice(0, 10), v: s.value, mark: true })));
+    if (fam.length < 2) return "";
+    let rows = fam, how = "daily";
+    if (fam.length > 40) {
+      const byMonth = new Map(); // last sample of each month
+      for (const p of fam) byMonth.set(p.day.slice(0, 7), p);
+      rows = Array.from(byMonth.values());
+      how = "month-end";
+    }
+    if (rows.length > 400) { rows = rows.slice(-400); how = "last 400 " + how + " rows"; }
+    const anyMark = rows.some((p) => p.mark);
+    return '<details class="dataTable"><summary>Inventory data table (' + how + ", " + rows.length + " rows)</summary>" +
+      '<div class="scroll"><table class="dt"><tr><th>Day</th><th>Inventory value</th></tr>' +
+      rows.map((p) => "<tr><td>" + esc(p.day) + (p.mark ? "†" : "") + "</td><td>" + fmt$(p.v) + "</td></tr>").join("") +
+      "</table></div>" +
+      (anyMark ? DS.hint({ text: "† value recorded at an actual load (everything else is today's holdings priced at that day's marks)", cls: "hint" }) : "") +
+      "</details>";
+  }
+  function renderInventory() {
+    const rep = state.inv.report;
+    const totals = $("invTotals"), tbl = $("invTable"), hint = $("invHint");
+    const wrap = $("invChartWrap"), cv = $("invChart");
+    $("invPanel").setAttribute("aria-busy", state.inv.busy ? "true" : "false");
+    if (!rep) {
+      totals.innerHTML = ""; tbl.innerHTML = ""; wrap.hidden = true;
+      $("invLegend").innerHTML = ""; $("invChartTable").innerHTML = "";
+      invChartArgs = null;
+      const n = invSnaps().length;
+      hint.innerHTML = state.inv.busy ? DS.hint({ text: "Reading your inventory…", cls: "hint" })
+        : state.inv.error ? DS.hint({ text: state.inv.error, cls: "hint" })
+        : DS.hint({ text: n
+            ? n + " earlier load" + (n === 1 ? "" : "s") + " recorded in this browser — load again to chart it."
+            : "Load your inventory to value it and chart it against the Skindex.", cls: "hint" });
+      return;
+    }
+    // carry the data table's open state + focus across the re-render
+    const oldDt = $("invChartTable").querySelector("details.dataTable");
+    const dtOpen = !!(oldDt && oldDt.open);
+    const dtFocused = !!(oldDt && document.activeElement && oldDt.contains(document.activeElement));
+    const v = rep.value || { total: 0, pricedCount: 0, unpricedCount: 0, rows: [] };
+    const recon = rep.recon || { days: [], coveragePct: 0, pricedNames: 0, totalNames: 0 };
+    const snaps = rep.series || [];
+    const b = rep.benchmark;
+    // v.pricedCount / v.unpricedCount are UNIT counts (they sum to the
+    // inventory's unit count); v.rows.length is the distinct-skin count
+    const names = v.rows.length;
+    const units = (v.pricedCount || 0) + (v.unpricedCount || 0);
+    // since-first-load: only real recorded loads, never a reconstructed day
+    const firstSnap = snaps.length ? snaps[0] : null;
+    const delta = firstSnap && snaps.length >= 2 && firstSnap.value > 0 ? v.total - firstSnap.value : null;
+    totals.innerHTML =
+      DS.tile({ label: "INVENTORY VALUE", value: fmt$(v.total),
+        sub: rep.count + " item" + (rep.count === 1 ? "" : "s") + " · " + names + " distinct name" + (names === 1 ? "" : "s") }) +
+      DS.tile({ label: "PRICED", value: v.pricedCount + " / " + units,
+        sub: v.unpricedCount
+          ? "items priced · " + v.unpricedCount + " not in the tracked set (never guessed)"
+          : "items priced — every one has a mark" }) +
+      DS.tile({ label: "SINCE FIRST LOAD",
+        value: delta == null ? "—" : (delta >= 0 ? "+" : "") + fmt$(delta).replace("$-", "-$"),
+        sub: delta == null ? "first load — the line starts here"
+          : fmtPct(delta / firstSnap.value, 1) + " over " + snaps.length + " recorded loads",
+        tone: delta == null ? null : cls(delta) }) +
+      (b ? DS.tile({ label: "VS SKINDEX", value: (b.alpha > 0 ? "+" : "") + b.alpha + "pp α",
+        sub: "you " + fmtPct(b.invPct / 100, 1) + " · Skindex " + fmtPct(b.idxPct / 100, 1) + " over " + b.spanDays + "d",
+        tone: cls(b.alpha) })
+        // say which side is missing rather than a bare dash — the alpha needs
+        // BOTH a value path for the holdings AND a published index level over
+        // the same span, and neither is ever fabricated
+        : DS.tile({ label: "VS SKINDEX", value: "—",
+          sub: (recon.days || []).length < 2 && snaps.length < 2
+            ? "needs price history behind your holdings"
+            : "needs a published Skindex level over that span" }));
+
+    // chart: the reconstruction (Mil-Spec blue, solid — the primary series)
+    // plus the recorded loads (Restricted violet, dashed overlay). Rarity
+    // ramp per DESIGN.md §2; the near-luminance pair is separated by
+    // weight + dash, and both colours are read from the token layer.
+    const reconPts = (recon.days || []).map((d) => ({ t: Date.parse(d.day + "T00:00:00Z"), v: d.value }))
+      .filter((p) => isFinite(p.t) && p.v > 0);
+    const snapPts = snaps.map((s) => ({ t: s.t, v: s.value })).filter((p) => isFinite(p.t) && p.v > 0);
+    const lines = [];
+    if (reconPts.length >= 2) lines.push({ pts: reconPts, col: COL.price, w: 2 });
+    if (snapPts.length >= 2) lines.push({ pts: snapPts, col: COL.sma30, w: 1.5, dash: [5, 4] });
+    if (lines.length) {
+      wrap.hidden = false;
+      $("invLegend").innerHTML =
+        (reconPts.length >= 2 ? DS.legendItem({ swatch: COL.price, label: "Reconstructed value" }) : "") +
+        (snapPts.length >= 2 ? DS.legendItem({ swatch: COL.sma30, label: "Recorded loads" }) : "");
+      const all = lines.flatMap((l) => l.pts.map((p) => p.v)).filter((x) => x > 0);
+      const useLog = all.length > 1 && Math.max.apply(null, all) / Math.min.apply(null, all) > 6;
+      const span = reconPts.length >= 2 ? reconPts : snapPts;
+      const dayOf = (t) => new Date(t).toISOString().slice(0, 10);
+      cv.setAttribute("aria-label",
+        "Inventory value over time: " + fmt$(span[0].v) + " on " + dayOf(span[0].t) + " to " +
+        fmt$(span[span.length - 1].v) + " on " + dayOf(span[span.length - 1].t) + ", " +
+        span.length + " points. Full figures in the data table below the chart.");
+      invChartArgs = { lines: lines, opts: { log: useLog, h: 150, fmt: invAxisFmt } };
+      drawIdxChart(cv, lines, invChartArgs.opts);
+      $("invChartTable").innerHTML = invDataTableHtml(recon.days, snaps);
+    } else {
+      wrap.hidden = true; invChartArgs = null;
+      $("invLegend").innerHTML = ""; $("invChartTable").innerHTML = "";
+    }
+
+    // top holdings — names come from pasted JSON, so every cell is escaped
+    // (DS.specTable escapes by default and wraps the table in .ds-scroll-x)
+    const top = v.rows.slice(0, INV_TOP_ROWS);
+    tbl.innerHTML = top.length
+      ? DS.specTable({ head: ["Item", "Qty", "Price", "Value"],
+          // FULL market_hash_name (the wear suffix is a different item at a
+          // different price — never shorten it away) plus a title, mirroring
+          // the market table's td.nm. The trusted html slot is fed nothing but
+          // DS.esc output; these names come from pasted JSON.
+          rows: top.map((r) => [{ html: '<span title="' + DS.esc(r.name) + '">' + DS.esc(r.name) + "</span>" },
+            String(r.qty), r.price == null ? "—" : fmt$(r.price),
+            r.value == null ? "unpriced" : fmt$(r.value)]) }) +
+        (v.rows.length > top.length
+          ? DS.hint({ text: "+ " + (v.rows.length - top.length) + " more name" + (v.rows.length - top.length === 1 ? "" : "s"), cls: "hint" })
+          : "")
+      : "";
+
+    hint.innerHTML =
+      DS.hint({ text: "Reconstruction covers " + recon.coveragePct + "% of current value · " +
+        recon.pricedNames + " of " + recon.totalNames + " names have usable price history · " +
+        "today's holdings priced at past marks, each name entering the line when its own history starts.",
+        cls: "hint" }) +
+      (rep.note ? DS.hint({ text: rep.note, cls: "hint" }) : "") +
+      (rep.cached ? DS.hint({ text: "Served from the tracker's cache (Steam rate-limits inventory reads).", cls: "hint" }) : "") +
+      // a refresh that failed leaves the PREVIOUS report on screen — say so
+      // next to it rather than letting stale numbers look fresh
+      (state.inv.error ? DS.hint({ text: "Last refresh failed: " + state.inv.error, cls: "hint" }) : "");
+
+    const newDt = $("invChartTable").querySelector("details.dataTable");
+    if (newDt && dtOpen) newDt.open = true;
+    if (newDt && dtFocused) { const sm = newDt.querySelector("summary"); if (sm) sm.focus(); }
+  }
+  let invRszT = null;
+  window.addEventListener("resize", () => {
+    clearTimeout(invRszT);
+    invRszT = setTimeout(() => {
+      if (invChartArgs && $("invChart") && !$("invChartWrap").hidden) drawIdxChart($("invChart"), invChartArgs.lines, invChartArgs.opts);
+    }, 150);
+  });
+
+  // ── load paths ───────────────────────────────────────────────────────────
+  // A tracker is only usable when one actually answered /health — on a static
+  // host (and on the setup panel) there is no server to ask, so the paste
+  // flow is the whole story.
+  const invLive = () => state.mode === "live" && !!state.health;
+  const invSteamId = (s) => { const m = /(7656\d{13})/.exec(String(s || "")); return m ? m[1] : null; };
+  async function invRun(fn) {
+    if (state.inv.busy) return;
+    state.inv.busy = true; state.inv.error = "";
+    if (!state.inv.report) renderInventory(); else $("invPanel").setAttribute("aria-busy", "true");
+    try {
+      const rep = await fn();
+      if (!rep || typeof rep !== "object") throw new Error("The tracker returned an unexpected response.");
+      state.inv.report = rep;
+      renderInventory();
+      toast("Inventory loaded: " + (rep.count || 0) + " items, " + fmt$(rep.value && rep.value.total));
+    } catch (e) {
+      state.inv.error = e.message;
+      renderInventory();
+      toast(e.message, true);
+    } finally {
+      state.inv.busy = false;
+      $("invPanel").setAttribute("aria-busy", "false");
+    }
+  }
+  // LIVE mode → the tracker's routes (it owns the polite fetch, the ≥10-minute
+  // cache and the append-only snapshot log). A tracker that predates the
+  // inventory routes answers 404 — say so and offer the paste flow instead.
+  async function invLoadLive(body, profile) {
+    try {
+      return body ? await api("/api/skins/inventory", body)
+        : await api("/api/skins/inventory?profile=" + encodeURIComponent(profile));
+    } catch (e) {
+      if (/HTTP 404/.test(e.message)) {
+        throw new Error("This tracker does not serve inventories yet — update it, or use 📋 Paste JSON.");
+      }
+      throw e;
+    }
+  }
+
+  // ── paste modal ──────────────────────────────────────────────────────────
+  // Same dialog contract as the import modal (A2-4/5/10): the opener is
+  // captured INSIDE the open function so any open path restores correctly,
+  // ONE close function restores it, Tab wraps while open, Esc is scoped to
+  // the open dialog. Exposed on window so probes can drive it directly.
+  let invPasteOpener = null;
+  function openInvPaste() {
+    invPasteOpener = document.activeElement;
+    $("invPasteUrl").textContent = invUrlFor(invSteamId($("invInput").value));
+    $("invPasteText").value = "";
+    $("invPasteErr").textContent = "";
+    $("invPasteModal").classList.add("open");
+    $("invPasteText").focus();
+  }
+  function closeInvPaste() {
+    if (!$("invPasteModal").classList.contains("open")) return;
+    $("invPasteModal").classList.remove("open");
+    if (invPasteOpener && invPasteOpener.focus && document.contains(invPasteOpener)) invPasteOpener.focus();
+    invPasteOpener = null;
+  }
+  window.openInvPaste = openInvPaste;
+  window.closeInvPaste = closeInvPaste;
+  function trapInvPasteTab(e) {
+    const dlg = $("invPasteModal").querySelector(".modal");
+    const foci = Array.from(dlg.querySelectorAll('a[href], button, textarea, input, select, [tabindex]:not([tabindex="-1"])'))
+      .filter((el) => !el.disabled && el.getClientRects().length);
+    if (!foci.length) return;
+    const first = foci[0], last = foci[foci.length - 1];
+    const cur = document.activeElement;
+    if (e.shiftKey) {
+      if (cur === first || !dlg.contains(cur)) { e.preventDefault(); last.focus(); }
+    } else if (cur === last || !dlg.contains(cur)) { e.preventDefault(); first.focus(); }
+  }
+  $("invPasteCancel").addEventListener("click", closeInvPaste);
+  $("invPasteModal").addEventListener("click", (e) => { if (e.target === $("invPasteModal")) closeInvPaste(); });
+  $("invPasteModal").addEventListener("keydown", (e) => {
+    if (!$("invPasteModal").classList.contains("open")) return;
+    if (e.key === "Tab") trapInvPasteTab(e);
+    else if (e.key === "Escape") { e.stopPropagation(); closeInvPaste(); }
+  });
+  // fallback for an Esc raised while focus sat outside the open dialog —
+  // still guarded on this dialog actually being open (A2-10)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && $("invPasteModal").classList.contains("open")) closeInvPaste();
+  });
+  $("invPasteBtn").addEventListener("click", openInvPaste);
+  $("invPasteGo").addEventListener("click", async () => {
+    const raw = $("invPasteText").value;
+    const profile = $("invInput").value.trim();
+    let parsed;
+    try { parsed = invParsePaste(raw); }
+    catch (e) { $("invPasteErr").textContent = e.message; return; }
+    parsed.steamid64 = invSteamId(profile);
+    // closeInvPaste restores the opener; the containers that re-render hold
+    // no form control, so the keyboard simply stays where it landed
+    closeInvPaste();
+    await invRun(async () => invLive()
+      ? await invLoadLive({ paste: raw }, profile)
+      : await invBuildClientReport(parsed, profile));
+  });
+
+  $("invForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const profile = $("invInput").value.trim();
+    if (!profile) { $("invInput").focus(); return toast("Enter a Steam profile URL, vanity name, or SteamID64", true); }
+    if (!invLive()) {
+      // static host: the browser is not allowed to read steamcommunity.com,
+      // so the honest answer is the paste flow with the exact URL prefilled
+      return openInvPaste();
+    }
+    await invRun(async () => await invLoadLive(null, profile));
+  });
+
   // ── boot ─────────────────────────────────────────────────────────────────
   function renderSetup() {
     $("netStatus").textContent = "tracker offline";
@@ -1280,6 +1841,7 @@
   }
   async function boot() {
     $("netStatus").textContent = "connecting…";
+    renderInventory(); // empty state up front — the panel never boots blank
     loadBacktest(); // fire-and-forget — re-renders home when it lands
     if (!(await resolveApiBase())) {
       if (await tryStatic()) return bootStatic();

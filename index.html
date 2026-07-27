@@ -51,6 +51,36 @@
         <button class="ds-btn primary btn" type="submit">＋ Add lot of selected item</button>
       </form>
     </div>
+
+    <!-- Steam inventory (S3): NO OpenID / password / API key — a CS2 inventory
+         is public JSON for any profile set to Public, so a profile URL, vanity
+         name or SteamID64 is the whole input. Live mode fetches it through the
+         tracker; on a static host browsers cannot read steamcommunity.com (no
+         CORS headers) so the user pastes the JSON — same idiom as the price-
+         history import modal below. -->
+    <section class="ds-panel panel" id="invPanel" aria-labelledby="invPanelH">
+      <h2 id="invPanelH">MY INVENTORY</h2>
+      <form class="lotForm invForm" id="invForm">
+        <label for="invInput">Steam profile URL, vanity name, or SteamID64</label>
+        <input id="invInput" type="text" autocomplete="off" spellcheck="false"
+               placeholder="steamcommunity.com/id/yourname" aria-describedby="invPrivacy">
+        <div class="btnrow">
+          <button class="ds-btn primary btn" type="submit" id="invGo">📈 Load inventory</button>
+          <button class="ds-btn btn" type="button" id="invPasteBtn">📋 Paste JSON</button>
+        </div>
+      </form>
+      <p class="ds-hint hint" id="invPrivacy">No sign-in, no password, no API key — public inventory
+        data only. Your SteamID stays in this browser (it is only ever sent to Steam).</p>
+      <div id="invTotals" class="pfTotals"></div>
+      <div id="invChartWrap" class="invChartWrap" hidden>
+        <div class="ds-legend invLegend" id="invLegend"></div>
+        <canvas id="invChart" height="150" role="img"
+                aria-label="Inventory value over time — no inventory loaded yet"></canvas>
+        <div id="invChartTable"></div>
+      </div>
+      <div id="invTable"></div>
+      <div id="invHint" role="status"></div>
+    </section>
   </aside>
 
   <section id="itemView"><div class="ds-panel panel"><div class="emptyChart">Loading market…</div></div></section>
@@ -79,6 +109,32 @@
     <div class="btnrow">
       <button class="ds-btn primary btn" id="importGo">Import</button>
       <button class="ds-btn btn" id="importCancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div class="modalBack" id="invPasteModal">
+  <div class="modal" role="dialog" aria-modal="true" aria-labelledby="invPasteTitle">
+    <h3 id="invPasteTitle">Load your Steam inventory</h3>
+    <div class="steps">
+      <p>Your CS2 inventory is <b>public JSON</b> — no sign-in, no password, no API key.
+        This page is a static site, and browsers are not allowed to read steamcommunity.com
+        directly (Steam sends no CORS headers), so you fetch it and paste it:</p>
+      <ol>
+        <li>Open this address in a new tab:<br><code id="invPasteUrl"></code></li>
+        <li>Select all (<b>Ctrl/⌘+A</b>) and copy (<b>Ctrl/⌘+C</b>).</li>
+        <li>Paste it below and press Load.</li>
+      </ol>
+      <p class="ds-hint hint">Steam answers <b>“This profile is private.”</b> unless the inventory
+        privacy setting is Public. Nothing is uploaded anywhere — the maths runs in this browser.</p>
+    </div>
+    <textarea id="invPasteText" placeholder='{"assets":[…],"descriptions":[…],"total_inventory_count":…}'
+      aria-label="Steam inventory JSON (paste the whole page)"
+      aria-describedby="invPasteErr"></textarea>
+    <div class="modalErr" id="invPasteErr" role="alert"></div>
+    <div class="btnrow">
+      <button class="ds-btn primary btn" id="invPasteGo">Load inventory</button>
+      <button class="ds-btn btn" id="invPasteCancel">Cancel</button>
     </div>
   </div>
 </div>
