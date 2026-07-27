@@ -13,6 +13,9 @@
 //     cross-market compare. Public but brotli-only and rate-limited hard
 //     (8 req / 5 min) → cached on disk, TTL 30 min.
 //   Skinport /v1/sales/history — realized-sale aggregates (24h/7d/30d/90d).
+//   Steam profile page + inventory JSON — the user's OWN holdings. PUBLIC,
+//     no sign-in of any kind (see the "Steam profile + inventory" section
+//     below for the endpoints and why OpenID is neither used nor needed).
 "use strict";
 const https = require("https");
 const zlib = require("zlib");
@@ -215,6 +218,156 @@ async function steamPriceHistory(name, cookie) {
   return normalizeHistoryRows(j.prices);
 }
 
+// ── Steam profile + inventory ("load my inventory") ───────────────────────
+// NO SIGN-IN, NO PASSWORD, NO API KEY, NO OpenID. Both endpoints are public:
+//
+//   PROFILE   https://steamcommunity.com/id/<vanity>
+//     A vanity name is not an id. The page ships an inline bootstrap object
+//     `g_rgProfileData = {...,"steamid":"<17 digits>",...}` — one public HTML
+//     read turns vanity → SteamID64, so we never need the Web API key that
+//     ISteamUser/ResolveVanityURL would demand.
+//   INVENTORY https://steamcommunity.com/inventory/<steamid64>/730/2
+//               ?l=english&count=5000
+//     CS2 = appid 730, context 2. Returns plain JSON for any profile whose
+//     inventory privacy is Public — logged out, no cookie. Two failure codes
+//     matter and both get plain-English messages: 403 = private/hidden,
+//     429 = IP rate-limited.
+//     Payload: `assets` [{classid, instanceid, amount}] × `descriptions`
+//     [{classid, instanceid, market_hash_name, marketable, tradable}] joined
+//     on classid+"_"+instanceid (assets carry the counts, descriptions carry
+//     the names — Steam de-duplicates the heavy half).
+//
+// WHY NOT STEAM OpenID: it would only PROVE identity, which buys a personal
+// analytics tool nothing (the data we read is public either way), and it
+// REQUIRES a server-side callback URL — impossible on the static GitHub
+// Pages build, where the user instead pastes the same inventory JSON. So the
+// entire feature's input is: a profile URL, a vanity name, or a SteamID64.
+//
+// PRIVACY: a SteamID is personal data — it goes to steamcommunity.com and
+// nowhere else, is never committed, and never reaches any third party.
+// RATE LIMITS: inventory reads are IP-limited, so they ride polite() (3.5s
+// per-host gap) and the CALLER must cache them (≥10 min TTL, a cached read
+// must never re-fetch). Like every other fetcher here this layer keeps no
+// cache of its own — storage belongs to the server.
+const STEAMID64_RE = /^\d{17}$/;
+const VANITY_RE = /^[A-Za-z0-9_.-]{2,64}$/;
+
+// input → { steamid64, vanity|null, source } where source is one of
+// "steamid64" (17 digits given directly), "profile-url" (.../profiles/<id>),
+// "vanity-url" (.../id/<name>) or "vanity" (a bare name). Only the two vanity
+// forms cost a network read. Throws Error with a plain-English message.
+async function resolveSteamProfile(input) {
+  const raw = String(input == null ? "" : input).trim();
+  if (!raw) throw new Error("enter a Steam profile URL, vanity name, or SteamID64");
+  if (STEAMID64_RE.test(raw)) return { steamid64: raw, vanity: null, source: "steamid64" };
+  const mProf = /\/profiles\/(\d{17})(?:[/?#]|$)/.exec(raw);
+  if (mProf) return { steamid64: mProf[1], vanity: null, source: "profile-url" };
+  const mVan = /\/id\/([A-Za-z0-9_.-]{2,64})(?:[/?#]|$)/.exec(raw);
+  if (mVan) return resolveVanity(mVan[1], "vanity-url");
+  if (VANITY_RE.test(raw)) return resolveVanity(raw, "vanity");
+  if (/steamcommunity\.com/i.test(raw))
+    throw new Error("that Steam link is not a profile — use the address that looks like " +
+      "steamcommunity.com/id/<name> or steamcommunity.com/profiles/<17 digits>");
+  throw new Error("could not read a Steam profile from that — paste your profile URL, " +
+    "your vanity name, or your 17-digit SteamID64");
+}
+
+// Vanity → SteamID64 by scraping g_rgProfileData off the public profile page.
+async function resolveVanity(vanity, source) {
+  const res = await polite("https://steamcommunity.com/id/" + enc(vanity));
+  if (res.status === 429)
+    throw new Error("Steam is rate-limiting profile lookups — try again in a few minutes");
+  if (res.status === 404)
+    throw new Error('no Steam profile found for "' + vanity + '" — check the spelling');
+  if (res.status !== 200)
+    throw new Error("could not reach the Steam profile page (HTTP " + res.status +
+      ") — try again in a few minutes");
+  const body = String(res.body || "");
+  // Scope the search to the bootstrap object: a bare "steamid" scrape over
+  // the whole page could pick up somebody else's id (friends, comments).
+  const at = body.indexOf("g_rgProfileData");
+  const m = at >= 0 ? /"steamid"\s*:\s*"(\d{17})"/.exec(body.slice(at, at + 4000)) : null;
+  if (!m) {
+    if (/could not be found/i.test(body))
+      throw new Error('no Steam profile found for "' + vanity + '" — check the spelling');
+    throw new Error("could not read the SteamID out of that profile page — " +
+      "paste your 17-digit SteamID64 instead");
+  }
+  return { steamid64: m[1], vanity: vanity, source: source };
+}
+
+// → { steamid64, count, items: [{name, qty, marketable, tradable}], truncated }
+// count = total UNITS parsed (qty summed), not the number of distinct names.
+// opts.count caps the assets Steam returns (default/max 5000).
+async function steamInventory(steamid64, opts) {
+  opts = opts || {};
+  const id = String(steamid64 == null ? "" : steamid64).trim();
+  if (!STEAMID64_RE.test(id))
+    throw new Error("that is not a 17-digit SteamID64 — resolve the profile first");
+  const max = Math.max(1, Math.min(5000, Math.round(Number(opts.count) || 5000)));
+  const res = await polite("https://steamcommunity.com/inventory/" + id + "/" + APP_ID +
+    "/2?l=english&count=" + max);
+  if (res.status === 403)
+    throw new Error("inventory is private or hidden — set it to Public in Steam privacy settings");
+  if (res.status === 429)
+    throw new Error("Steam is rate-limiting inventory reads — try again in a few minutes");
+  if (res.status === 404)
+    throw new Error("no CS2 inventory found for that profile — check the SteamID or profile URL");
+  if (res.status !== 200)
+    throw new Error("Steam inventory read failed (HTTP " + res.status + ") — try again in a few minutes");
+  let payload;
+  try { payload = JSON.parse(res.body); }
+  catch (e) { throw new Error("Steam returned an unreadable inventory response — try again in a few minutes"); }
+  return parseSteamInventory(payload, id, max);
+}
+
+// The assets×descriptions join, split out so the STATIC/paste path (the user
+// pastes the same JSON out of their own browser) parses byte-identically to
+// the fetched one. Pure — no network, no clock.
+function parseSteamInventory(payload, steamid64, max) {
+  let p = payload;
+  if (typeof p === "string") {
+    try { p = JSON.parse(p); }
+    catch (e) { throw new Error("that does not look like Steam inventory JSON — copy the whole page, starting with {"); }
+  }
+  if (!p || typeof p !== "object")
+    throw new Error("that does not look like Steam inventory JSON — copy the whole page, starting with {");
+  const assets = Array.isArray(p.assets) ? p.assets : [];
+  const descs = Array.isArray(p.descriptions) ? p.descriptions : [];
+  const empty = p.success === 1 || p.success === true || Number(p.total_inventory_count) === 0;
+  if (!assets.length && !empty)
+    throw new Error("Steam did not return an inventory for that profile — it may be private, hidden, or empty");
+  const byKey = new Map();
+  for (const d of descs) {
+    if (!d) continue;
+    const k = String(d.classid) + "_" + String(d.instanceid);
+    if (!byKey.has(k)) byKey.set(k, d);
+  }
+  const rows = new Map();
+  let count = 0;
+  for (const a of assets) {
+    if (!a) continue;
+    const d = byKey.get(String(a.classid) + "_" + String(a.instanceid));
+    if (!d || typeof d.market_hash_name !== "string" || !d.market_hash_name) continue; // never invent a name
+    const n = Number(a.amount);
+    const qty = isFinite(n) && n > 0 ? Math.round(n) : 1;
+    const k = String(a.classid) + "_" + String(a.instanceid);
+    const cur = rows.get(k);
+    if (cur) cur.qty += qty;   // duplicate stack of the SAME item → one row, qty summed
+    else rows.set(k, { name: d.market_hash_name, qty: qty,
+      marketable: !!Number(d.marketable), tradable: !!Number(d.tradable) });
+    count += qty;
+  }
+  const declared = Number(p.total_inventory_count);
+  return {
+    steamid64: String(steamid64 == null ? "" : steamid64),
+    count: count,
+    items: Array.from(rows.values()),
+    truncated: Boolean(p.more_items) || (isFinite(declared) && declared > assets.length) ||
+      (max > 0 && assets.length >= max),
+  };
+}
+
 // ── Skinport ───────────────────────────────────────────────────────────────
 // Full dump → [{name, min, median?, mean, max, qty}] (USD)
 async function skinportItems() {
@@ -315,5 +468,6 @@ module.exports = {
   APP_ID, setTransport, httpGet,
   steamPriceOverview, steamPriceHistory, parseSteamDate, normalizeHistoryRows,
   steamOrderBook, steamPriceHistoryPublic, steamchartsMonthly, btcHistoryAll,
+  resolveSteamProfile, steamInventory, parseSteamInventory,
   skinportItems, skinportSalesHistory, steamPlayers, cryptoPrices,
 };
