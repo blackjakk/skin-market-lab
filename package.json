@@ -8,5 +8,10 @@
     "probe": "node probe.js",
     "probe:ui": "node client-probe.js",
     "probe:a11y": "node tools/a11y-probe.js"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "5.0.2",
+    "hardhat": "^2.19.0"
   }
 }
