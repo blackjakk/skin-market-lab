@@ -1457,24 +1457,39 @@
   // "did the inventory beat the Skindex over the same span" — the same
   // benchmarkGrowth the portfolio panel uses, one entry sized to the value
   // at the first reconstructed (or first recorded) day.
-  function invBenchmark(days, snaps) {
+  // LIKE-FOR-LIKE alpha — MUST stay identical to the server's invBenchmark
+  // (a cross-surface probe check pins live ≈ static). Both legs cover the same
+  // window over the same basket: open no earlier than recon.fullFrom (else an
+  // item ENTERING the line reads as a gain) nor than index inception (else
+  // benchmarkGrowth clamps its own leg and the two legs differ), and truncate
+  // the index at the inventory's last day. The snaps fallback requires an
+  // unchanged item count — two different inventories are not a return.
+  function invBenchmark(recon, snaps) {
     const series = state.market && state.market.series;
     if (!series || !series.length) return null;
+    const days = (recon && recon.days) || [];
+    const dayOf = (t) => new Date(t).toISOString().slice(0, 10);
     let first = null, last = null;
-    if (days && days.length >= 2) {
-      first = { t: Date.parse(days[0].day + "T00:00:00Z"), v: days[0].value };
-      last = { t: Date.parse(days[days.length - 1].day + "T00:00:00Z"), v: days[days.length - 1].value };
-    } else if (snaps && snaps.length >= 2) {
+    if (days.length >= 2) {
+      const from = [(recon && recon.fullFrom) || days[0].day, series[0].day].reduce((a, b) => (a > b ? a : b));
+      const win = days.filter((d) => d.day >= from);
+      if (win.length < 2) return null;
+      first = { t: Date.parse(win[0].day + "T00:00:00Z"), v: win[0].value };
+      last = { t: Date.parse(win[win.length - 1].day + "T00:00:00Z"), v: win[win.length - 1].value };
+    } else if (snaps && snaps.length >= 2 && snaps[0].count === snaps[snaps.length - 1].count) {
       first = { t: snaps[0].t, v: snaps[0].value };
       last = { t: snaps[snaps.length - 1].t, v: snaps[snaps.length - 1].value };
     }
     if (!first || !last || !(first.v > 0) || !isFinite(first.t)) return null;
-    const bg = A.benchmarkGrowth([{ t: first.t, cost: first.v }], series);
+    const span = series.filter((s) => s && s.day <= dayOf(last.t));
+    if (!span.length) return null;
+    const bg = A.benchmarkGrowth([{ t: first.t, cost: first.v }], span);
     if (bg.idxPct == null) return null;
     const invPct = Math.round((last.v / first.v - 1) * 1000) / 10;
     return { idxPct: bg.idxPct, invPct: invPct,
       alpha: Math.round((invPct - bg.idxPct) * 10) / 10,
-      spanDays: Math.max(0, Math.round((last.t - first.t) / 86400000)) };
+      spanDays: Math.max(0, Math.round((last.t - first.t) / 86400000)),
+      from: dayOf(first.t), to: dayOf(last.t) };
   }
 
   // Static-mode INV_REPORT: identical shape to the server's, computed here.
@@ -1489,7 +1504,7 @@
     return {
       steamid64: parsed.steamid64, profile: profile || "", fetchedAt: Date.now(), cached: false,
       count: parsed.count, value: value, recon: recon, series: series,
-      benchmark: invBenchmark(recon.days, series),
+      benchmark: invBenchmark(recon, series),
       note: parsed.truncated ? "Steam truncated this inventory — only the first page of items is included." : "",
     };
   }

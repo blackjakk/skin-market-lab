@@ -553,19 +553,32 @@ function startServer(opts) {
   // reconstruction's opening value on its opening day. The index series is
   // truncated at the reconstruction's last day so both legs measure the SAME
   // window; lots predating the index clamp to inception (documented there).
+  // LIKE-FOR-LIKE alpha. Both legs must cover the same window over the same
+  // basket, or the number is fiction: opening before the basket is whole
+  // books an item ENTERING the reconstruction as a gain, and opening before
+  // the index exists makes benchmarkGrowth clamp ITS leg to inception while
+  // the inventory leg runs longer. spanDays is a DURATION, not a count of
+  // marked days (sparse marks made a 2-year window print "3").
   function invBenchmark(recon) {
     if (!recon || !Array.isArray(recon.days) || recon.days.length < 2) return null;
-    const first = recon.days[0], last = recon.days[recon.days.length - 1];
-    if (!(first.value > 0) || last.value == null) return null;
     let series = [];
     try { series = A.marketOverview(marketItems()).series || []; } catch (e) { return null; }
+    if (!series.length) return null;
+    const from = [recon.fullFrom || recon.days[0].day, series[0].day].reduce((a, b) => (a > b ? a : b));
+    const win = recon.days.filter((d) => d.day >= from);
+    if (win.length < 2) return null;
+    const first = win[0], last = win[win.length - 1];
+    if (!(first.value > 0) || last.value == null) return null;
     const span = series.filter((s) => s && s.day <= last.day);
     if (!span.length) return null;
     const bg = A.benchmarkGrowth([{ t: Date.parse(first.day + "T00:00:00Z"), cost: first.value }], span);
     if (bg.idxPct == null) return null;
     const invPct = Math.round((last.value / first.value - 1) * 1000) / 10;
     return { idxPct: bg.idxPct, invPct: invPct,
-      alpha: Math.round((invPct - bg.idxPct) * 10) / 10, spanDays: recon.days.length };
+      alpha: Math.round((invPct - bg.idxPct) * 10) / 10,
+      spanDays: Math.max(0, Math.round(
+        (Date.parse(last.day + "T00:00:00Z") - Date.parse(first.day + "T00:00:00Z")) / 86400000)),
+      from: first.day, to: last.day };
   }
 
   // paste → inventory, through the SHARED join when market.js carries it (one
@@ -719,14 +732,42 @@ function startServer(opts) {
     return scored.slice(0, 25).map(([, it]) => Object.assign({ watched: watchlist.includes(it.name) }, it));
   }
 
+  // ── CORS: an ALLOWLIST, never "*" ────────────────────────────────────────
+  // This API answers with personal data — the portfolio's lots and cost
+  // basis, and (since the inventory routes) a SteamID64 plus every item the
+  // user owns. A wildcard ACAO let ANY page the user happened to have open
+  // read all of it with a plain no-preflight GET, and let a simple
+  // text/plain POST rewrite server state (CSRF) — reproduced end-to-end
+  // before this fix. Allowed: the GitHub Pages origin the static dashboard
+  // is served from, any localhost/127.0.0.1 port (the dashboard served by
+  // this very tracker, or a dev copy), plus anything explicitly configured
+  // in SKIN_ALLOW_ORIGIN. Everything else gets no ACAO header AND, because
+  // omitting the header still lets the REQUEST run server-side, a 403
+  // before any handler executes.
+  const ALLOW_EXTRA = String(process.env.SKIN_ALLOW_ORIGIN || "")
+    .split(",").map((s) => s.trim()).filter(Boolean);
+  function corsOrigin(req) {
+    const o = req.headers && req.headers.origin;
+    if (!o) return null;                       // same-origin / curl / server-to-server
+    if (ALLOW_EXTRA.indexOf(o) >= 0) return o;
+    if (/^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i.test(o)) return o;
+    if (/^https:\/\/[a-z0-9-]+\.github\.io$/i.test(o)) return o;
+    return null;
+  }
+  function corsAllowed(req) { return !(req.headers && req.headers.origin) || !!corsOrigin(req); }
+
   // ── http plumbing ────────────────────────────────────────────────────────
   function sendJson(res, code, obj) {
     const body = JSON.stringify(obj);
-    res.writeHead(code, {
+    const head = {
       "Content-Type": "application/json; charset=utf-8",
-      "Access-Control-Allow-Origin": "*",
       "Cache-Control": "no-store",
-    });
+      "Vary": "Origin",
+    };
+    // set per-request in the handler; absent → no ACAO → a foreign page
+    // cannot read the response even if it somehow reached us
+    if (res._allowOrigin) head["Access-Control-Allow-Origin"] = res._allowOrigin;
+    res.writeHead(code, head);
     res.end(body);
   }
   // inventory failures answer in plain English with the right status — the
@@ -771,8 +812,19 @@ function startServer(opts) {
     const u = new URL(req.url, "http://x");
     const p = u.pathname;
     try {
+      // Resolve the caller's origin ONCE per request. A foreign origin is
+      // refused outright on the API surface: withholding the ACAO header
+      // stops the page READING the answer, but the request would still have
+      // RUN — which is how the CSRF write (a no-preflight text/plain POST
+      // that repointed the stored profile) worked.
+      res._allowOrigin = corsOrigin(req);
+      if (p.indexOf("/api/") === 0 && !corsAllowed(req)) {
+        return sendJson(res, 403, { error: "cross-origin request refused — this tracker only answers its own dashboard" });
+      }
       if (req.method === "OPTIONS") {
-        res.writeHead(204, { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Methods": "GET,POST", "Access-Control-Allow-Headers": "Content-Type" });
+        if (!res._allowOrigin) { res.writeHead(403); return res.end(); }
+        res.writeHead(204, { "Access-Control-Allow-Origin": res._allowOrigin, "Vary": "Origin",
+          "Access-Control-Allow-Methods": "GET,POST", "Access-Control-Allow-Headers": "Content-Type" });
         return res.end();
       }
       if (p === "/api/skins/health") {
@@ -869,7 +921,11 @@ function startServer(opts) {
     }
   });
 
-  server.listen(PORT);
+  // Loopback by default: this is a personal tracker holding a SteamID, a
+  // portfolio and an inventory, and it was binding 0.0.0.0 — reachable by
+  // every device on the network. SKIN_HOST (or opts.host) re-opens it
+  // deliberately for anyone who actually wants LAN access.
+  server.listen(PORT, opts.host || process.env.SKIN_HOST || "127.0.0.1");
   return {
     server,
     port: PORT,

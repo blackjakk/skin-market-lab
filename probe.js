@@ -964,6 +964,34 @@ async function fixtureTransport(url, headers) {
     ok(iPriv.status === 403 && noStack(iPriv.body.error) && /private or hidden/.test(iPriv.body.error)
       && /Public/.test(iPriv.body.error),
       "private inventory → 403 + Steam's own fix (\"set it to Public\"), distinct from a 404 unknown profile, never a 500 or a stack");
+    // ── CORS/CSRF lock (adversarial review, BLOCKER) ────────────────────────
+    // The API answers with personal data (portfolio lots, SteamID, holdings).
+    // A wildcard ACAO let any page the user had open read all of it, and a
+    // no-preflight text/plain POST rewrite server state. A foreign Origin must
+    // now be refused OUTRIGHT (403, no ACAO) — withholding the header alone
+    // would still have let the request RUN.
+    const originGet = async (p, origin) => {
+      const r = await fetch("http://127.0.0.1:" + IPORT + p, { headers: { Origin: origin, Connection: "close" } });
+      return { status: r.status, acao: r.headers.get("access-control-allow-origin") };
+    };
+    const evilRead = await originGet("/api/skins/portfolio", "https://evil.example");
+    ok(evilRead.status === 403 && !evilRead.acao,
+      "foreign origin CANNOT read the API: 403 and no Access-Control-Allow-Origin (personal data stays put)");
+    const evilInv = await originGet("/api/skins/inventory?profile=probe-fake-user", "https://evil.example");
+    ok(evilInv.status === 403 && !evilInv.acao,
+      "foreign origin CANNOT reach the inventory route (SteamID + holdings unreadable cross-site)");
+    const evilWrite = await fetch("http://127.0.0.1:" + IPORT + "/api/skins/inventory", {
+      method: "POST", headers: { Origin: "https://evil.example", "Content-Type": "text/plain", Connection: "close" },
+      body: JSON.stringify({ profile: "76561198999999999" }) });
+    ok(evilWrite.status === 403,
+      "CSRF write refused: a no-preflight cross-origin POST cannot repoint the stored profile");
+    const pagesOk = await originGet("/api/skins/health", "https://blackjakk.github.io");
+    ok(pagesOk.status === 200 && pagesOk.acao === "https://blackjakk.github.io",
+      "the hosted dashboard's own origin is still allowed (reflected, not wildcarded)");
+    const localOk = await originGet("/api/skins/health", "http://localhost:1234");
+    ok(localOk.status === 200 && localOk.acao === "http://localhost:1234",
+      "a localhost dashboard on any port is still allowed");
+
     invMode = "ratelimited";
     const iRate = await iapi("/api/skins/inventory", { profile: "probe-fake-user" });
     ok(iRate.status === 429 && /rate-limiting/.test(iRate.body.error),
@@ -1439,6 +1467,32 @@ async function fixtureTransport(url, headers) {
   ok(invPart.days.length === 2 && invPart.days[0].value === 5 && invPart.days[1].value === 10
     && invPart.coveragePct === 54.9 && invPart.pricedNames === 1 && invPart.totalNames === 3,
     "inventoryReconstruction: coverage is VALUE-weighted — $25 of $45.50 = 54.9% (a count would claim 33.3%), and the historyless skin never joins the line");
+  // ── like-for-like alpha lock (adversarial review, BLOCKER) ───────────────
+  // An item ENTERING the reconstruction on its own first mark is not a gain.
+  // Prices here are flat and the market is flat, yet measuring from days[0]
+  // printed +900% (the sub-basket grows as B joins). fullFrom marks the day
+  // the basket is whole; every return leg must open at or after it.
+  const staggerHist = {
+    A: [{ day: "2026-01-01", price: 100 }, { day: "2026-01-02", price: 100 }, { day: "2026-01-03", price: 100 }],
+    B: [{ day: "2026-01-03", price: 900 }],
+  };
+  const stagger = A.inventoryReconstruction(
+    [{ name: "A", qty: 1 }, { name: "B", qty: 1 }],
+    (n) => staggerHist[n] || null,
+    { priceOf: (n) => (n === "A" ? 100 : 900) });
+  const naiveRet = (stagger.days[stagger.days.length - 1].value / stagger.days[0].value - 1) * 100;
+  const lfl = stagger.days.filter((d) => d.day >= stagger.fullFrom);
+  ok(stagger.fullFrom === "2026-01-03" && Math.round(naiveRet) === 900 && lfl.length === 1,
+    "reconstruction publishes fullFrom (the day the basket is COMPLETE): measuring from day 0 would book B's entry as +900% on a flat portfolio in a flat market");
+  const flatFull = A.inventoryReconstruction(
+    [{ name: "A", qty: 1 }, { name: "B", qty: 1 }],
+    (n) => (n === "A" ? staggerHist.A : [{ day: "2026-01-01", price: 900 }, { day: "2026-01-03", price: 900 }]),
+    { priceOf: (n) => (n === "A" ? 100 : 900) });
+  const flatWin = flatFull.days.filter((d) => d.day >= flatFull.fullFrom);
+  ok(flatFull.fullFrom === "2026-01-01" && flatWin.length >= 2
+    && flatWin[flatWin.length - 1].value === flatWin[0].value,
+    "a genuinely whole basket keeps its full window and a flat market reads as 0% (the fix does not just suppress every number)");
+
   const invT = A.inventoryReconstruction([{ name: "Fracture Case", qty: 2 }],
     () => [{ t: Date.UTC(2026, 0, 5), price: 3 }, { t: Date.UTC(2026, 0, 5), price: 4 }, { t: Date.UTC(2026, 0, 4), price: 1 }]);
   const invNone = A.inventoryReconstruction(inv.items, () => null, { priceOf: invPriceOf });

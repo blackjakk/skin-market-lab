@@ -1003,10 +1003,21 @@
       }
       days.push({ day: day, value: round2(v) });
     }
+    // The day the basket is COMPLETE — every reconstructable holding has a
+    // mark on or before it. Before this day the line is a SUB-basket, so a
+    // return measured from days[0] books items ENTERING the line as gains
+    // (a flat portfolio in a flat market printed +900pp alpha). Any
+    // like-for-like return must open at or after fullFrom.
+    let fullFrom = null;
+    for (const h of held) {
+      const d0 = h.marks[0].day;
+      if (fullFrom === null || d0 > fullFrom) fullFrom = d0;
+    }
     return {
       days: days,
       coveragePct: todayTotal > 0 ? Math.round((covered / todayTotal) * 1000) / 10 : 0,
       pricedNames: pricedNames, totalNames: totalNames,
+      fullFrom: fullFrom,
     };
   }
 
