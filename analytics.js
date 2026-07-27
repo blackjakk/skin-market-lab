@@ -752,11 +752,49 @@
     return { corr: Math.round(sab / Math.sqrt(sa * sb) * 100) / 100, n: n };
   }
 
+  // ── BTC session-attribution gauge (the CN/US ACTIVITY sibling for the
+  // macro benchmark). Each inter-sample BTC return is attributed to the
+  // trading session it ENDED in — Asia/China daytime (UTC end-hour 1–9,
+  // ≈ 09:00–18:00 Beijing) vs US daytime (UTC end-hour 14–22, ≈ 09:00–18:00
+  // ET) — and trailing-window log-returns cumulate per bucket. Needs the 3h
+  // collector cadence to populate (6h gaps span sessions and are skipped);
+  // the gauge accrues until `minDays` distinct UTC days have BOTH buckets
+  // sampled. DISPLAY-ONLY (a home tile) — never an index or fixing input.
+  function btcSessionSplit(readings, opts) {
+    opts = opts || {};
+    const windowDays = opts.windowDays || 30, minDays = opts.minDays || 5;
+    const rows = (readings || []).filter((r) => r && r.t != null && r.btc > 0)
+      .sort((a, b) => a.t - b.t);
+    const cutoff = rows.length ? rows[rows.length - 1].t - windowDays * 86400000 : 0;
+    let asia = 0, us = 0, aN = 0, uN = 0;
+    const dayBoth = new Map();
+    for (let i = 1; i < rows.length; i++) {
+      const prev = rows[i - 1], cur = rows[i];
+      if (cur.t < cutoff) continue;
+      const gapH = (cur.t - prev.t) / 3600000;
+      if (gapH <= 0 || gapH > 5) continue;    // needs adjacent 3h samples
+      const end = new Date(cur.t);
+      const h = end.getUTCHours();
+      const day = end.toISOString().slice(0, 10);
+      const r = Math.log(cur.btc / prev.btc);
+      const d = dayBoth.get(day) || { a: false, u: false };
+      if (h >= 1 && h < 10) { asia += r; aN++; d.a = true; }
+      else if (h >= 14 && h < 23) { us += r; uN++; d.u = true; }
+      dayBoth.set(day, d);
+    }
+    let days = 0;
+    for (const v of dayBoth.values()) if (v.a && v.u) days++;
+    const pct = (x) => Math.round((Math.exp(x) - 1) * 1000) / 10;
+    return { asiaPct: aN ? pct(asia) : null, usPct: uN ? pct(us) : null,
+      pairsAsia: aN, pairsUs: uN, days: days, minDays: minDays,
+      windowDays: windowDays, ready: days >= minDays && aN > 0 && uN > 0 };
+  }
+
   return {
     parseMoney: parseMoney, parseCount: parseCount, dayKey: dayKey, median: median, toDaily: toDaily,
     marketOverview: marketOverview, includedFromDay: includedFromDay, INDEX_RULES: INDEX_RULES,
     deepHistoryBase: deepHistoryBase,
-    cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily,
+    cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily, btcSessionSplit: btcSessionSplit,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,
     maxDrawdown: maxDrawdown, currentDrawdown: currentDrawdown,

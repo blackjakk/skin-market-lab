@@ -727,6 +727,13 @@ async function fixtureTransport(url, headers) {
   fs.writeFileSync(path.join(CROOT, "data", "market.jsonl"),
     JSON.stringify({ t: mkT(11, 17), players: 5000000 }) + "\n" +
     JSON.stringify({ t: mkT(23, 17), players: 4000000 }) + "\n");
+  // committed deep history for the SPARK backfill (display-only): 18 daily
+  // closes ending 3 days ago, strictly before Fracture's founding mark — the
+  // 14d sparkline must splice deep→collected while mi.daily (the index
+  // input) stays deep-blind
+  fs.mkdirSync(path.join(CROOT, "backtest", "history"), { recursive: true });
+  fs.writeFileSync(path.join(CROOT, "backtest", "history", slug("Fracture Case") + ".json"),
+    JSON.stringify({ rows: Array.from({ length: 18 }, (_, i) => [Date.now() - (20 - i) * D, 10 + i * 0.5, 100]) }));
   // grandfather the case + art grail (see seedFounding note) so the index
   // bases at 100 instead of seasoning out now that "today" > adoption date
   seedFounding(path.join(CROOT, "data"), "Fracture Case", { src: "steam", price: 23, lowest: 22.1, vol: 57 });
@@ -790,6 +797,34 @@ async function fixtureTransport(url, headers) {
       || (setPub.latest.budget.marketUniverse.centerCapture.weightNeeded === 0.5
         && Number.isInteger(setPub.latest.budget.marketUniverse.concentrated.costMove1pctDay))),
     "budget carries the SMLX-7 preview market-universe economics slot (null or well-formed)");
+  // ── market-metrics pins (dollar volume · deep-spark backfill · BTC sessions) ──
+  const frRow = c1.manifest.items.find((i) => i.name === "Fracture Case");
+  const nmRow = c1.manifest.items.find((i) => i.name === NAME);
+  ok(nmRow && nmRow.dvol === 1311 && frRow && frRow.dvol === 23 * 57,
+    "manifest rows publish dollar volume (units × price paid: 23×57=$1,311)");
+  ok(frRow && frRow.spark.length === 14 && new Set(frRow.spark).size > 2
+    && frRow.spark[frRow.spark.length - 1] === 23,
+    "14d spark backfills from committed deep history (display-only splice; ends at the collected mark)");
+  ok(c1.manifest.market.today.btcSessions && c1.manifest.market.today.btcSessions.ready === false,
+    "today publishes the BTC session-split slot (accruing until 3h-cadence samples exist)");
+  // btcSessionSplit unit pins — fixed-clock synthetic samples, hand-computed:
+  // one UTC day sampled every 3h; Asia leg compounds 1% per 3h step
+  // (ends 03/06/09 UTC → +3.0301% ≈ 3.0), US leg round-trips to 0.
+  {
+    const B0 = Date.UTC(2026, 0, 5), H = 3600000;
+    const mk = (h, v) => ({ t: B0 + h * H + 17 * 60000, btc: v });
+    const oneDay = [mk(0, 100), mk(3, 101), mk(6, 102.01), mk(9, 103.0301),
+      mk(12, 103.0301), mk(15, 104.060401), mk(18, 103.0301), mk(21, 103.0301)];
+    const s1 = A.btcSessionSplit(oneDay);
+    ok(s1.asiaPct === 3 && s1.usPct === 0 && s1.days === 1 && s1.ready === false,
+      "btcSessionSplit: session-attributed returns (Asia +3.0% vs US 0.0%), accruing below 5 days");
+    const sixDays = [];
+    for (let d = 0; d < 6; d++) for (const r of oneDay)
+      sixDays.push({ t: r.t + d * 24 * H, btc: r.btc * Math.pow(1.030301, d) });
+    const s6 = A.btcSessionSplit(sixDays);
+    ok(s6.days === 6 && s6.ready === true && s6.asiaPct === 19.6 && s6.usPct === 0,
+      "btcSessionSplit: 6 both-bucket days → ready, Asia compounds to +19.6% (1.030301^6)");
+  }
   const frW = c1.manifest.items.find((i) => /Fracture/.test(i.name));
   ok(frW && frW.weight === 1 && cCon.weighted === true,
     "manifest items carry the published index weight; the budget prices on it (single case → weight 1)");
