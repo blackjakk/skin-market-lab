@@ -340,6 +340,23 @@
   //     realized sales in the 30d marking window is published, not hidden.
   //   staleness — venue loss surfaces as an alert instead of the site
   //     silently serving carried-forward prices.
+  //   venue — THIRD-VENUE corroboration: every mark is single-venue at
+  //     source (Steam), so this lane compares it against independent
+  //     marketplaces (market.js's pluggable venue adapters). A wash trader
+  //     who moves a Steam mark must now move unrelated venues in the same
+  //     direction at the same time or the divergence is published.
+  //     MEDIAN-RELATIVE, exactly like the ratio lane and the index clamp:
+  //     third venues sit at a structural discount to Steam (measured ~0.66×
+  //     on 2026-07-27 — Steam proceeds are wallet-locked) and that discount
+  //     moves with FX, fee changes and market-wide sentiment, so the gate is
+  //     each item's deviation from the DAY'S median venue/steam ratio, not
+  //     from 1.0. A venue-wide move flags nothing; one name that escaped its
+  //     own venue's consensus flags. Unique (non-case) items get
+  //     venueUniqueMult more room: a venue quote is the cheapest ask on ONE
+  //     float/pattern/phase variant while the Steam mark is a bucketed
+  //     median — the same asymmetry that made the book lane commodity-only
+  //     (live false alarms, 2026-07-26). An unavailable venue is REPORTED
+  //     unavailable; it is never counted as agreement.
   //
   // FLAG-ONLY BY DESIGN — flags NEVER remove a mark or reroute the index.
   // Auto-rejection would hand an attacker a cheaper lever: manipulate the
@@ -354,6 +371,15 @@
     ratioWindow: 30, ratioMinDays: 5, ratioDevWatch: 0.25, ratioDevAlert: 0.5,
     bookBracketWatch: 0.15, bookBracketAlert: 0.30, bookMaxAgeH: 48,
     artMinSales30: 3, quoteFreshH: 12, staleAlertFrac: 0.5,
+    // venue lane (third-venue corroboration). Thresholds MIRROR the ratio
+    // lane — same median-relative log deviation, same watch/alert steps —
+    // because it is the same kind of measurement against a different second
+    // read path. Measured against live venue data on 2026-07-27 (55 tracked
+    // non-art names × market.csgo + waxpeer) these produced 0 and 1 flags
+    // respectively: wide enough not to cry wolf, tight enough that a 30%+
+    // single-name divergence is published the day it appears.
+    venueDevWatch: 0.25, venueDevAlert: 0.5, venueUniqueMult: 1.6,
+    venueMinQuotes: 5, venueMaxAgeH: 48,
   };
   function medianOf(vals) {
     if (!vals.length) return null;
@@ -362,8 +388,15 @@
     return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
   }
   // items: [{ name, cat, tier, steamPrice, quoteT, salesT, sales30,
-  //           ratioDays: [{day, r}], book: {t,bid,ask,mid,...}|null }]
-  // opts: { now } — pure function of its inputs, probe-pinned.
+  //           ratioDays: [{day, r}], book: {t,bid,ask,mid,...}|null,
+  //           venues: { <venueId>: { price, t } } | null }]
+  // opts: { now,
+  //         venues: [{ id, label, kind, ccy, ok, reason, mode, t }] — the
+  //           per-run venue ROSTER. It is passed separately from the quotes
+  //           so a venue that answered nothing is still published (a silent
+  //           absence would read as agreement). Callers with no venue layer
+  //           (the live server) simply omit it and the lane reports 0/0.
+  //       } — pure function of its inputs, probe-pinned.
   function assessIntegrity(items, opts) {
     opts = opts || {};
     const now = opts.now != null ? opts.now : 0;
@@ -441,14 +474,78 @@
       flags.push({ name: "(market)", lane: "staleness", severity: "alert", dev: r3(steamFresh / steamExpected),
         detail: "only " + steamFresh + "/" + steamExpected + " items have a fresh steam quote — possible venue loss" });
     }
+    // venue lane: third-venue corroboration (see the header note). FLAG-ONLY
+    // like every other lane — a divergence here never removes a mark, never
+    // reroutes the index and never touches a fixing. That is not politeness:
+    // third venues are THINNER than Steam, so auto-rejection would let an
+    // attacker knock honest marks out of the index by moving the cheaper
+    // market. Detection is published; consumers decide their own halt rules.
+    const vRoster = opts.venues || [];
+    const vEligible = (items || []).filter((it) => it.tier !== "art" && it.steamPrice > 0);
+    const vCorroboratedItems = new Set();
+    let venuesAnswered = 0;
+    const venueReport = [];
+    for (const v of vRoster) {
+      const row = { id: v.id, label: v.label || v.id, kind: v.kind || null, ccy: v.ccy || null,
+        mode: v.mode || null, status: "unavailable", reason: v.reason || null,
+        corroborated: "0/" + vEligible.length, medianRatio: null, watch: 0, alert: 0,
+        t: v.t != null ? v.t : null };
+      if (!v.ok) { venueReport.push(row); continue; } // unavailable ≠ agreement
+      venuesAnswered++;
+      const pairs = [];
+      for (const it of vEligible) {
+        const q = it.venues ? it.venues[v.id] : null;
+        if (!q || !(q.price > 0)) continue;
+        // a reading older than venueMaxAgeH is dropped, NOT carried: a stale
+        // quote that happens to agree is not corroboration
+        if (now && q.t != null && now - q.t > R.venueMaxAgeH * 3600000) continue;
+        pairs.push({ it: it, q: q, lr: Math.log(q.price / it.steamPrice) });
+      }
+      row.corroborated = pairs.length + "/" + vEligible.length;
+      if (pairs.length < R.venueMinQuotes) {
+        // too few names to trust a cross-sectional median — publish the
+        // coverage, raise nothing (the ratioMinDays discipline)
+        row.status = pairs.length ? "insufficient" : "no-quotes";
+        row.reason = row.reason || (pairs.length + " fresh quotes, below venueMinQuotes "
+          + R.venueMinQuotes + " — coverage published, no flags raised");
+        venueReport.push(row);
+        continue;
+      }
+      row.status = "ok";
+      // only a venue that actually got EVALUATED counts toward the summary's
+      // item coverage — quotes a venue held but could not be gated on are
+      // published in its own row, never folded into "corroborated"
+      for (const p of pairs) vCorroboratedItems.add(p.it.name);
+      const vMed = medianOf(pairs.map((p) => p.lr));
+      row.medianRatio = r3(Math.exp(vMed));
+      for (const p of pairs) {
+        const e = p.lr - vMed;
+        const mult = p.it.cat === "case" ? 1 : R.venueUniqueMult;
+        if (Math.abs(e) < R.venueDevWatch * mult) continue;
+        const sev = Math.abs(e) >= R.venueDevAlert * mult ? "alert" : "watch";
+        if (sev === "alert") row.alert++; else row.watch++;
+        flags.push({ name: p.it.name, lane: "venue", venue: v.id, severity: sev,
+          dev: r3(e), ratio: r3(Math.exp(p.lr)), venueMedianRatio: row.medianRatio,
+          steamPrice: p.it.steamPrice, venuePrice: p.q.price,
+          detail: (e < 0 ? "steam-rich" : "steam-lean") + " vs " + (v.label || v.id)
+            + " (" + (v.kind || "quote") + " " + p.q.price + " vs steam " + p.it.steamPrice
+            + " = " + r3(Math.exp(p.lr)) + "×, venue median " + row.medianRatio + "×)" });
+      }
+      venueReport.push(row);
+    }
+
     return {
-      version: R.version, t: now, rules: R, flags: flags,
+      version: R.version, t: now, rules: R, flags: flags, venues: venueReport,
       summary: {
         itemsAssessed: (items || []).length,
         ratioCorroborated: ratioCorroborated + "/" + ratioEligible,
         bookCorroborated: bookCorroborated + "/" + bookEligible,
         steamFresh: steamFresh + "/" + steamExpected,
         artEvidenced: artEvidenced + "/" + artTotal,
+        // honest per-run coverage: how many tracked items ANY third venue
+        // actually corroborated, and how many venues answered at all
+        venueCorroborated: vCorroboratedItems.size + "/" + vEligible.length,
+        venuesAnswered: venuesAnswered + "/" + vRoster.length,
         oldestSalesAgeDays: oldestSalesAgeDays,
         watch: flags.filter((f) => f.severity === "watch").length,
         alert: flags.filter((f) => f.severity === "alert").length,

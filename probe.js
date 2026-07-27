@@ -1713,6 +1713,321 @@ async function fixtureTransport(url, headers) {
   }
   // ═══ END F1 PINS ═════════════════════════════════════════════════════════
 
+  // ═══ BEGIN VENUE-LANE PINS — INTEG-1 third-venue corroboration ═══════════
+  // ONE contiguous block. Hand-computed, hermetic: the pure-lane pins call
+  // assessIntegrity directly, the wiring pins drive the real collector over a
+  // FIXTURE transport (never the network), and the last pin is the firewall
+  // proof — the same collector run with the lane ACTIVE and INACTIVE must
+  // publish a byte-identical index and byte-identical fixing hashes.
+  //
+  // Arithmetic used throughout (log space, base e):
+  //   ln(0.65) = −0.430783,  a clean venue quote is 0.65 × the steam mark
+  //   an item quoted 4.81532 against a steam mark of 10 is ratio 0.481532,
+  //   ln(0.481532/0.65) = −0.300000 exactly → watch for a case (≥0.25),
+  //   clean for a unique item (0.25 × venueUniqueMult 1.6 = 0.40)
+  //   an item quoted 3.5 against 10 is ratio 0.35,
+  //   ln(0.35/0.65) = −0.619039 → alert for a case (≥0.50)
+  console.log("— venue lane (INTEG-1 third-venue corroboration) —");
+  {
+    const VNOW = Date.UTC(2026, 6, 20, 12);
+    const vItem = (name, cat, venues) => ({ name: name, cat: cat, tier: null, steamPrice: 10,
+      quoteT: VNOW, salesT: VNOW, sales30: 20, ratioDays: [], book: null, venues: venues || null });
+    const vq = (price, t) => ({ vx: { price: price, t: t == null ? VNOW : t } });
+    const vRoster = (over) => [Object.assign({ id: "vx", label: "VX Market", kind: "ask",
+      ccy: "USD", ok: true, reason: null }, over || {})];
+    const vLane = (items, roster) => S.assessIntegrity(items, { now: VNOW, venues: roster || vRoster() });
+    const vFlags = (r) => r.flags.filter((f) => f.lane === "venue");
+    const vRow = (r, id) => (r.venues || []).find((x) => x.id === (id || "vx"));
+
+    // 1. a venue-wide level difference is NOT manipulation. Third venues sit
+    //    at a structural discount to Steam (measured 0.66× live) that also
+    //    moves with FX and fee changes — every item at 0.50× must flag NOTHING.
+    const vWide = vLane(["A", "B", "C", "D", "E", "F"].map((n) => vItem(n + " Case", "case", vq(5))));
+    ok(vFlags(vWide).length === 0 && vRow(vWide).status === "ok"
+      && vRow(vWide).medianRatio === 0.5 && vRow(vWide).corroborated === "6/6"
+      && vWide.summary.venueCorroborated === "6/6" && vWide.summary.venuesAnswered === "1/1",
+      "venue lane: a whole-venue discount/FX shift (every item 0.50×) flags NOTHING — the gate is median-relative, exactly like the ratio lane and the index clamp");
+
+    // 2. one name escaping its venue's own consensus flags — and an IDENTICAL
+    //    divergence on a unique item does not (venueUniqueMult: a venue quote
+    //    is the cheapest ask on ONE float/pattern variant, the steam mark is a
+    //    bucketed median — the asymmetry that made the book lane case-only)
+    const vOne = vLane([
+      vItem("H1 Case", "case", vq(6.5)), vItem("H2 Case", "case", vq(6.5)),
+      vItem("H3 Case", "case", vq(6.5)), vItem("H4 Case", "case", vq(6.5)),
+      vItem("H5 Case", "case", vq(6.5)),
+      vItem("P Case", "case", vq(4.81532)), vItem("U Skin", "skin", vq(4.81532))]);
+    const vOneF = vFlags(vOne);
+    ok(vOneF.length === 1 && vOneF[0].name === "P Case" && vOneF[0].severity === "watch"
+      && vOneF[0].venue === "vx" && vOneF[0].dev === -0.3 && vOneF[0].ratio === 0.482
+      && vOneF[0].steamPrice === 10 && vOneF[0].venuePrice === 4.81532
+      && /steam-rich vs VX Market/.test(vOneF[0].detail)
+      && vRow(vOne).medianRatio === 0.65 && vRow(vOne).watch === 1 && vRow(vOne).alert === 0,
+      "venue lane: dev −0.300 vs the venue median ratio → WATCH on the case, naming venue + both values + the ratio; the SAME ratio on a unique item stays clean (0.30 < 0.25×1.6)");
+    const vAlert = vLane([
+      vItem("H1 Case", "case", vq(6.5)), vItem("H2 Case", "case", vq(6.5)),
+      vItem("H3 Case", "case", vq(6.5)), vItem("H4 Case", "case", vq(6.5)),
+      vItem("H5 Case", "case", vq(6.5)), vItem("P Case", "case", vq(3.5))]);
+    const vAlertF = vFlags(vAlert);
+    ok(vAlertF.length === 1 && vAlertF[0].severity === "alert" && vAlertF[0].dev === -0.619
+      && vAlertF[0].ratio === 0.35 && vAlertF[0].venueMedianRatio === 0.65
+      && vRow(vAlert).alert === 1,
+      "venue lane: dev −0.619 (a steam mark 86% above what the venue consensus implies) → ALERT");
+
+    // 3. FLAG-ONLY: the lane's own output carries no instruction to drop a
+    //    mark, and its rules are published in every record (a consumer of the
+    //    fixings decides its own halt rule — auto-rejection would let an
+    //    attacker knock honest marks out via the THINNER venue)
+    ok(vAlert.rules.venueDevWatch === 0.25 && vAlert.rules.venueDevAlert === 0.5
+      && vAlert.rules.venueUniqueMult === 1.6 && vAlert.rules.venueMinQuotes === 5
+      && vAlert.rules.venueMaxAgeH === 48
+      && vAlertF.every((f) => !("reject" in f) && !("drop" in f) && !("price" in f)),
+      "venue lane thresholds are published in every record and flags carry no rejection/override field — surveillance, never a settlement input");
+
+    // 4. an UNAVAILABLE venue is reported unavailable — never silently
+    //    treated as agreement (the whole point of publishing the roster
+    //    separately from the quotes)
+    const vGone = vLane(["A", "B", "C", "D", "E", "F"].map((n) => vItem(n + " Case", "case", vq(6.5))),
+      [{ id: "vx", label: "VX Market", kind: "ask", ccy: "USD", ok: true },
+        { id: "vy", label: "VY Market", kind: "ask", ccy: "USD", ok: false, reason: "not configured — set VY_COOKIE" }]);
+    ok(vRow(vGone, "vy").status === "unavailable" && vRow(vGone, "vy").corroborated === "0/6"
+      && /not configured/.test(vRow(vGone, "vy").reason) && vRow(vGone, "vy").medianRatio === null
+      && vGone.summary.venuesAnswered === "1/2" && vFlags(vGone).length === 0,
+      "venue lane: an unavailable venue publishes status \"unavailable\" + its reason + 0/6 coverage — it is never counted as a venue that agreed");
+
+    // 5. coverage honesty: a venue holding fewer than venueMinQuotes fresh
+    //    quotes publishes them but is NOT gated on (no median to trust), and
+    //    its items do not inflate the summary's corroboration count
+    const vThin = vLane([
+      vItem("A Case", "case", { vx: { price: 6.5, t: VNOW }, vz: { price: 6.5, t: VNOW } }),
+      vItem("B Case", "case", vq(6.5)), vItem("C Case", "case", vq(6.5)),
+      vItem("D Case", "case", vq(6.5)), vItem("E Case", "case", vq(6.5)),
+      vItem("F Case", "case", { vz: { price: 6.5, t: VNOW } })],
+      [{ id: "vx", label: "VX Market", ok: true }, { id: "vz", label: "VZ Market", ok: true }]);
+    ok(vRow(vThin, "vx").status === "ok" && vRow(vThin, "vx").corroborated === "5/6"
+      && vRow(vThin, "vz").status === "insufficient" && vRow(vThin, "vz").corroborated === "2/6"
+      && /below venueMinQuotes 5/.test(vRow(vThin, "vz").reason)
+      && vThin.summary.venueCorroborated === "5/6" && vThin.summary.venuesAnswered === "2/2",
+      "venue lane coverage: 5/6 from the gated venue, 2/6 published-but-not-gated from the thin one — the item only VZ holds is not counted as corroborated (5/6, not 6/6)");
+
+    // 6. a stale reading is not agreement: past venueMaxAgeH it drops out of
+    //    the pairing and out of the coverage count
+    const vStaleT = VNOW - 49 * 3600000; // 49h > venueMaxAgeH 48
+    const vStale = vLane([
+      vItem("A Case", "case", vq(6.5)), vItem("B Case", "case", vq(6.5)),
+      vItem("C Case", "case", vq(6.5)), vItem("D Case", "case", vq(6.5)),
+      vItem("E Case", "case", vq(6.5)), vItem("S Case", "case", vq(3.5, vStaleT))]);
+    ok(vRow(vStale).corroborated === "5/6" && vFlags(vStale).length === 0
+      && vStale.summary.venueCorroborated === "5/6",
+      "venue lane: a reading older than venueMaxAgeH is dropped from coverage rather than carried — a stale quote that happens to agree is not corroboration");
+
+    // 7. art marks never enter the lane (they have no steam quote by nature —
+    //    grails sit above the ~$1,800 listing cap), same exclusion as ratio
+    const vArt = vLane([
+      vItem("A Case", "case", vq(6.5)), vItem("B Case", "case", vq(6.5)),
+      vItem("C Case", "case", vq(6.5)), vItem("D Case", "case", vq(6.5)),
+      vItem("E Case", "case", vq(6.5)),
+      Object.assign(vItem("Grail", "knife", vq(999)), { tier: "art", steamPrice: null })]);
+    ok(vRow(vArt).corroborated === "5/5" && vFlags(vArt).length === 0,
+      "venue lane: art/appraisal items are outside the lane (no steam mark to corroborate) — 5/5, not 5/6");
+
+    // 8. a caller with no venue layer at all (the live server) reports 0/0
+    //    rather than pretending the marks were corroborated
+    const vNone = S.assessIntegrity([vItem("A Case", "case", null)], { now: VNOW });
+    ok(Array.isArray(vNone.venues) && vNone.venues.length === 0
+      && vNone.summary.venueCorroborated === "0/1" && vNone.summary.venuesAnswered === "0/0",
+      "venue lane: a surface with no venue adapters publishes 0 venues and 0/1 corroboration — absence is stated, never implied agreement");
+
+    // ── adapter contract + fetchers (fixture transport, never the network) ──
+    const V_COOKIE = "session=PROBE-VENUE-SECRET";
+    const vCalls = [];
+    // BUFF fixture: id 4003 answers with a DIFFERENT market_hash_name than the
+    // map claims (a rotated/wrong id), id 4009 is a logged-out refusal.
+    // steam_price 10 / steam_price_cny 70 ⇒ implied FX 7.0, ask 104.65 CNY
+    // ⇒ 104.65/7 = 14.95 USD = 0.65 × the fixture's $23.00 steam mark.
+    const vBuffName = { 4001: "Fracture Case", 4002: "Recoil Case", 4003: "Chroma Case",
+      4004: "Gamma Case", 4005: "Clutch Case" };
+    const vCfg = { dump: true, waxpeer: false, buff: true };
+    const vDumpItems = ["Fracture Case", "Recoil Case", "Prisma Case", "Chroma Case",
+      "Gamma Case", "AK-47 | Redline (Field-Tested)"]; // NOTE: "Clutch Case" deliberately absent
+    async function venueTransport(url, headers) {
+      if (/waxpeer\.com|market\.csgo\.com|buff\.163\.com/.test(url))
+        vCalls.push({ url: url, cookie: !!(headers && headers.Cookie) });
+      if (url.includes("market.csgo.com/api/v2/prices")) {
+        if (!vCfg.dump) return { status: 503, body: "" };
+        return { status: 200, body: JSON.stringify({ success: true, currency: "USD",
+          items: vDumpItems.map((n) => ({ market_hash_name: n, price: "14.950", volume: "77" }))
+            .concat([{ market_hash_name: "Untracked Case", price: "1.000", volume: "1" },
+              { market_hash_name: "Zero Case", price: "0", volume: "0" }]) }) };
+      }
+      if (url.includes("api.waxpeer.com/v1/prices")) {
+        if (!vCfg.waxpeer) return { status: 503, body: "" };
+        return { status: 200, body: JSON.stringify({ success: true, items: [
+          { name: "Fracture Case", count: 12, min: 14950 },   // 1/1000 USD ⇒ $14.95
+          { name: "Zero Case", count: 0, min: 0 }] }) };       // nothing listed ⇒ never a $0 mark
+      }
+      if (url.includes("buff.163.com/api/market/goods/info")) {
+        if (!vCfg.buff) return { status: 503, body: "" };
+        const id = Number(/goods_id=(\d+)/.exec(url)[1]);
+        if (id === 4009) return { status: 200, body: JSON.stringify({ code: "Login Required", error: "请先登录" }) };
+        const nm = vBuffName[id];
+        if (!nm) return { status: 200, body: JSON.stringify({ code: "Invalid Argument" }) };
+        return { status: 200, body: JSON.stringify({ code: "OK", data: { id: id, market_hash_name: nm,
+          sell_min_price: "104.65", buy_max_price: "100.00", sell_num: 31, buy_num: 12,
+          goods_info: { steam_price: "10", steam_price_cny: "70" } } }) };
+      }
+      if (url.includes("buff.163.com/api/market/goods?")) {      // COOKIE-ONLY discovery
+        if (!headers || !headers.Cookie) return { status: 200, body: JSON.stringify({ code: "Login Required" }) };
+        const want = decodeURIComponent(/search=([^&]*)/.exec(url)[1]);
+        const hit = Object.keys(vBuffName).find((k) => vBuffName[k] === want && Number(k) === 4004);
+        return { status: 200, body: JSON.stringify({ code: "OK", data: { items: hit
+          ? [{ id: Number(hit), market_hash_name: want }] : [] } }) };
+      }
+      return fixtureTransport(url, headers);
+    }
+    M.setTransport(venueTransport);
+
+    // 9. availability gating mirrors STEAM_COOKIE exactly: no credential and
+    //    no verified id map ⇒ "not configured", and the credential-free
+    //    venues are always available
+    const vAdNo = M.venueAdapters({ env: {} });
+    const vAdPub = M.venueAdapters({ env: {}, buff: { ids: { _note: "doc", "Fracture Case": 4001 } } });
+    const vAdAuth = M.venueAdapters({ env: { BUFF_COOKIE: V_COOKIE } });
+    const vBuffOf = (l) => l.find((a) => a.id === "buff163");
+    ok(vAdNo.length === 3 && vAdNo.every((a) => typeof a.available === "function" && typeof a.quotes === "function" && typeof a.quote === "function")
+      && vAdNo[0].available().ok === true && vAdNo[1].available().ok === true
+      && vBuffOf(vAdNo).available().ok === false && /not configured/.test(vBuffOf(vAdNo).available().reason)
+      && vBuffOf(vAdPub).available().mode === "public" && vBuffOf(vAdAuth).available().mode === "auth"
+      && M.venueAdapters({ env: {}, buff: { ids: { _note: "doc only" } } })[2].available().ok === false,
+      "adapter registry: 3 venues implementing one contract; BUFF is gated exactly like STEAM_COOKIE (no cookie + no verified id map ⇒ \"not configured\"), the credential-free venues need nothing, and a documentation-only id map is not configuration");
+
+    // 10. unit parsing, pinned to the shapes verified live on 2026-07-27
+    const vTm = await M.marketCsgoPrices();
+    vCfg.waxpeer = true;
+    const vWx = await M.waxpeerPrices();
+    const vBuffInfo = await M.buffGoodsInfo(4001);
+    ok(vTm["Fracture Case"].price === 14.95 && vTm["Fracture Case"].qty === 77 && !("Zero Case" in vTm)
+      && vWx["Fracture Case"].price === 14.95 && vWx["Fracture Case"].qty === 12 && !("Zero Case" in vWx)
+      && vBuffInfo.ok === true && vBuffInfo.ask === 104.65 && vBuffInfo.bid === 100
+      && near(vBuffInfo.fxCnyPerUsd, 7, 1e-12) && vBuffInfo.name === "Fracture Case",
+      "fetchers parse the real payload shapes: market.csgo decimal STRINGS, waxpeer integer 1/1000 USD (14950 ⇒ $14.95), BUFF CNY asks + the steam_price/steam_price_cny pair as a pure FX rate; a 0 price is dropped, never published as a $0 mark");
+    const vBadCcy = await M.marketCsgoPrices(); // the good payload, then flip the currency
+    M.setTransport(async (url, headers) => (url.includes("market.csgo.com/api/v2/prices")
+      ? { status: 200, body: JSON.stringify({ success: true, currency: "EUR", items: [] }) }
+      : venueTransport(url, headers)));
+    const vCcyErr = await M.marketCsgoPrices().then(() => null, (e) => e.message);
+    M.setTransport(venueTransport);
+    ok(vBadCcy["Fracture Case"].price === 14.95 && /currency is EUR, not USD/.test(vCcyErr || ""),
+      "market.csgo refuses a non-USD payload instead of silently mis-scaling every quote");
+
+    // 11. the untrusted id map is verified name-for-name on every read
+    const vBuffAd = M.venueAdapters({ env: {},
+      buff: { ids: { "Fracture Case": 4001, "Prisma Case": 4003, "Snakebite Case": 4009 } } })[2];
+    const vBuffGot = await vBuffAd.quotes(["Fracture Case", "Prisma Case", "Snakebite Case"], {});
+    ok(Object.keys(vBuffGot.quotes).length === 1 && vBuffGot.quotes["Fracture Case"].price === 14.95
+      && vBuffGot.quotes["Fracture Case"].priceNative === 104.65
+      && vBuffGot.quotes["Fracture Case"].fxCnyPerUsd === 7 && !("Prisma Case" in vBuffGot.quotes)
+      && !("Snakebite Case" in vBuffGot.quotes) && vBuffGot.meta.read === 2 && vBuffGot.meta.fx === 7,
+      "BUFF goods ids are HINTS: id 4003 answers with a different market_hash_name than the map claims and its quote is DISCARDED; a logged-out refusal yields no quote — a wrong id costs coverage, it can never corroborate the wrong item");
+    const vSugar = await vBuffAd.quote("Fracture Case", {});
+    ok(vSugar && vSugar.price === 14.95 && typeof vSugar.t === "number"
+      && vSugar.source === "buff163:goods/info" && (await vBuffAd.quote("Prisma Case", {})) === null,
+      "adapter quote(name) sugar returns {price,t,source} or null, over the same batch contract");
+
+    // ── collector wiring + the FIREWALL proof ──────────────────────────────
+    // Two roots seeded IDENTICALLY. Root V runs with the venue lane fully
+    // live (a gated venue, a thin venue, an unavailable venue, a cookie in
+    // the environment); root N runs with every venue dead and nothing
+    // configured. Their published index and fixings must be byte-identical.
+    const vNames = ["Fracture Case", "Recoil Case", "Prisma Case", "Chroma Case",
+      "Gamma Case", "Clutch Case", "AK-47 | Redline (Field-Tested)"];
+    const vMakeRoot = (tag, withIds) => {
+      const r = path.join(os.tmpdir(), "hh-skin-venue-" + tag + "-" + Date.now());
+      fs.mkdirSync(path.join(r, "data", "history"), { recursive: true });
+      fs.writeFileSync(path.join(r, "watchlist.json"), JSON.stringify({ items: vNames, art: [] }));
+      for (const n of vNames)
+        seedFounding(path.join(r, "data"), n, { src: "steam", price: 23, lowest: 22.1, vol: 57 });
+      if (withIds) fs.writeFileSync(path.join(r, "data", "buff-ids.json"), JSON.stringify({
+        _note: "documentation key — must not count as configuration",
+        "Fracture Case": 4001, "Recoil Case": 4002, "Prisma Case": 4003, "Clutch Case": 4005 }));
+      return r;
+    };
+    const V_ROOT = vMakeRoot("on", true);
+    vCfg.waxpeer = false; // this venue is DEAD for the collector run (pin: unavailable ≠ agreement)
+    const vRun = await collect({ root: V_ROOT, env: { BUFF_COOKIE: V_COOKIE } });
+    const vInteg = vRun.manifest.market.integrity;
+    const vRowOf = (id) => vInteg.venues.find((x) => x.id === id);
+    ok(vInteg.venues.length === 3 && vRowOf("market.csgo").status === "ok"
+      && vRowOf("market.csgo").corroborated === "6/7" && vRowOf("market.csgo").medianRatio === 0.65
+      && vRowOf("waxpeer").status === "unavailable" && vRowOf("buff163").status === "insufficient"
+      && vRowOf("buff163").corroborated === "4/7" && vRowOf("buff163").mode === "auth"
+      && vInteg.summary.venueCorroborated === "6/7" && vInteg.summary.venuesAnswered === "2/3"
+      && vInteg.flags.filter((f) => f.lane === "venue").length === 0,
+      "collector publishes the venue lane honestly: 6/7 from the gated venue, a DEAD venue as \"unavailable\" (not agreement), BUFF published-but-not-gated at 4/7 — and Clutch Case, which only the ungated venue holds, is not counted (6/7, not 7/7)");
+    const vStore = JSON.parse(fs.readFileSync(path.join(V_ROOT, "data", "venues.json"), "utf8"));
+    const vIdsAfter = JSON.parse(fs.readFileSync(path.join(V_ROOT, "data", "buff-ids.json"), "utf8"));
+    const vFracRow = vRun.manifest.items.find((i) => i.name === "Fracture Case");
+    ok(vStore["market.csgo"].quotes[slug("Fracture Case")].price === 14.95
+      && vStore.buff163.quotes[slug("Fracture Case")].price === 14.95
+      && vIdsAfter["Gamma Case"] === 4004 && vIdsAfter._note
+      && vFracRow.venues["market.csgo"].price === 14.95
+      && fs.existsSync(path.join(V_ROOT, "data", "venue-cursor.json"))
+      && !fs.readFileSync(path.join(V_ROOT, "data", "history", slug("Fracture Case") + ".jsonl"), "utf8")
+        .split("\n").some((l) => l && /waxpeer|market\.csgo|buff/.test(l)),
+      "venue readings persist to data/venues.json + the manifest row and the cookie-resolved id is written back to buff-ids.json — and NEVER into the history jsonl (a third venue's ask must not reach assembleSeries' daily marks)");
+    // the cookie leaves as a request header and nowhere else
+    const vPublished = JSON.stringify([vRun.manifest, vStore, vIdsAfter,
+      JSON.parse(fs.readFileSync(path.join(V_ROOT, "data", "settlement.json"), "utf8"))]);
+    const vSearchCalls = vCalls.filter((c) => /goods\?/.test(c.url));
+    const vInfoCalls = vCalls.filter((c) => /goods\/info/.test(c.url));
+    ok(vSearchCalls.length > 0 && vSearchCalls.every((c) => c.cookie === true)
+      && vInfoCalls.length > 0 && vInfoCalls.every((c) => c.cookie === false)
+      && vPublished.indexOf("PROBE-VENUE-SECRET") === -1 && vPublished.indexOf(V_COOKIE) === -1,
+      "the BUFF cookie rides ONLY the discovery request (the public quote reads carry no Cookie header) and its value appears in no published file — not the manifest, the venue store, the id map or the settlement record");
+
+    // 12. a venue failure is garnish: every venue dead ⇒ the run still
+    //     snapshots everything and simply reports no corroboration
+    const N_ROOT = vMakeRoot("off", false);
+    vCfg.dump = false; vCfg.waxpeer = false; vCfg.buff = false;
+    const nRun = await collect({ root: N_ROOT, env: {} });
+    const nInteg = nRun.manifest.market.integrity;
+    ok(nRun.steamOk === vNames.length && nRun.manifest.errors.length === 0
+      && nInteg.summary.venuesAnswered === "0/3" && nInteg.summary.venueCorroborated === "0/7"
+      && nInteg.venues.every((v) => v.status === "unavailable")
+      && /not configured/.test(nRun.manifest.market.settlement.integrity.venues
+        .find((v) => v.id === "buff163").reason),
+      "every venue failing (dumps 503, no cookie, no id map) costs coverage and nothing else: the run still snapshots 7/7 items with 0 errors and publishes 0/3 venues answered");
+
+    // 13. THE FIREWALL. Lane active vs lane inactive: the published index and
+    //     every fixing's canonical preimage + hash must be byte-identical.
+    //     Flag-only means exactly this — the lane cannot move a settlement
+    //     number even when it is firing on every venue it has.
+    const vSet = JSON.parse(fs.readFileSync(path.join(V_ROOT, "data", "settlement.json"), "utf8"));
+    const nSet = JSON.parse(fs.readFileSync(path.join(N_ROOT, "data", "settlement.json"), "utf8"));
+    const vCanon = Object.keys(vSet.detail).map((k) => S.canonical(vSet.detail[k])).join("|");
+    const nCanon = Object.keys(nSet.detail).map((k) => S.canonical(nSet.detail[k])).join("|");
+    const vHashes = Object.keys(vSet.latest.fixings).map((k) => vSet.latest.fixings[k].hash).join("|");
+    const nHashes = Object.keys(nSet.latest.fixings).map((k) => nSet.latest.fixings[k].hash).join("|");
+    const vReHash = Object.keys(vSet.detail).map((k) =>
+      crypto.createHash("sha256").update(S.canonical(vSet.detail[k])).digest("hex")).join("|");
+    // `t` on a series day is the RUN INSTANT (two collector runs are never the
+    // same millisecond) — every index-bearing field is compared, that one is
+    // not, and it enters no fixing: canonical() hashes day/values only.
+    const vSeries = (m) => JSON.stringify(m.market.series.map((d) =>
+      Object.assign({}, d, { t: undefined })));
+    ok(vSeries(vRun.manifest) === vSeries(nRun.manifest)
+      && JSON.stringify(vRun.manifest.market.today) === JSON.stringify(nRun.manifest.market.today)
+      && JSON.stringify(vRun.manifest.market.weights) === JSON.stringify(nRun.manifest.market.weights)
+      && JSON.stringify(vRun.manifest.market.settlement.budget) === JSON.stringify(nRun.manifest.market.settlement.budget)
+      && vCanon === nCanon && vHashes === nHashes && vHashes === vReHash && vHashes.length > 0,
+      "FIREWALL: the venue lane ACTIVE and INACTIVE publish a byte-identical series, today block, index weights, manipulation budget, fixing canonical preimages and fixing hashes — corroboration is surveillance and can never move a settlement number");
+
+    fs.rmSync(V_ROOT, { recursive: true, force: true });
+    fs.rmSync(N_ROOT, { recursive: true, force: true });
+    M.setTransport(fixtureTransport);
+  }
+  // ═══ END VENUE-LANE PINS ═════════════════════════════════════════════════
+
   M.setTransport(null);
   fs.rmSync(DATA, { recursive: true, force: true });
 
