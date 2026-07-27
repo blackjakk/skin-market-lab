@@ -889,8 +889,12 @@ async function fixtureTransport(url, headers) {
       && iR1.body.count === 5 && iR1.body.profile === "probe-fake-user",
       "GET ?profile=<vanity> resolves → fetches → INV_REPORT (5 assets, 4 item types)");
     const iV = iR1.body.value;
-    ok(iV.total === 400 && iV.pricedCount === 3 && iV.unpricedCount === 1 && iV.rows.length === 4,
-      "inventoryValue: 2×QQ Skin@150 + A1 Case@11 + Dump Only@89 = $400, 1 item unpriced (never guessed)");
+    // priced/unpriced count UNITS (the canonical analytics semantics), so they
+    // sum to the inventory's unit count: 2×QQ + 1×A1 + 1×Dump = 4 priced units,
+    // 1 unpriced unit, 5 total — across 4 distinct names.
+    ok(iV.total === 400 && iV.pricedCount === 4 && iV.unpricedCount === 1
+      && iV.pricedCount + iV.unpricedCount === iR1.body.count && iV.rows.length === 4,
+      "inventoryValue: 2×QQ Skin@150 + A1 Case@11 + Dump Only@89 = $400; priced/unpriced are UNITS summing to count, 1 unit unpriced (never guessed)");
     ok(iV.rows[0].name === "QQ Skin" && iV.rows[0].qty === 2 && iV.rows[0].value === 300
       && iV.rows[3].name === "Unknown Sticker" && iV.rows[3].price === null,
       "rows sort by value desc, duplicate stacks merged to qty 2, the unpriceable item reports null");
@@ -955,9 +959,11 @@ async function fixtureTransport(url, headers) {
     // (8) upstream failures surface as the user's own next action
     invMode = "private";
     const iPriv = await iapi("/api/skins/inventory", { profile: "probe-fake-user" });
-    ok(iPriv.status === 404 && noStack(iPriv.body.error) && /private or hidden/.test(iPriv.body.error)
+    // 403 (not 404): the profile exists, its inventory is just hidden — a
+    // different user fix than a mistyped profile, so clients can branch on it
+    ok(iPriv.status === 403 && noStack(iPriv.body.error) && /private or hidden/.test(iPriv.body.error)
       && /Public/.test(iPriv.body.error),
-      "private inventory → 404 + Steam's own fix (\"set it to Public\"), never a 500 or a stack");
+      "private inventory → 403 + Steam's own fix (\"set it to Public\"), distinct from a 404 unknown profile, never a 500 or a stack");
     invMode = "ratelimited";
     const iRate = await iapi("/api/skins/inventory", { profile: "probe-fake-user" });
     ok(iRate.status === 429 && /rate-limiting/.test(iRate.body.error),

@@ -56,10 +56,13 @@ function writeJson(f, v) { fs.mkdirSync(path.dirname(f), { recursive: true }); f
 // ── inventory errors: plain English, never a stack trace ───────────────────
 // Every inventory failure carries the status the user's situation deserves:
 //   400 the input can't be used (no profile given, unparseable paste)
-//   404 no PUBLIC inventory to read (unknown profile, or private/hidden — the
-//       resource this API serves is "the public inventory", which then does
-//       not exist; Steam's own 403 is translated, not forwarded)
+//   403 the profile EXISTS but its inventory is private/hidden
+//   404 no such profile / no CS2 inventory on it
 //   429 Steam is rate-limiting us     502 anything upstream broke
+// 403 vs 404 is a real distinction, not pedantry: the user's next action is
+// completely different (flip a Steam privacy setting vs fix a mistyped
+// profile), so a client can branch on the status instead of string-matching
+// the message.
 function invErr(status, message) { const e = new Error(message); e.httpStatus = status; return e; }
 // A resolve that failed means we have no profile — default 404, not 502.
 function invResolveStatus(msg) {
@@ -72,7 +75,7 @@ function invResolveStatus(msg) {
 function invFetchStatus(msg) {
   const m = String(msg || "").toLowerCase();
   if (/rate.?limit|429|too many/.test(m)) return 429;
-  if (/private|hidden|not public/.test(m)) return 404;
+  if (/private|hidden|not public/.test(m)) return 403;
   if (/not found|no such|does ?n[o']t exist|404/.test(m)) return 404;
   return 502;
 }
