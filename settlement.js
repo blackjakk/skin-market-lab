@@ -10,6 +10,11 @@
 //
 //   SETTLE-CASE-7D   — mean of the last ≤7 daily Skindex values (min 3)
 //   SETTLE-CASE-30D  — mean of the last ≤30 daily values (min 10)
+//   SETTLE-CASE-90D  — mean of the last ≤90 daily values (min 30; ADDITIVE
+//                      SMLX-6 catalog entry, 2026-07-27 — accrues forward
+//                      under its own min-day gate, never backfilled; adding
+//                      a fixing changes no existing canonical form or hash,
+//                      which is why the methodology id does not bump)
 //   SETTLE-RATIO-30D — mean of the last ≤30 daily cash-ratio values (min 7)
 //
 // Averaged fixings are the anti-manipulation choice: to move a 7-day mean
@@ -33,6 +38,7 @@
   const FIXINGS = [
     { name: "SETTLE-CASE-7D", key: "caseIdx", window: 7, minDays: 3, decimals: 2 },
     { name: "SETTLE-CASE-30D", key: "caseIdx", window: 30, minDays: 10, decimals: 2 },
+    { name: "SETTLE-CASE-90D", key: "caseIdx", window: 90, minDays: 30, decimals: 2 },
     { name: "SETTLE-RATIO-30D", key: "cashRatio", window: 30, minDays: 7, decimals: 4 },
   ];
 
@@ -139,6 +145,7 @@
         costMove1pctDay: Math.round(a1.cost),
         costMove1pctFix7d: Math.round(a1.cost * 7),
         costMove1pctFix30d: Math.round(a1.cost * 30),
+        costMove1pctFix90d: Math.round(a1.cost * 90),
         note: (anyW ? "cheapest weight-accumulation attack" : "cheapest-k attack (equal-weight fallback)")
           + ": clamp caps one name's pull at weight×" + clampLog + " — a "
           + (targetMove * 100) + "% move needs ≥" + Math.round(weightNeeded * 100)
@@ -156,12 +163,53 @@
         costPerDay: Math.round(a2.cost),
         costFix7d: Math.round(a2.cost * 7),
         costFix30d: Math.round(a2.cost * 30),
+        costFix90d: Math.round(a2.cost * 90),
         note: "seize >50% of index weight → control the weighted-median clamp center → UNBOUNDED move ("
           + a2.k + " heaviest names here)",
       };
     }
     const ratioBurn30d = washFraction * ratioLegDollarVol30d * feeCash;
     const r2 = (v) => Math.round(v);
+    // ── open-interest capacity, per fixing ───────────────────────────────
+    // Safety condition: corrupting a fixing by Δ must cost more than it can
+    // pay. With LINEAR payoffs and the single-party worst case (one attacker
+    // holds the entire opposing side of open interest N), a Δ move pays
+    // N×Δ, so the fixing is safe while C(Δ) > N×Δ — i.e. N < C(Δ)/Δ.
+    //   boundConcentrated = costMove1pctFix / 0.01 — the bounded (clamped)
+    //     attack: the cheapest 1% push over the fixing window.
+    //   boundCapture = captureCostFix / 0.05 — center capture is UNBOUNDED
+    //     in Δ, so this bound only exists under a dispute/challenge layer
+    //     that caps the largest CREDIBLE print at Δcap = 5%; without such a
+    //     layer, total notional must stay below the raw capture cost.
+    //   capacityLinear = round(min(bounds) / κ), κ = 3 corruption margin —
+    //     the publishable OI line. Linear payoffs ONLY: near-the-money
+    //     binary/digital payoffs make a tiny Δ decisive → capacity ≈ zero.
+    // The ratio fixing has no capture model (no weighted-median center on a
+    // two-leg ratio) → bounded by its 1% thin-leg cost alone.
+    // Bounds divide the PUBLISHED (rounded) costs, so any counterparty
+    // reproduces the capacity line from this record's own numbers.
+    const OI_DELTA_CAP = 0.05, OI_KAPPA = 3;
+    const oiAssumptions = (hasCapture) => ({
+      payoffs: "linear payoffs only — near-the-money binary/digital payoffs make a tiny move decisive, so their capacity on these fixings is ≈ zero",
+      attacker: "single-party worst case: one attacker holds the entire opposing side of the open interest",
+      costs: "fee-burn floors (wash fraction × venue fee); inventory and price risk excluded, so true attack cost is higher",
+      deltaCap: hasCapture
+        ? "center capture is unbounded; the capture bound assumes a dispute layer capping the credible print at Δcap = 5%"
+        : "no capture model for this fixing — bound taken from its 1% cost alone (Δcap 5% not applicable)",
+      kappa: "κ = 3 corruption margin: capacityLinear = round(min(bounds) / 3)",
+      hedging: "independent ceiling: hedgeable OI ≈ the underlying's daily $ volume — capacity beyond what spot absorbs is unusable",
+    });
+    const oiFromCosts = (costCon, costCap) => {
+      const bc = costCon != null ? Math.round(costCon / targetMove) : null;
+      const bk = costCap != null ? Math.round(costCap / OI_DELTA_CAP) : null;
+      const bounds = [bc, bk].filter((v) => v != null);
+      return {
+        boundConcentrated: bc,
+        boundCapture: bk,
+        capacityLinear: bounds.length ? Math.round(Math.min.apply(null, bounds) / OI_KAPPA) : null,
+        assumptions: oiAssumptions(costCap != null),
+      };
+    };
     return {
       model: { washFraction: washFraction, feeSteam: feeSteam, feeCash: feeCash,
         clampLog: clampLog, targetMove: targetMove,
@@ -171,6 +219,7 @@
         costMove1pctDay: r2(perDayCase),
         costMove1pctFix7d: r2(perDayCase * 7),
         costMove1pctFix30d: r2(perDayCase * 30),
+        costMove1pctFix90d: r2(perDayCase * 90),
         coverage: caseCovered + "/" + caseTotal + " constituents priced",
         concentrated: concentrated,
         centerCapture: centerCapture,
@@ -180,6 +229,53 @@
         costMove1pctFix30d: r2(ratioBurn30d),
         coverage: ratioCovered + "/" + ratioTotal + " items with sales data",
       },
+      oiCapacity: {
+        "SETTLE-CASE-7D": concentrated ? oiFromCosts(concentrated.costMove1pctFix7d, centerCapture.costFix7d) : null,
+        "SETTLE-CASE-30D": concentrated ? oiFromCosts(concentrated.costMove1pctFix30d, centerCapture.costFix30d) : null,
+        "SETTLE-CASE-90D": concentrated ? oiFromCosts(concentrated.costMove1pctFix90d, centerCapture.costFix90d) : null,
+        "SETTLE-RATIO-30D": oiFromCosts(r2(ratioBurn30d), null),
+      },
+    };
+  }
+
+  // ── PERPMARK-CASE — EXPERIMENTAL perp-grade mark preview ─────────────────
+  // NOT a settlement fixing: no hash, no canonical form, outside the SMLX-6
+  // FIXINGS catalog, and nothing settles on it. Purpose: preview the
+  // liquidation-grade smoothing a perpetual venue would mark positions to —
+  // the median of the last ≤5 daily case-index prints, with a max-step guard:
+  // an update that would move the mark by more than 2% carries the previous
+  // mark instead and publishes guarded:true. The median means ONE corrupted
+  // print cannot move the mark at all, and the step guard stops even a
+  // 3-of-5-print corruption at 2% per update.
+  // Pure fold over the published daily series — no state, no clock — so any
+  // counterparty re-derives the entire mark path from data/index.json alone.
+  // Publication home: the NON-CANONICAL `latest` area of the settlement
+  // output (latest.perpmark — the collector attaches
+  // S.perpMark(market.series) beside the budget); the methodology page also
+  // re-derives it in-browser.
+  const PERPMARK = { name: "PERPMARK-CASE", key: "caseIdx", window: 5, maxStep: 0.02, decimals: 2, experimental: true };
+  function perpMark(series) {
+    const prints = (series || []).filter((s) => s[PERPMARK.key] != null && isFinite(s[PERPMARK.key]));
+    let mark = null, guarded = false, guardedUpdates = 0;
+    for (let i = 0; i < prints.length; i++) {
+      const win = prints.slice(Math.max(0, i - PERPMARK.window + 1), i + 1).map((s) => s[PERPMARK.key]);
+      const med = medianOf(win);
+      if (mark != null && Math.abs(med / mark - 1) > PERPMARK.maxStep) { guarded = true; guardedUpdates++; }
+      else { mark = med; guarded = false; }
+    }
+    return {
+      name: PERPMARK.name,
+      experimental: true,
+      label: "EXPERIMENTAL perp-grade mark preview — NOT a settlement fixing, no hash, outside the SMLX-6 canonical catalog",
+      value: mark != null ? roundTo(mark, PERPMARK.decimals) : null,
+      guarded: guarded,
+      guardedUpdates: guardedUpdates,
+      window: PERPMARK.window,
+      maxStep: PERPMARK.maxStep,
+      day: prints.length ? prints[prints.length - 1].day : null,
+      prints: prints.slice(-PERPMARK.window).map((s) => ({ day: s.day, v: roundTo(s[PERPMARK.key], PERPMARK.decimals) })),
+      note: "median of the last ≤" + PERPMARK.window + " daily case-index prints; |step| > "
+        + (PERPMARK.maxStep * 100) + "% per update carries the previous mark (guarded) — liquidation-grade smoothing",
     };
   }
 
@@ -320,5 +416,6 @@
 
   return { METHODOLOGY: METHODOLOGY, FIXINGS: FIXINGS, computeFixing: computeFixing,
     computeAll: computeAll, canonical: canonical, manipulationBudget: manipulationBudget,
+    PERPMARK: PERPMARK, perpMark: perpMark,
     INTEG_RULES: INTEG_RULES, assessIntegrity: assessIntegrity };
 });

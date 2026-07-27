@@ -45,7 +45,7 @@
   <h2>1 · What this is</h2>
   <p>Three price indices over Counter-Strike 2 items, plus <b>dated settlement fixings</b> computed from
   them by fixed rules. Every input is a file committed to this repository by an automated collector
-  (GitHub Actions, every 6 hours), so any counterparty can re-derive every published number
+  (GitHub Actions, every 3 hours), so any counterparty can re-derive every published number
   <b>bit-exactly</b> from public data — the index operator has no discretion and nothing to assert
   that you cannot check.</p>
 
@@ -116,9 +116,16 @@
     <tr><th scope="col">Fixing</th><th scope="col">Definition</th><th scope="col">Window</th><th scope="col">Min days</th><th scope="col">Decimals</th></tr>
     <tr><td>SETTLE-CASE-7D</td><td>Mean of daily Skindex</td><td>≤7 days</td><td>3</td><td>2</td></tr>
     <tr><td>SETTLE-CASE-30D</td><td>Mean of daily Skindex</td><td>≤30 days</td><td>10</td><td>2</td></tr>
+    <tr><td>SETTLE-CASE-90D</td><td>Mean of daily Skindex (additive catalog entry, 2026-07-27 — the
+      quarterly-dated tenor)</td><td>≤90 days</td><td>30</td><td>2</td></tr>
     <tr><td>SETTLE-RATIO-30D</td><td>Mean of daily cash ratio (median third-party realized ÷ Steam price)</td>
       <td>≤30 days</td><td>7</td><td>4</td></tr>
   </table></div>
+  <p>New fixings are <b>additive</b> catalog entries under the same methodology id: each accrues
+  forward from its introduction under its own min-day gate and is never backfilled, and adding one
+  changes no existing fixing's canonical form or hash. That is why SETTLE-CASE-90D (added
+  2026-07-27) did not bump SMLX-6 — a version bump without a computation change on existing fixings
+  would falsely signal a rules change to every hash verifier.</p>
   <p>Suitability, stated plainly: the case family has commodity-grade depth and is the only plausible
   candidate for continuous instruments; the cash ratio is a spread/convertibility mark suited to
   <b>dated</b> settlement only; the art index is <b>never</b> suitable for settlement (appraisal marks,
@@ -184,7 +191,7 @@
   </ul>
   <p>An N-day fixing multiplies either burn by N. Any credible instrument must cap open interest well
   below the concentrated figure — and its total notional well below the center-capture figure —
-  below.</p>
+  §5b turns these attack prices into that per-fixing capacity line.</p>
   <div id="budgetOut"><p class="muted">Loading live budget from data/settlement.json…</p></div>
 
   <h2>5a · Mark integrity (INTEG-1) — the tamper detector</h2>
@@ -224,6 +231,50 @@
   also jittered: scheduled collector runs add 0–10 min of random delay on top of GitHub's own
   scheduling noise, so the reading instants are not predictable enough to pin a fake price against.</p>
   <div id="integOut"><p class="muted">Loading live integrity state…</p></div>
+
+  <h2>5b · Open interest these fixings can support <span id="oiStamp" class="muted"></span></h2>
+  <p>§5 prices the attacks; this section converts those prices into a <b>capacity line</b>.
+  With linear payoffs, an attacker who holds the entire opposing side of open interest <i>N</i>
+  earns <i>N</i>×Δ from corrupting the fixing by Δ — so a fixing is safe while
+  <b>C(Δ)&nbsp;&gt;&nbsp;N×Δ</b> for every available attack, i.e. N&nbsp;&lt;&nbsp;C(Δ)/Δ. Three
+  ceilings apply to each fixing:</p>
+  <ul>
+    <li><b>Concentrated bound</b> — the winsorization clamp bounds what a ≥20%-weight coalition can
+    do, so the reference attack is the cheapest 1% push sustained over the fixing window:
+    bound&nbsp;=&nbsp;cost(1% move over the window)&nbsp;/&nbsp;0.01.</li>
+    <li><b>Capture bound</b> — center capture is <i>unbounded</i> in Δ, so on its own it caps
+    nothing. The bound assumes a <b>dispute layer</b> — the §6 verification recipe run by
+    counterparties, or an on-chain optimistic challenge window — under which the largest
+    <i>credible</i> print is Δcap&nbsp;=&nbsp;5%: bound&nbsp;=&nbsp;capture cost over the
+    window&nbsp;/&nbsp;0.05. <b>This bound exists only under such a layer</b>; without one, total
+    notional must stay below the raw center-capture cost itself.</li>
+    <li><b>Hedging ceiling</b> — independent of manipulation: a market maker can only lay off risk
+    in the underlying, so workable OI is additionally bounded by ≈ the basket's daily dollar volume
+    no matter what the attack math says.</li>
+  </ul>
+  <p>The published capacity is <b>min(bounds)&nbsp;/&nbsp;κ</b> with <b>κ&nbsp;=&nbsp;3</b> as
+  corruption margin — the attack must cost at least three times what it could win. This is a
+  <b>linear-payoff</b> number only: near-the-money binary or digital payoffs make a tiny Δ decisive,
+  so their capacity on these fixings is ≈ zero. The cash-ratio fixing has no capture model (there is
+  no weighted-median center on a two-leg ratio), so its bound comes from its 1% thin-leg cost alone.
+  Every bound divides the <i>published, rounded</i> costs in the settlement record itself, so any
+  counterparty reproduces the capacity line from the same bytes (<code>budget.oiCapacity</code>,
+  assumptions included per entry).</p>
+  <div id="oiOut"><p class="muted">Loading capacity from data/settlement.json…</p></div>
+
+  <h2>5c · PERPMARK-CASE — experimental mark preview (not a fixing)</h2>
+  <p><b>PERPMARK-CASE</b> is an <b>experimental</b> preview of a liquidation-grade mark — the
+  smoothing a perpetual venue would mark positions to — published for observation only: it is
+  <b>not a settlement fixing</b>, carries no hash, sits outside the SMLX-6 canonical catalog, and
+  nothing settles on it. Rule: the median of the last ≤5 daily case-index prints, with a max-step
+  guard — an update that would move the mark by more than 2% instead carries the previous mark and
+  publishes <code>guarded:true</code>. The median means one corrupted print cannot move the mark at
+  all, and the step guard stops even a 3-of-5-print corruption at 2% per update — the purpose is
+  exactly that: no single bad print can materially move a mark liquidations might reference. The
+  whole mark path is a pure fold over the published daily series, so it re-derives bit-exactly from
+  <code>data/index.json</code>; the value below is computed in your browser from that file and
+  compared against the collector-published copy when present.</p>
+  <div id="perpOut"><p class="muted">Loading…</p></div>
 
   <h2>6 · Verification — check the operator</h2>
   <p>Every fixing publishes a SHA-256 hash over its canonical form
@@ -322,10 +373,12 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       ["Move SETTLE-CASE-7D 1% (uniform)", money(c.costMove1pctFix7d), ""],
       ["Move SETTLE-CASE-30D 1% (uniform)", money(c.costMove1pctFix30d), ""],
     ];
+    if (c.costMove1pctFix90d != null) rows.push(["Move SETTLE-CASE-90D 1% (uniform)", money(c.costMove1pctFix90d), ""]);
     if (k) {
       rows.push(["Concentrated attack: cheapest " + k.kMin + " names, 1 day", money(k.costMove1pctDay), k.note || ""]);
       rows.push([{ html: "<b>Move SETTLE-CASE-7D 1% (concentrated floor)</b>" }, { html: "<b>" + money(k.costMove1pctFix7d) + "</b>" }, ""]);
       rows.push(["Move SETTLE-CASE-30D 1% (concentrated floor)", money(k.costMove1pctFix30d), ""]);
+      if (k.costMove1pctFix90d != null) rows.push(["Move SETTLE-CASE-90D 1% (concentrated floor)", money(k.costMove1pctFix90d), ""]);
     }
     if (cc) {
       rows.push([{ html: "<b>Center capture: seize &gt;50% of index weight</b>" }, { html: "<b>" + money(cc.costPerDay) + "/day</b>" }, cc.note || ""]);
@@ -336,6 +389,47 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       "<p class='muted'>Model: wash fraction " + b.model.washFraction + ", Steam fee " + b.model.feeSteam +
       ", cash fee " + b.model.feeCash + (b.model.clampLog != null ? ", clamp ±" + b.model.clampLog + " log" : "") +
       " — " + esc(b.model.note) + ".</p>";
+  }
+
+  // §5b — per-fixing OI capacity from budget.oiCapacity (published, rounded
+  // costs → bounds → min/κ). Renders "—" rows for records that predate it.
+  function oiHtml(b) {
+    var oc = b && b.oiCapacity;
+    if (!oc) return "<p class='muted'>Capacity figures publish with the next collector run.</p>";
+    var order = ["SETTLE-CASE-7D", "SETTLE-CASE-30D", "SETTLE-CASE-90D", "SETTLE-RATIO-30D"];
+    var rows = [];
+    for (var i = 0; i < order.length; i++) {
+      var cp = oc[order[i]];
+      if (!cp) continue;
+      rows.push([order[i], money(cp.boundConcentrated),
+        cp.boundCapture != null ? money(cp.boundCapture) : "— (no capture model)",
+        { html: "<b>" + money(cp.capacityLinear) + "</b>" }]);
+    }
+    if (!rows.length) return "<p class='muted'>Capacity figures publish with the next collector run.</p>";
+    return DS.specTable({ head: ["Fixing", "Concentrated bound (Δ=1%)", "Capture bound (Δcap=5%)", "OI capacity (min/κ, κ=3)"], rows: rows }) +
+      "<p class='muted'>Linear payoffs, single-party worst case, fee-burn floors — full assumptions ride inside each record's " +
+      "<code>budget.oiCapacity</code> entries. Hedging ceiling ≈ case basket daily $ volume (" +
+      (b.caseIndex ? money(b.caseIndex.dailyDollarVolume) : "—") + "/day).</p>";
+  }
+
+  // §5c — PERPMARK-CASE, re-derived in this browser from the committed series
+  // (pure fold), compared against the collector-published copy when present.
+  function renderPerp(idx) {
+    var el = document.getElementById("perpOut");
+    if (!idx || !idx.market || !idx.market.series || !idx.market.series.length) {
+      el.innerHTML = "<p class='muted'>data/index.json not published yet.</p>"; return;
+    }
+    var p = S.perpMark(idx.market.series);
+    var pub = settlement && settlement.latest && settlement.latest.perpmark;
+    var agree = pub ? (pub.value === p.value && pub.guarded === p.guarded) : null;
+    el.innerHTML = "<p>" + DS.badge({ label: "EXPERIMENTAL — NOT A FIXING" }) + " <b>" + esc(p.name) + "</b> = " +
+      (p.value != null ? esc(p.value) : "—") +
+      (p.guarded ? " · <b>guarded</b> (last update exceeded the 2% step; previous mark carried)" : "") +
+      " <span class='muted'>· last prints " + p.prints.map(function (x) { return esc(x.v); }).join(" → ") +
+      " · derived in this browser from data/index.json" +
+      (pub ? (agree ? " · matches the collector-published copy" : " · differs from the collector-published copy (files from different runs — retry after the next run)")
+        : " · collector-published copy not present in this record") +
+      "</span></p>";
   }
 
   function sha256Hex(str) {
@@ -366,14 +460,24 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   }
 
   var settlement = null;
+  var perpBoot = function () {
+    fetch("data/index.json", { cache: "no-store" }).then(function (r) { return r.json(); })
+      .then(renderPerp)
+      .catch(function () { document.getElementById("perpOut").innerHTML = "<p class='muted'>data/index.json not published yet.</p>"; });
+  };
   fetch("data/settlement.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
     settlement = j;
     document.getElementById("budgetOut").innerHTML = budgetHtml(j.latest && j.latest.budget);
     document.getElementById("budgetStamp").textContent = j.latest ? "· as of " + j.latest.day : "";
     document.getElementById("integOut").innerHTML = integHtml(j.latest && j.latest.integrity);
+    document.getElementById("oiOut").innerHTML = oiHtml(j.latest && j.latest.budget);
+    document.getElementById("oiStamp").textContent = j.latest ? "· as of " + j.latest.day : "";
+    perpBoot();
   }).catch(function () {
     document.getElementById("budgetOut").innerHTML = "<p class='muted'>data/settlement.json not published yet (first collector run pending).</p>";
     document.getElementById("integOut").innerHTML = "<p class='muted'>No integrity record yet.</p>";
+    document.getElementById("oiOut").innerHTML = "<p class='muted'>No capacity record yet.</p>";
+    perpBoot();
   });
 
   fetch("data/settlements.jsonl", { cache: "no-store" }).then(function (r) { return r.text(); }).then(function (txt) {
@@ -382,11 +486,11 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       try {
         var f = JSON.parse(ln), fx = f.fixings || {};
         var cell = function (n) { var x = fx[n]; return x && x.value != null ? x.value : (x ? (x.accruing || "—") : "—"); };
-        return [f.day, cell("SETTLE-CASE-7D"), cell("SETTLE-CASE-30D"), cell("SETTLE-RATIO-30D")];
+        return [f.day, cell("SETTLE-CASE-7D"), cell("SETTLE-CASE-30D"), cell("SETTLE-CASE-90D"), cell("SETTLE-RATIO-30D")];
       } catch (e) { return null; }
     }).filter(Boolean);
     document.getElementById("histOut").innerHTML = rows.length
-      ? DS.specTable({ head: ["Day", "CASE-7D", "CASE-30D", "RATIO-30D"], rows: rows })
+      ? DS.specTable({ head: ["Day", "CASE-7D", "CASE-30D", "CASE-90D", "RATIO-30D"], rows: rows })
       : "No fixing history yet.";
   }).catch(function () { document.getElementById("histOut").textContent = "No fixing history yet."; });
 
