@@ -691,6 +691,134 @@ async function fixtureTransport(url, headers) {
   const c2 = await collect({ root: CROOT });
   const hl2 = fs.readFileSync(path.join(CROOT, "data", "history", slug(NAME) + ".jsonl"), "utf8").trim().split("\n");
   ok(hl2.length === hl1.length && c2.manifest.items.length === 4, "immediate re-run dedupes snapshots, still refreshes the manifest");
+
+  // ═════════════════════════════════════════════════════════════════════════
+  // M2 PIN BLOCK (lane M2, feat/market-index) — SMLX-7 market-index preview
+  // + center-corroboration observation lane. ONE contiguous block, hand-
+  // computed fixtures. The byte-identity pins embed the EXACT pre-change
+  // output of the shipped `mo` fixture (captured from the committed tree
+  // before this lane's diff), so any drift in an already-published field
+  // fails loudly — the preview must stay strictly ADDITIVE.
+  console.log("— M2: SMLX-7 preview + center corroboration —");
+  // (1) byte-identity of every pre-existing published field on the shipped
+  // `mo` fixture (same inputs as the analytics-section pin above)
+  const m2ProjRow = (r) => JSON.stringify({ day: r.day, t: r.t, caseIdx: r.caseIdx,
+    liqIdx: r.liqIdx, artIdx: r.artIdx, cashRatio: r.cashRatio, volTotal: r.volTotal });
+  const m2mo = A.marketOverview([
+    { name: "A Case", cat: "case", daily: [{ day: A.dayKey(T0), t: T0, price: 10, vol: 100 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 11, vol: 120 }], skinportDaily: [{ day: A.dayKey(T0 + D), t: T0 + D, price: 8.8, vol: 5 }] },
+    { name: "B Case", cat: "case", daily: [{ day: A.dayKey(T0), t: T0, price: 100, vol: 10 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 121, vol: 12 }], skinportDaily: [] },
+    { name: "C Case", cat: "case", daily: [{ day: A.dayKey(T0), t: T0, price: 5, vol: 0 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 5, vol: 0 }], skinportDaily: [] },
+    { name: "S", cat: "skin", daily: [{ day: A.dayKey(T0), t: T0, price: 50, vol: 7 }, { day: A.dayKey(T0 + D), t: T0 + D, price: 40, vol: 7 }], skinportDaily: [] },
+  ]);
+  ok(m2ProjRow(m2mo.series[0]) === '{"day":"2026-01-01","t":1767225600000,"caseIdx":100,"liqIdx":100,"artIdx":null,"cashRatio":null,"volTotal":117}'
+    && m2ProjRow(m2mo.series[1]) === '{"day":"2026-01-02","t":1767312000000,"caseIdx":110,"liqIdx":80,"artIdx":null,"cashRatio":0.8,"volTotal":139}',
+    "M2 byte-identity: shipped series fields on the `mo` fixture are byte-exact vs the pre-preview capture");
+  ok(JSON.stringify({ day: m2mo.today.day, caseIdx: m2mo.today.caseIdx, idx1: m2mo.today.idx1, idx7: m2mo.today.idx7,
+    liqIdx: m2mo.today.liqIdx, artIdx: m2mo.today.artIdx, cashRatio: m2mo.today.cashRatio, volTotal: m2mo.today.volTotal })
+    === '{"day":"2026-01-02","caseIdx":110,"idx1":0.10000000000000009,"idx7":null,"liqIdx":80,"artIdx":null,"cashRatio":0.8,"volTotal":139}'
+    && JSON.stringify(m2mo.weights) === '{"case":{"A Case":0.333333,"B Case":0.333333,"C Case":0.333333},"liq":{"S":1}}',
+    "M2 byte-identity: shipped today{} fields + published weights byte-exact (weights shape untouched)");
+  ok(Object.keys(m2mo.series[0]).join(",") === "day,t,caseIdx,liqIdx,artIdx,cashRatio,volTotal,marketIdx",
+    "M2 additive-only: series rows keep every shipped key in place; marketIdx is APPENDED");
+  // mo combined universe (A,B,C cases + liquid S), day 2, equal weights:
+  // rets [ln1.1, 2ln1.1, 0, ln0.8]; weighted median = (0 + ln1.1)/2 =
+  // 0.0476551; clamp ±0.05 → [ln1.1, med+.05, 0, med−.05] → mean
+  // 0.04765509 → 100·e^0.04765509 = 104.88
+  ok(near(m2mo.series[1].marketIdx, 104.88, 0.01) && m2mo.today.marketIdx === m2mo.series[1].marketIdx,
+    "SMLX-7 preview: combined case+liq index under the exact SMLX-6 rules (104.88); today mirrors the last day");
+  // (2) preview construction: breadth, floors, seasoning, clamp — post-
+  // adoption fixture (founding marks on the adoption day, per seedFounding)
+  const M2A = Date.UTC(2026, 6, 25), M2B = Date.UTC(2026, 8, 1), M2C = Date.UTC(2026, 8, 2);
+  const m2mk = A.marketOverview([
+    { name: "MA Case", cat: "case", daily: [dcase(M2A, 10), dcase(M2B, 10), dcase(M2C, 11)], skinportDaily: [] },
+    { name: "MB Case", cat: "case", daily: [dcase(M2A, 10), dcase(M2B, 10), dcase(M2C, 10)], skinportDaily: [] },
+    { name: "ML Skin", cat: "skin", daily: [dcase(M2A, 50), dcase(M2B, 50), dcase(M2C, 50)], skinportDaily: [] },
+    { name: "MP Skin", cat: "skin", daily: [dcase(M2A, 20), dcase(M2B, 20), dcase(M2C, 30)], skinportDaily: [] },
+    { name: "MN Case", cat: "case", daily: [dcase(M2B, 999), dcase(M2C, 5)], skinportDaily: [] },
+  ]);
+  // day 3 combined: rets [ln1.1, 0, 0, ln1.5]; equal weights (no lagged
+  // volume) → weighted median (0+ln1.1)/2 = 0.0476551; MP clamps to
+  // med+0.05 = 0.0976551 → mean 0.04824132 → 104.94. The 2-name case
+  // family is UNDER minContributors → caseIdx carries at 100 the whole way
+  // (combined breadth is the point of the preview); the seasoning
+  // newcomer's 999→5 crash moves NOTHING.
+  ok(near(m2mk.series[2].marketIdx, 104.94, 0.01) && m2mk.series[2].caseIdx === 100 && m2mk.series[1].marketIdx === 100,
+    "SMLX-7 preview: liquids give the breadth cases lack (marketIdx 104.94 while caseIdx carries); +50% outlier clamped; seasoning newcomer inert");
+  ok(near(m2mk.series[2].liqIdx, 122.47, 0.01) && m2mk.today.marketIdx === m2mk.series[2].marketIdx,
+    "SMLX-7 preview: liq family itself unchanged by the combined pass (√1.5 → 122.47)");
+  ok(m2mk.marketPreview && m2mk.marketPreview.label === "SMLX-7 draft preview — NOT a settlement input"
+    && m2mk.marketPreview.universe.members === 5 && m2mk.marketPreview.universe.caseMembers === 3
+    && m2mk.marketPreview.universe.liqMembers === 2,
+    "marketPreview published with the exact NOT-a-settlement-input label + universe census");
+  ok(Object.keys(m2mk.marketPreview.weights).length === 5 && near(m2mk.marketPreview.weights["MA Case"], 0.2, 1e-9)
+    && near(m2mk.marketPreview.weights["MP Skin"], 0.2, 1e-9),
+    "capture-economics input: combined-universe current-month weights published (equal 1/5 pre-volume; budget wiring at integration)");
+  ok(A.INDEX_RULES.marketPreview && A.INDEX_RULES.marketPreview.centerToleranceLog === 0.03
+    && A.INDEX_RULES.marketPreview.label === "SMLX-7 draft preview — NOT a settlement input"
+    && A.INDEX_RULES.marketPreview.seasoningDays === A.INDEX_RULES.seasoningDays
+    && A.INDEX_RULES.marketPreview.clampLog === A.INDEX_RULES.clampLog
+    && A.INDEX_RULES.marketPreview.minPrice === A.INDEX_RULES.minPrice
+    && A.INDEX_RULES.marketPreview.minContributors === A.INDEX_RULES.minContributors
+    && A.INDEX_RULES.version === "SMLX-6" && A.INDEX_RULES.adoption === "2026-07-25",
+    "INDEX_RULES.marketPreview additive (params = load-time copies of SMLX-6); shipped SMLX-6 fields untouched");
+  // (3) center-corroboration lane. NO-FLAG: steam and cash move together
+  // (both centers ln1.1 → dev 0). FLAG: a market-wide steam pump with cash
+  // flat — the ratio lane's cross-sectional gate absorbs exactly this move
+  // (see the gWide pin above), but it drags the steam CENTER 0.0953 log off
+  // the cash center → the lane observes what INTEG-1 cannot.
+  const m2cc = (spPrices) => A.marketOverview([1, 2, 3, 4].map((n) => ({
+    name: "CC" + n + " Case", cat: "case",
+    daily: [dcase(T0, 10), dcase(T0 + D, 11)],
+    skinportDaily: spPrices ? [{ day: A.dayKey(T0), t: T0, price: spPrices[0], vol: 5 },
+      { day: A.dayKey(T0 + D), t: T0 + D, price: spPrices[1], vol: 5 }] : [],
+  })));
+  const m2ccOk = m2cc([8, 8.8]);
+  const m2ccOkCheck = m2ccOk.marketPreview.centerCheck;
+  ok(m2ccOkCheck.stats.daysObserved === 1 && m2ccOkCheck.stats.daysWouldBind === 0
+    && m2ccOkCheck.flags.length === 0 && m2ccOkCheck.latest.devLog === 0
+    && m2ccOkCheck.latest.steamCenter === 0.0953 && m2ccOkCheck.latest.cashCenter === 0.0953,
+    "center lane: cash-corroborated day (both centers ln1.1) observes clean — no flag, 0/1 would-bind");
+  const m2ccPump = m2cc([8, 8]);
+  const m2ccPumpCheck = m2ccPump.marketPreview.centerCheck;
+  ok(m2ccPumpCheck.stats.daysObserved === 1 && m2ccPumpCheck.stats.daysWouldBind === 1
+    && m2ccPumpCheck.boundDays.length === 1 && near(m2ccPumpCheck.latest.devLog, 0.0953, 1e-4)
+    && near(m2ccPump.series[1].marketIdx, 110, 0.01),
+    "center lane: market-wide steam pump vs flat cash binds (dev 0.0953 > 0.03) while the clamp passes it (index 110) — the gap this lane exists for");
+  const m2flag = m2ccPumpCheck.flags[0];
+  ok(m2ccPumpCheck.flags.length === 1 && m2flag.name === "(market)" && m2flag.lane === "center"
+    && m2flag.severity === "watch" && near(m2flag.dev, 0.0953, 1e-4)
+    && /SMLX-7 observation phase/.test(m2flag.detail) && /must corroborate/.test(m2flag.detail)
+    && /the day carries/.test(m2flag.detail) && /flag-only/.test(m2flag.detail),
+    "center lane flag row: INTEG-1 shape, watch severity, and the exact observation-phase language (corroborate or the day carries; flag-only)");
+  const m2ccThin = A.marketOverview([1, 2, 3, 4].map((n) => ({
+    name: "CT" + n + " Case", cat: "case",
+    daily: [dcase(T0, 10), dcase(T0 + D, 11)],
+    skinportDaily: n <= 2 ? [{ day: A.dayKey(T0), t: T0, price: 8, vol: 5 },
+      { day: A.dayKey(T0 + D), t: T0 + D, price: 8, vol: 5 }] : [],
+  })));
+  const m2ccThinCheck = m2ccThin.marketPreview.centerCheck;
+  ok(m2ccThinCheck.stats.daysObserved === 0 && m2ccThinCheck.flags.length === 0 && m2ccThinCheck.latest === null,
+    "center lane: under minContributors cash names the day is NOT an observation (2 of 4 have sales) — never flags on thin evidence");
+  // (4) collector integration: preview + merged lane ride the published
+  // artifacts. Fixture has one skinport day → zero cash return pairs → the
+  // lane observes nothing, adds no flag, and publishes honest 0/0 counts
+  // into BOTH data/index.json and the settlement record's integrity block.
+  const m2cm = c1.manifest.market;
+  ok(m2cm.today.marketIdx === 100 && m2cm.marketPreview
+    && m2cm.marketPreview.label === "SMLX-7 draft preview — NOT a settlement input"
+    && m2cm.marketPreview.universe.members === 3 && m2cm.marketPreview.universe.caseMembers === 1
+    && m2cm.marketPreview.universe.liqMembers === 2,
+    "collector publishes the preview (1 case + 2 liquids; index carries at 100 — never ≥3 paired marks)");
+  ok(Object.keys(m2cm.marketPreview.weights).length === 3
+    && Object.values(m2cm.marketPreview.weights).every((w) => w > 0 && w <= 1),
+    "collector publishes combined-universe weights for all 3 members (capture-economics input)");
+  ok(m2cm.integrity.summary.centerCorroborated === "0/0" && m2cm.integrity.summary.centerDaysWouldBind === 0
+    && m2cm.integrity.flags.length === 0 && m2cm.integrity.summary.watch === 0 && m2cm.integrity.summary.alert === 0,
+    "center lane merged into INTEG report as an ADDITIVE lane (0/0 observed, no flags, counts intact)");
+  ok(setPub.latest.integrity.summary.centerCorroborated === "0/0"
+    && JSON.parse(fs.readFileSync(path.join(CROOT, "data", "index.json"), "utf8")).market.marketPreview.centerCheck.stats.daysObserved === 0,
+    "running observed/would-bind counts persist per run (settlement.json integrity block + data/index.json)");
+  // ═══ end M2 pin block ═════════════════════════════════════════════════════
   // ── witness protocol against the collector's published tree ──────────────
   console.log("— witness —");
   const readLocal = async (rel) => {

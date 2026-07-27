@@ -200,6 +200,24 @@ async function collect(opts) {
   // staleness surveillance. FLAG-ONLY — never removes a mark (see the
   // assessIntegrity comment for why auto-rejection would be a new attack lever)
   manifest.market.integrity = S.assessIntegrity(integItems, { now: Date.now() });
+  // SMLX-7 center-corroboration lane (observation phase, flag-only):
+  // computed by marketOverview (analytics owns the weighted-median
+  // construction) and merged here as an ADDITIVE lane in the INTEG report —
+  // assessIntegrity's own lanes are untouched, flags still never remove a
+  // mark or reroute the index, and the running observed/would-bind counts
+  // publish per run (they ride into settlement.json's integrity block and
+  // settlements.jsonl below, so the SMLX-7 hardening decision has a
+  // committed evidence trail).
+  const ccM = manifest.market.marketPreview && manifest.market.marketPreview.centerCheck;
+  if (ccM) {
+    const integM = manifest.market.integrity;
+    integM.flags = integM.flags.concat(ccM.flags || []);
+    integM.summary.watch = integM.flags.filter((f) => f.severity === "watch").length;
+    integM.summary.alert = integM.flags.filter((f) => f.severity === "alert").length;
+    integM.summary.centerCorroborated = (ccM.stats.daysObserved - ccM.stats.daysWouldBind)
+      + "/" + ccM.stats.daysObserved;
+    integM.summary.centerDaysWouldBind = ccM.stats.daysWouldBind;
+  }
   if (manifest.market.integrity.flags.length)
     console.log("[collect] INTEGRITY FLAGS: " + manifest.market.integrity.flags
       .map((f) => f.severity + " " + f.lane + " " + f.name).join("; "));
