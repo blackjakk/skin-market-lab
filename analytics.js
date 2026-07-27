@@ -819,12 +819,152 @@
       covered: covered, total: total };
   }
 
+  // ── inventory analytics (DISPLAY layer — never an index or fixing input) ─
+  // Pure: no clock, no network, no randomness. `items` are the merged rows
+  // market.js's steamInventory returns ({name, qty, ...}); anything else on
+  // the row is ignored. Holdings are aggregated BY NAME first (two Steam
+  // rows can share a market_hash_name — e.g. the same skin with and without
+  // stickers — and a portfolio table that lists a name twice reads as a bug).
+  // NEVER fabricate a price or a day: a name we cannot price is reported as
+  // unpriced, a day nobody has a mark for is simply not in the series.
+  function invHoldings(items) {
+    const by = new Map();
+    for (const it of items || []) {
+      if (!it) continue;
+      const name = typeof it.name === "string" ? it.name.trim() : "";
+      if (!name) continue;
+      const q = it.qty == null ? 1 : Number(it.qty);
+      if (!isFinite(q) || q <= 0) continue;
+      by.set(name, (by.get(name) || 0) + q);
+    }
+    return by;
+  }
+
+  // priceOf(name) → number|null (a live/current price). Returns
+  // { total, pricedCount, unpricedCount, rows } with rows one-per-NAME sorted
+  // by value desc (unpriced rows last, then name asc — a total order, so the
+  // output is byte-stable). pricedCount/unpricedCount are UNITS, not names,
+  // so they sum to the inventory's item count.
+  function inventoryValue(items, priceOf) {
+    const px = typeof priceOf === "function" ? priceOf : function () { return null; };
+    const rows = [];
+    let total = 0, pricedCount = 0, unpricedCount = 0;
+    for (const e of invHoldings(items)) {
+      const name = e[0], qty = e[1];
+      const raw = px(name);
+      const price = typeof raw === "number" && isFinite(raw) && raw > 0 ? raw : null;
+      if (price == null) {
+        unpricedCount += qty;
+        rows.push({ name: name, qty: qty, price: null, value: null });
+        continue;
+      }
+      const value = round2(price * qty);
+      total += value;
+      pricedCount += qty;
+      rows.push({ name: name, qty: qty, price: price, value: value });
+    }
+    rows.sort(function (a, b) {
+      const av = a.value == null ? -1 : a.value, bv = b.value == null ? -1 : b.value;
+      if (av !== bv) return bv - av;
+      return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+    });
+    return { total: round2(total), pricedCount: pricedCount,
+      unpricedCount: unpricedCount, rows: rows };
+  }
+
+  // Rows a caller may hand us as history: {day:"YYYY-MM-DD", price} or the
+  // collected/backtest shape {t, price}. Bad rows and non-positive prices are
+  // dropped (never repaired); a repeated day keeps the LAST row given.
+  function invHistoryMarks(rows) {
+    if (!Array.isArray(rows)) return [];
+    const byDay = new Map();
+    for (const r of rows) {
+      if (!r) continue;
+      const day = typeof r.day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(r.day) ? r.day
+        : (r.t != null && isFinite(r.t) ? dayKey(r.t) : null);
+      const price = Number(r.price);
+      if (day == null || !isFinite(price) || price <= 0) continue;
+      byDay.set(day, price);
+    }
+    return Array.from(byDay.entries())
+      .sort(function (a, b) { return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0; })
+      .map(function (e) { return { day: e[0], price: e[1] }; });
+  }
+
+  // What TODAY's holdings would have been worth on each past day — the
+  // inventory's "performance" line. historyOf(name) → [{day, price}] | null;
+  // opts.priceOf(name) → number|null supplies today's price for coverage.
+  //
+  // SEMANTICS (easy to get subtly wrong — this is the contract):
+  //  · today's QUANTITIES are held fixed and valued at each past day's price
+  //    (a like-for-like basket, not a trade ledger);
+  //  · the day axis is the UNION of the days that actually appear in the
+  //    items' own histories — no day is invented, none is interpolated;
+  //  · a day sums ONLY the items with a mark ON or BEFORE it, so an item
+  //    enters the line on its own first mark and contributes nothing earlier;
+  //  · within one item's series the last known mark carries forward across
+  //    gaps; it NEVER carries across items (one item's price can never stand
+  //    in for another's).
+  // coveragePct = the share of today's total VALUE (not of the item count)
+  // that has usable history, rounded to 0.1 — the honesty number the UI must
+  // show beside the chart. Each name is valued with the SAME price on both
+  // sides of that ratio (opts.priceOf, else its own last mark), so it is a
+  // true share. Without opts.priceOf, names with no history have no value at
+  // all and coverage is measured over the reconstructable holdings only (it
+  // will read high) — callers that have prices should always pass them.
+  function inventoryReconstruction(items, historyOf, opts) {
+    opts = opts || {};
+    const hist = typeof historyOf === "function" ? historyOf : function () { return null; };
+    const px = typeof opts.priceOf === "function" ? opts.priceOf : null;
+    const held = [];                 // items WITH history: { qty, marks }
+    const daySet = new Set();
+    let pricedNames = 0, totalNames = 0, covered = 0, todayTotal = 0;
+    for (const e of invHoldings(items)) {
+      const name = e[0], qty = e[1];
+      totalNames++;
+      const marks = invHistoryMarks(hist(name));
+      let today = null;
+      if (px) {
+        const p = px(name);
+        if (typeof p === "number" && isFinite(p) && p > 0) today = p;
+      }
+      if (today == null && marks.length) today = marks[marks.length - 1].price;
+      const worth = today == null ? 0 : today * qty;
+      todayTotal += worth;
+      if (!marks.length) continue;
+      pricedNames++;
+      covered += worth;
+      held.push({ qty: qty, marks: marks });
+      for (const m of marks) daySet.add(m.day);
+    }
+    const axis = Array.from(daySet).sort();
+    const cursor = held.map(function () { return -1; });
+    const days = [];
+    for (const day of axis) {
+      let v = 0;
+      for (let i = 0; i < held.length; i++) {
+        const marks = held[i].marks;
+        let k = cursor[i];
+        while (k + 1 < marks.length && marks[k + 1].day <= day) k++;
+        cursor[i] = k;
+        if (k >= 0) v += marks[k].price * held[i].qty;   // carry-forward, within this item only
+      }
+      days.push({ day: day, value: round2(v) });
+    }
+    return {
+      days: days,
+      coveragePct: todayTotal > 0 ? Math.round((covered / todayTotal) * 1000) / 10 : 0,
+      pricedNames: pricedNames, totalNames: totalNames,
+    };
+  }
+
   return {
     parseMoney: parseMoney, parseCount: parseCount, dayKey: dayKey, median: median, toDaily: toDaily,
     marketOverview: marketOverview, includedFromDay: includedFromDay, INDEX_RULES: INDEX_RULES,
     deepHistoryBase: deepHistoryBase,
     cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily, btcSessionSplit: btcSessionSplit,
     benchmarkGrowth: benchmarkGrowth,
+    inventoryValue: inventoryValue, inventoryReconstruction: inventoryReconstruction,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,
     maxDrawdown: maxDrawdown, currentDrawdown: currentDrawdown,

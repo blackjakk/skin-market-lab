@@ -1055,6 +1055,110 @@ async function fixtureTransport(url, headers) {
     && A.INDEX_RULES.seasoningDays === 365 && A.INDEX_RULES.clampLog === 0.05 && A.INDEX_RULES.weightMinObs === 5,
     "backtest variant overrides fully restore the shipped INDEX_RULES (no leakage into production math)");
 
+  // ═══ BEGIN LANE S1 PINS — inventory data layer (market.js + analytics.js) ═
+  // Hand-computed, hermetic: a FIXTURE transport (never the network) and the
+  // obviously-fake SteamID 76561190000000001 — a real one is personal data.
+  console.log("— inventory (S1) —");
+  const INV_ID = "76561190000000001", INV_PRIV = "76561190000000002", INV_BUSY = "76561190000000003";
+  let invCalls = 0;
+  // Steam's real payload shape: `assets` carry the counts, `descriptions`
+  // carry the names, joined on classid_instanceid. Three assets share the
+  // case's key (1+1+3 = qty 5), one asset has NO description at all.
+  const invPayload = {
+    success: 1, total_inventory_count: 6,
+    assets: [
+      { classid: "1", instanceid: "0", amount: "1" },
+      { classid: "1", instanceid: "0", amount: "1" },
+      { classid: "1", instanceid: "0", amount: "3" },
+      { classid: "2", instanceid: "0", amount: "1" },
+      { classid: "3", instanceid: "0", amount: "1" },
+      { classid: "9", instanceid: "0", amount: "1" },   // orphan → dropped
+    ],
+    descriptions: [
+      { classid: "1", instanceid: "0", market_hash_name: "Fracture Case", marketable: 1, tradable: 1 },
+      { classid: "2", instanceid: "0", market_hash_name: "AK-47 | Redline (Field-Tested)", marketable: 1, tradable: 1 },
+      { classid: "3", instanceid: "0", market_hash_name: "Sticker | Probe (Glitter)", marketable: 0, tradable: 0 },
+    ],
+  };
+  M.setTransport(async (url) => {
+    invCalls++;
+    if (url.includes("/id/probe-vanity"))
+      return { status: 200, body: '<html><script>g_rgProfileData = {"url":"https://steamcommunity.com/id/probe-vanity/",' +
+        '"steamid":"' + INV_ID + '","personaname":"probe"};</script></html>' };
+    if (url.includes("/inventory/" + INV_ID + "/730/2")) return { status: 200, body: JSON.stringify(invPayload) };
+    if (url.includes("/inventory/" + INV_PRIV + "/730/2")) return { status: 403, body: "null" };
+    if (url.includes("/inventory/" + INV_BUSY + "/730/2")) return { status: 429, body: "" };
+    return { status: 404, body: "" };
+  });
+  const rId = await M.resolveSteamProfile(INV_ID);
+  const rUrl = await M.resolveSteamProfile("https://steamcommunity.com/profiles/" + INV_ID + "/");
+  ok(rId.steamid64 === INV_ID && rId.vanity === null && rId.source === "steamid64"
+    && rUrl.steamid64 === INV_ID && rUrl.vanity === null && rUrl.source === "profile-url" && invCalls === 0,
+    "resolveSteamProfile: 17-digit id + /profiles/ URL pass straight through — zero network reads");
+  const rVanUrl = await M.resolveSteamProfile("https://steamcommunity.com/id/probe-vanity/");
+  const rVan = await M.resolveSteamProfile("probe-vanity");
+  ok(rVanUrl.steamid64 === INV_ID && rVanUrl.vanity === "probe-vanity" && rVanUrl.source === "vanity-url"
+    && rVan.steamid64 === INV_ID && rVan.vanity === "probe-vanity" && rVan.source === "vanity" && invCalls === 2,
+    "resolveSteamProfile: vanity URL + bare vanity scrape g_rgProfileData's steamid (no sign-in, no API key)");
+  const eJunk = await M.resolveSteamProfile("not a profile!!").then(() => null, (e) => e.message);
+  const eGone = await M.resolveSteamProfile("missing-user").then(() => null, (e) => e.message);
+  ok(/paste your profile URL/.test(eJunk) && eGone === 'no Steam profile found for "missing-user" — check the spelling',
+    "resolveSteamProfile: junk input and a missing profile throw plain-English errors (no HTTP jargon)");
+
+  const inv = await M.steamInventory(INV_ID);
+  const invCase = inv.items.find((i) => i.name === "Fracture Case");
+  const invStick = inv.items.find((i) => /^Sticker/.test(i.name));
+  ok(inv.steamid64 === INV_ID && inv.count === 7 && inv.items.length === 3 && inv.truncated === false
+    && invCase.qty === 5 && invCase.marketable === true && invCase.tradable === true
+    && invStick.marketable === false && invStick.tradable === false,
+    "steamInventory: assets×descriptions merged on classid_instanceid — duplicate stacks sum to qty 5 (count 7 units), unmarketable flagged, description-less asset dropped (a name is never invented)");
+  const ePriv = await M.steamInventory(INV_PRIV).then(() => null, (e) => e.message);
+  ok(ePriv === "inventory is private or hidden — set it to Public in Steam privacy settings",
+    "steamInventory: HTTP 403 → the exact plain-English private-inventory message");
+  const eBusy = await M.steamInventory(INV_BUSY).then(() => null, (e) => e.message);
+  ok(eBusy === "Steam is rate-limiting inventory reads — try again in a few minutes",
+    "steamInventory: HTTP 429 → the exact plain-English rate-limit message");
+
+  // 5 cases @ $5 = $25, 1 skin @ $20.50, 1 sticker with no price at all.
+  const invPx = { "Fracture Case": 5, "AK-47 | Redline (Field-Tested)": 20.5 };
+  const invPriceOf = (n) => (invPx[n] == null ? null : invPx[n]);
+  const invVal = A.inventoryValue(inv.items, invPriceOf);
+  ok(invVal.total === 45.5 && invVal.rows.length === 3
+    && invVal.rows[0].name === "Fracture Case" && invVal.rows[0].qty === 5 && invVal.rows[0].value === 25
+    && invVal.rows[1].name === "AK-47 | Redline (Field-Tested)" && invVal.rows[1].value === 20.5,
+    "inventoryValue: 5×$5 + 1×$20.50 = $45.50, rows sorted by VALUE desc (the $5 case outranks the $20.50 skin)");
+  ok(invVal.pricedCount === 6 && invVal.unpricedCount === 1
+    && invVal.rows[2].price === null && invVal.rows[2].value === null
+    && invVal.pricedCount + invVal.unpricedCount === inv.count,
+    "inventoryValue: priced/unpriced are UNITS summing to the inventory count; an unpriceable item is reported, never guessed");
+
+  // Case marks 2026-01-01 $1 → 2026-01-03 $2; skin marks 2026-01-02 $10 only.
+  const invHist = {
+    "Fracture Case": [{ day: "2026-01-01", price: 1 }, { day: "2026-01-03", price: 2 }],
+    "AK-47 | Redline (Field-Tested)": [{ day: "2026-01-02", price: 10 }],
+  };
+  const invRec = A.inventoryReconstruction(inv.items, (n) => invHist[n] || null, { priceOf: invPriceOf });
+  ok(invRec.days.length === 3
+    && invRec.days[0].day === "2026-01-01" && invRec.days[0].value === 5
+    && invRec.days[1].day === "2026-01-02" && invRec.days[1].value === 15
+    && invRec.days[2].day === "2026-01-03" && invRec.days[2].value === 20
+    && invRec.pricedNames === 2 && invRec.totalNames === 3 && invRec.coveragePct === 100,
+    "inventoryReconstruction: day1 = 5×$1 alone (the skin has no mark yet), day2 = carried $5 + $10 skin = 15, day3 = 5×$2 + carried $10 = 20 (carry-forward within an item, never across items)");
+  const invPart = A.inventoryReconstruction(inv.items,
+    (n) => (n === "Fracture Case" ? invHist["Fracture Case"] : null), { priceOf: invPriceOf });
+  ok(invPart.days.length === 2 && invPart.days[0].value === 5 && invPart.days[1].value === 10
+    && invPart.coveragePct === 54.9 && invPart.pricedNames === 1 && invPart.totalNames === 3,
+    "inventoryReconstruction: coverage is VALUE-weighted — $25 of $45.50 = 54.9% (a count would claim 33.3%), and the historyless skin never joins the line");
+  const invT = A.inventoryReconstruction([{ name: "Fracture Case", qty: 2 }],
+    () => [{ t: Date.UTC(2026, 0, 5), price: 3 }, { t: Date.UTC(2026, 0, 5), price: 4 }, { t: Date.UTC(2026, 0, 4), price: 1 }]);
+  const invNone = A.inventoryReconstruction(inv.items, () => null, { priceOf: invPriceOf });
+  ok(invT.days.length === 2 && invT.days[0].day === "2026-01-04" && invT.days[0].value === 2
+    && invT.days[1].day === "2026-01-05" && invT.days[1].value === 8
+    && invNone.days.length === 0 && invNone.coveragePct === 0,
+    "inventoryReconstruction: {t,price} rows accepted (last row wins a repeated day, order-independent); no history → no fabricated days and coverage 0");
+  M.setTransport(fixtureTransport);
+  // ═══ END LANE S1 PINS ════════════════════════════════════════════════════
+
   M.setTransport(null);
   fs.rmSync(DATA, { recursive: true, force: true });
 
