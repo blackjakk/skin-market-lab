@@ -43,8 +43,13 @@ const DUMP_TTL_MS = 12 * 3600 * 1000;       // skinport full-dump cache
 // Steam IP-rate-limits inventory reads, so a fetched inventory is cached and a
 // cached read makes NO network call at all (not even the vanity resolve).
 const INV_TTL_MS = 10 * 60 * 1000;          // inventory fetch cache (contract: ≥10 min)
-const INV_SNAP_DEDUPE_MS = 10 * 60 * 1000;  // one snapshot line per distinct load
-const INV_BODY_MAX = 32 * 1024 * 1024;      // a 5000-item pasted inventory is megabytes
+const INV_SNAP_DEDUPE_MS = 10 * 60 * 1000;  // one snapshot POINT per 10 min (collapsed on READ)
+// A real 5000-asset Steam page is single-digit MB. The old 32 MB ceiling let
+// one paste block this single-threaded server for seconds (parse → value →
+// reconstruct → sort → stringify are all synchronous); INV_PASTE_MAX_ASSETS
+// bounds the WORK regardless of how the bytes arrive.
+const INV_BODY_MAX = 8 * 1024 * 1024;
+const INV_PASTE_MAX_ASSETS = 5000;          // the same cap the Steam fetcher asks for
 
 function slug(name) {
   const h = crypto.createHash("sha1").update(name).digest("hex").slice(0, 8);
@@ -110,23 +115,31 @@ function parseInventoryPayload(raw) {
   const byKey = new Map();
   for (const d of descs) if (d) byKey.set(String(d.classid) + "_" + String(d.instanceid), d);
   const byName = new Map();
-  let unknown = 0;
-  for (const a of assets) {
+  let unknown = 0, capped = false;
+  for (let ai = 0; ai < assets.length; ai++) {
+    if (ai >= INV_PASTE_MAX_ASSETS) { capped = true; break; }  // bound the work, don't just flag it
+    const a = assets[ai];
     const d = a ? byKey.get(String(a.classid) + "_" + String(a.instanceid)) : null;
     const name = d && typeof d.market_hash_name === "string" ? d.market_hash_name : null;
     if (!name) { unknown++; continue; }
-    const qty = Math.max(1, Math.round(Number(a.amount) || 1));
+    // clamped at both ends: "1e9" in a hand-edited paste must never reach the
+    // valuation (and from there the append-only snapshot series)
+    const qty = Math.max(1, Math.min(INV_PASTE_MAX_ASSETS, Math.round(Number(a.amount) || 1)));
     const row = byName.get(name);
     if (row) row.qty += qty;
     else byName.set(name, { name: name, qty: qty, marketable: !!Number(d.marketable), tradable: !!Number(d.tradable) });
   }
   const items = Array.from(byName.values());
-  if (!items.length) throw invErr(400, "no CS2 items found in that paste — check you copied the 730/2 inventory");
+  if (!items.length)
+    throw invErr(400, unknown
+      ? "none of the " + unknown + " items in that JSON matched a description — select ALL of the inventory page and copy it whole"
+      : "no CS2 items found in that paste — check you copied the 730/2 inventory");
   return {
     steamid64: j.steamid64 != null ? String(j.steamid64) : null,
     count: items.reduce((a, i) => a + i.qty, 0),
     items: items,
-    truncated: !!(j.more_items || j.last_assetid),
+    truncated: capped || !!(j.more_items || j.last_assetid),
+    truncatedBy: capped ? "cap" : (j.more_items || j.last_assetid) ? "more_items" : null,
     unknown: unknown,
   };
 }
@@ -451,25 +464,78 @@ function startServer(opts) {
 
   function invState() { const s = readJson(invFile, null); return s && typeof s === "object" ? s : {}; }
 
-  // append-only {t,value,count} — one line per distinct load, deduped inside
-  // 10 minutes. Read from disk every time, so a restart just picks it back up.
-  function invSeries() {
+  // append-only {t,value,count,id,sig} — one line per load.
+  //
+  // IDENTITY (adversarial review): a value-over-time line is only meaningful
+  // for ONE inventory. The field accepts any profile URL, so loading a second
+  // profile used to EXTEND the same line — the panel then reported a delta and
+  // an alpha across two different people's holdings ("SINCE FIRST LOAD −75%"
+  // because the other person owns less). Every snapshot now carries who it
+  // describes (`id` = the resolved SteamID64) and WHAT it describes (`sig` = a
+  // digest of the name×qty composition), and a series joins like with like:
+  //   · a resolved inventory keys on its SteamID64;
+  //   · a paste with no id keys on its COMPOSITION — two different people's
+  //     anonymous pastes can never share a line (the id is the binding we
+  //     would normally use, and we simply do not have it);
+  //   · rows written before this fix carry neither and share the legacy ""
+  //     bucket — an honest one-time restart, disclosed in the report note,
+  //     never a silent re-attribution.
+  // `sig` also lets a consumer see that the BASKET changed between two points
+  // (buying an item is not a return), which identity alone cannot express.
+  function invSnapSig(rows) {
+    // FNV-1a over "name×qty" in the rows' own (already total-ordered) order —
+    // a fingerprint, not a secret: it never leaves the tracker's own answers
+    // and cannot be turned back into an inventory.
+    let h = 0x811c9dc5;
+    const s = (rows || []).map((r) => r.name + "×" + r.qty).sort().join("|");
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(36);
+  }
+  function invSnapKey(steamid64, sig) {
+    const id = steamid64 == null ? "" : String(steamid64).trim();
+    if (id) return "id:" + id;
+    return sig ? "sig:" + sig : "";
+  }
+  function invSeriesRaw() {
     const out = [];
     try {
       for (const ln of fs.readFileSync(invSeriesFile, "utf8").split("\n")) {
         if (!ln.trim()) continue;
         try {
           const r = JSON.parse(ln);
-          if (r && isFinite(r.t)) out.push({ t: r.t, value: r.value, count: r.count });
+          if (r && isFinite(r.t)) out.push({ t: r.t, value: r.value, count: r.count,
+            id: r.id == null ? "" : String(r.id), sig: r.sig == null ? null : String(r.sig),
+            legacy: r.id == null && r.sig == null });
         } catch { /* torn line — skip, keep the rest */ }
       }
     } catch { /* no file yet */ }
     return out.sort((a, b) => a.t - b.t);
   }
+  // One point per 10-minute window, NEWEST wins. The file stays append-only
+  // (nothing is ever rewritten or dropped on disk) and the collapse happens on
+  // READ — the browser's localStorage series already kept the newest value in
+  // the window while the server kept the FIRST and silently discarded the
+  // correction, so the two surfaces printed different lines from the same
+  // loads. Newest wins on both now: a re-read is a better reading of the same
+  // moment, not a second moment.
+  function invCollapse(list) {
+    const out = [];
+    for (const r of list) {
+      const prev = out.length ? out[out.length - 1] : null;
+      if (prev && r.t - prev.t < INV_SNAP_DEDUPE_MS) out[out.length - 1] = r;
+      else out.push(r);
+    }
+    return out;
+  }
+  function invSeries(key) {
+    const k = key == null ? "" : String(key);
+    const mine = invSeriesRaw().filter((r) => invSnapKey(r.id, r.sig) === k);
+    // the id never rides back out on the wire — the caller already knows whose
+    // inventory it asked for, and a series is display data
+    return invCollapse(mine).map((r) => ({ t: r.t, value: r.value, count: r.count, sig: r.sig }));
+  }
+  function invLegacyCount() { return invSeriesRaw().filter((r) => r.legacy).length; }
   function invAppendSnap(snap) {
-    const list = invSeries();
-    const last = list.length ? list[list.length - 1] : null;
-    if (last && snap.t - last.t < INV_SNAP_DEDUPE_MS) return false;
     fs.mkdirSync(path.dirname(invSeriesFile), { recursive: true });
     fs.appendFileSync(invSeriesFile, JSON.stringify(snap) + "\n");
     return true;
@@ -592,10 +658,16 @@ function startServer(opts) {
       }
     }
     let p;
-    try { p = M.parseSteamInventory(j); }
+    // the SAME cap the fetcher asks Steam for: a paste is unbounded user input
+    // and this server is single-threaded
+    try { p = M.parseSteamInventory(j, null, INV_PASTE_MAX_ASSETS); }
     catch (e) { throw e.httpStatus ? e : invErr(400, String((e && e.message) || e)); }
     if (!p || !Array.isArray(p.items) || !p.items.length)
-      throw invErr(400, "no CS2 items found in that paste — check you copied the whole 730/2 inventory response");
+      // "nothing joined" is a DIFFERENT user fix from "no CS2 items in here":
+      // it means the descriptions half of the payload is missing
+      throw invErr(400, p && p.unknown
+        ? "none of the " + p.unknown + " items in that JSON matched a description — select ALL of the inventory page and copy it whole"
+        : "no CS2 items found in that paste — check you copied the whole 730/2 inventory response");
     return p;
   }
 
@@ -661,13 +733,24 @@ function startServer(opts) {
         } else {
           inv = await invFetch(steamid64);
           fetchedAt = Date.now();
+          // A payload whose assets joined NOTHING is a broken read, not an
+          // empty inventory: Steam sent the assets half without the
+          // descriptions half. Reported as a cheerful "$0 · 0 items" it
+          // poisoned two things at once — the 10-minute cache (so the next
+          // read repeated the lie) and the APPEND-ONLY snapshot series (a $0
+          // point that nothing can delete). Refuse before either is written.
+          if (!inv.items.length && inv.unknown > 0)
+            throw invErr(502, inv.unknown + " assets came back with no matching description — " +
+              "Steam served a partial payload. Try again in a minute.");
         }
       }
       // only a real Steam read refreshes the fetch cache — a paste is the
       // user's own copy of the data, not evidence about the live inventory
       if (!cached)
         state.cache = { t: fetchedAt, input: raw || profile, profile: profile, steamid64: steamid64,
-          count: inv.count, items: inv.items, truncated: !!inv.truncated };
+          count: inv.count, items: inv.items, truncated: !!inv.truncated,
+          truncatedBy: inv.truncatedBy || null, unknown: inv.unknown || 0 };
+      else if (c) { inv.truncatedBy = c.truncatedBy || null; inv.unknown = c.unknown || 0; }
     }
 
     const priceOf = invPricer();
@@ -678,7 +761,13 @@ function startServer(opts) {
     if (!recon || !Array.isArray(recon.days)) // frozen shape holds even if a name has no history at all
       recon = { days: [], coveragePct: 0, pricedNames: 0, totalNames: inv.items.length };
     const count = inv.count != null ? inv.count : inv.items.reduce((a, i) => a + (i.qty || 0), 0);
-    invAppendSnap({ t: Date.now(), value: value.total, count: count });
+    // WHOSE line is this, and WHAT was in it (see invSnapKey): without both,
+    // a second profile's holdings extended the first one's value line
+    const sig = invSnapSig(value.rows);
+    const seriesKey = invSnapKey(steamid64, sig);
+    const legacyPoints = invLegacyCount();
+    invAppendSnap({ t: Date.now(), value: value.total, count: count,
+      id: steamid64 || "", sig: sig });
 
     const types = value.pricedCount + value.unpricedCount;
     const note = [
@@ -691,19 +780,32 @@ function startServer(opts) {
       recon.days.length
         ? "Reconstruction covers " + recon.coveragePct + "% of today's value (" + recon.pricedNames + " of " + recon.totalNames + " names have usable history)."
         : "No usable price history behind these items yet — track them to start accruing one.",
-      inv.truncated ? "Steam capped the read at 5000 items — this inventory is truncated." : "",
+      // ONE flag used to blame Steam's 5000-item page cap for all three
+      // truncation causes — including a payload of eleven items
+      inv.truncatedBy === "cap"
+        ? "Only the first " + INV_PASTE_MAX_ASSETS + " items were read — this inventory is truncated."
+        : inv.truncatedBy === "more_items"
+          ? "Steam has more pages of this inventory — only the first is included."
+          : inv.truncatedBy === "short_payload"
+            ? "Steam returned fewer items than it declared — reload to try again."
+            : inv.truncated ? "This inventory came back truncated — some items are missing." : "",
       inv.unknown ? inv.unknown + " assets had no matching description and were skipped." : "",
+      // the identity fix restarts any line recorded before it existed — say
+      // so rather than letting the chart look like the history was lost
+      legacyPoints && seriesKey !== "" ? "Your value line starts here: " + legacyPoints +
+        " earlier load" + (legacyPoints === 1 ? " was" : "s were") + " recorded before loads were tagged with a profile." : "",
     ].filter(Boolean).join(" ");
 
     // a paste without an id must NOT overwrite the last KNOWN profile (the
     // next "refresh" would have nothing resolvable to go back to)
     if (source !== "paste" || steamid64) { state.profile = profile; state.steamid64 = steamid64; }
+    state.seriesKey = seriesKey;    // so GET …/series replays THIS inventory's line
     state.last = { t: Date.now(), profile: profile, steamid64: steamid64, source: source,
       count: count, total: value.total, coveragePct: recon.coveragePct };
     writeJson(invFile, state);
 
     return { steamid64: steamid64, profile: profile, fetchedAt: fetchedAt, cached: cached,
-      count: count, value: value, recon: recon, series: invSeries(),
+      count: count, value: value, recon: recon, series: invSeries(seriesKey),
       benchmark: invBenchmark(recon), note: note };
   }
 
@@ -776,20 +878,35 @@ function startServer(opts) {
     const msg = String((e && e.message) || e || "inventory read failed");
     return sendJson(res, (e && e.httpStatus) || invFetchStatus(msg), { error: msg });
   }
-  function readBody(req, maxBytes) {
+  // OVER-CAP MUST STILL ANSWER IN WORDS: this used to req.destroy() in the
+  // same tick it rejected, so the socket died before the handler could write
+  // the plain-English 400 — the user got ECONNRESET ("network error") and the
+  // message we wrote for them was unreachable code. Now the upload is PAUSED
+  // (we stop reading, so nothing more is buffered — the cap still holds) and
+  // the socket is closed only once the reply has actually gone out.
+  function readBody(req, maxBytes, res) {
     const cap = maxBytes || 4 * 1024 * 1024;
     return new Promise((resolve, reject) => {
-      let size = 0; const chunks = [];
+      let size = 0, over = false; const chunks = [];
       req.on("data", (c) => {
+        if (over) return;
         size += c.length;
-        if (size > cap) { reject(new Error("body too large")); req.destroy(); return; }
+        if (size > cap) {
+          over = true;
+          req.pause();
+          chunks.length = 0;                                   // drop what we buffered
+          if (res) res.on("finish", () => { try { req.destroy(); } catch (e) { /* already gone */ } });
+          reject(new Error("body too large"));
+          return;
+        }
         chunks.push(c);
       });
       req.on("end", () => {
+        if (over) return;
         try { resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString("utf8")) : {}); }
         catch (e) { reject(new Error("bad json")); }
       });
-      req.on("error", reject);
+      req.on("error", (e) => { if (!over) reject(e); });
     });
   }
   const MIME = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".png": "image/png", ".jpg": "image/jpeg", ".svg": "image/svg+xml", ".webp": "image/webp", ".woff2": "font/woff2" };
@@ -839,7 +956,25 @@ function startServer(opts) {
         return sendJson(res, 200, await itemReport(name));
       }
       if (p === "/api/skins/portfolio") return sendJson(res, 200, portfolioReport());
-      if (p === "/api/skins/inventory/series") return sendJson(res, 200, { series: invSeries() });
+      if (p === "/api/skins/inventory/series") {
+        const st = invState();
+        // the LAST loaded inventory's own line (never every profile's points
+        // concatenated) — pre-fix state has no key, so fall back to its id
+        return sendJson(res, 200, { series: invSeries(st.seriesKey || invSnapKey(st.steamid64, null)) });
+      }
+      // The privacy control that makes the panel's copy honest: erase the
+      // SteamID, the cached inventory and the whole recorded value series
+      // from this machine. Without it the tracker keeps personal data with
+      // no way to withdraw it. Destructive, so POST only.
+      if (p === "/api/skins/inventory/forget") {
+        if (req.method !== "POST") return sendJson(res, 405, { error: "use POST to erase stored inventory data" });
+        let points = 0;
+        try { points = invSeriesRaw().length; } catch (e) { points = 0; }
+        try { fs.unlinkSync(invSeriesFile); } catch (e) { /* already gone */ }
+        try { fs.unlinkSync(invFile); } catch (e) { /* already gone */ }
+        return sendJson(res, 200, { ok: 1, cleared: points,
+          note: "stored SteamID, cached inventory and recorded value history erased from this tracker" });
+      }
       if (p === "/api/skins/inventory" && req.method !== "POST") {
         try { return sendJson(res, 200, await inventoryReport({ profile: u.searchParams.get("profile") })); }
         catch (e) { return invFail(res, e); }
@@ -847,10 +982,11 @@ function startServer(opts) {
 
       if (req.method !== "POST") { serveStatic(req, res, p); return; }
       let body;
-      try { body = await readBody(req, p === "/api/skins/inventory" ? INV_BODY_MAX : 0); }
+      try { body = await readBody(req, p === "/api/skins/inventory" ? INV_BODY_MAX : 0, res); }
       catch (e) {
         return sendJson(res, 400, { error: /too large/.test(String(e && e.message))
-          ? "that upload is too large — a Steam inventory paste should be well under 32 MB"
+          ? "that upload is too large — a Steam inventory paste is a few MB, this one is over " +
+            Math.round(INV_BODY_MAX / (1024 * 1024)) + " MB"
           : "the request body wasn't valid JSON" });
       }
 

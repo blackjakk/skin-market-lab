@@ -858,9 +858,12 @@ async function fixtureTransport(url, headers) {
       { name: "Dump Only Item", min: 89, mean: 95, median: 92, max: 120, qty: 7 },
       { name: "A1 Case", min: 999, mean: 999, median: 999, max: 999, qty: 3 }, // tracked mark must WIN this
     ] }));
-    // an earlier load, 20 min ago — the next load must APPEND beside it
+    // an earlier load of THIS inventory, 20 min ago — the next load must
+    // APPEND beside it. Tagged with the id it describes: a snapshot line now
+    // carries whose inventory it is, so a line from another profile can never
+    // extend this one (see the identity pins in the F1 block below).
     fs.writeFileSync(path.join(INV_DATA, "inventory.jsonl"),
-      JSON.stringify({ t: INV_NOW - 20 * 60000, value: 350, count: 5 }) + "\n");
+      JSON.stringify({ t: INV_NOW - 20 * 60000, value: 350, count: 5, id: FAKE_ID, sig: "seed" }) + "\n");
 
     const IPORT = 5501;
     let iinst = startServer({ port: IPORT, dataDir: INV_DATA, snapHours: 0, steamCookie: "" });
@@ -934,8 +937,11 @@ async function fixtureTransport(url, headers) {
       "second read inside the 10-min TTL is served from cache — transport call count still 2 (no re-fetch)");
     ok(iR2.body.series.length === 2 && /Cached read/.test(iR2.body.note),
       "snapshot deduped inside 10 minutes (series still 2 lines) and the note says the read was cached");
-    ok(fs.readFileSync(path.join(INV_DATA, "inventory.jsonl"), "utf8").trim().split("\n").length === 2,
-      "exactly two lines on disk after the deduped load");
+    // the FILE is append-only (every load is recorded, nothing is ever
+    // rewritten); the 10-minute dedupe is a collapse applied on READ, which is
+    // what lets a correction inside the window win instead of being dropped
+    ok(fs.readFileSync(path.join(INV_DATA, "inventory.jsonl"), "utf8").trim().split("\n").length === 3,
+      "the snapshot file stays append-only (3 lines for 3 loads) while the SERIES collapses the 10-minute window to 2 points");
 
     // (7) paste path (the static-host idiom) — identical math, zero network
     const iPaste = await iapi("/api/skins/inventory", { paste: JSON.stringify(INV_PAYLOAD) });
@@ -1009,13 +1015,31 @@ async function fixtureTransport(url, headers) {
     iinst = startServer({ port: IPORT, dataDir: INV_DATA, snapHours: 0, steamCookie: "" });
     await new Promise((r) => iinst.server.once("listening", r));
     const iSer = await iapi("/api/skins/inventory/series");
-    ok(iSer.status === 200 && iSer.body.series.length === 2 && iSer.body.series[0].value === 350
-      && iSer.body.series[1].value === 400,
-      "restart: GET /api/skins/inventory/series replays the snapshots from disk");
+    // the LAST load was the paste, which carries no SteamID — it keeps its own
+    // composition-keyed line rather than being attributed to the resolved
+    // profile's, so this replays one point, from disk, after a restart
+    ok(iSer.status === 200 && iSer.body.series.length === 1 && iSer.body.series[0].value === 400,
+      "restart: GET /api/skins/inventory/series replays the last loaded inventory's own line from disk");
     const iR3 = await iapi("/api/skins/inventory");
     ok(iR3.status === 200 && iR3.body.cached === true && iR3.body.profile === "probe-fake-user"
       && iR3.body.value.total === 400 && invHits.total === hitsBefore,
       "restart: the last profile + its cached inventory survive, and re-reading still makes no network call");
+
+    // ── the right to be forgotten (privacy control) ─────────────────────────
+    // A feature that stores a SteamID and a holdings history must let the user
+    // erase it, or the panel's privacy copy is a promise it cannot keep.
+    const fGet = await fetch("http://127.0.0.1:" + IPORT + "/api/skins/inventory/forget", { headers: { Connection: "close" } });
+    ok(fGet.status === 405, "erasing inventory data is POST-only (a GET cannot destroy it, so no link or prefetch can)");
+    const seriesBefore = (await iapi("/api/skins/inventory/series")).body.series;
+    const forget = await iapi("/api/skins/inventory/forget", {});
+    ok(forget.status === 200 && forget.body.ok === 1 && forget.body.cleared >= seriesBefore.length,
+      "POST /inventory/forget reports how many recorded points it erased");
+    ok(!fs.existsSync(path.join(INV_DATA, "inventory.json")) && !fs.existsSync(path.join(INV_DATA, "inventory.jsonl")),
+      "forget deletes the stored SteamID/profile AND the whole recorded value history from disk");
+    const seriesAfter = (await iapi("/api/skins/inventory/series")).body.series;
+    ok(Array.isArray(seriesAfter) && seriesAfter.length === 0,
+      "after forget the series reads empty — nothing personal survives the erase");
+
     await iinst.close();
 
     M.setTransport(fixtureTransport);
@@ -1502,6 +1526,192 @@ async function fixtureTransport(url, headers) {
     "inventoryReconstruction: {t,price} rows accepted (last row wins a repeated day, order-independent); no history → no fabricated days and coverage 0");
   M.setTransport(fixtureTransport);
   // ═══ END LANE S1 PINS ════════════════════════════════════════════════════
+
+  // ═══ BEGIN F1 PINS — inventory defects closed by the adversarial review ══
+  // ONE contiguous block, its own tmp data dir / port / fixture transport, so
+  // nothing above is disturbed. Every check names the defect it locks and was
+  // verified to go RED with that fix (and only that fix) reverted.
+  //   1 snapshot identity + composition fingerprint (a second profile used to
+  //     extend the first one's value line)      2 assets that join nothing
+  //     reported as a successful $0 read        3 unbounded `amount`
+  //   4 one truncation sentence for three causes 5 dedupe inverted vs the
+  //     browser (first won, corrections dropped) 6 unbounded paste work
+  //   7 the "upload too large" 400 was unreachable (socket destroyed first)
+  console.log("— inventory (F1 fixes) —");
+  {
+    const F1_A = "76561190000000011", F1_B = "76561190000000012";
+    const F1_DROP = "76561190000000013", F1_SHORT = "76561190000000014", F1_MIX = "76561190000000015";
+    const f1asset = (classid, amount) => ({ appid: 730, contextid: "2", assetid: "f1" + classid,
+      classid: classid, instanceid: "0", amount: String(amount == null ? 1 : amount) });
+    const f1desc = (classid, name) => ({ appid: 730, classid: classid, instanceid: "0",
+      market_hash_name: name, marketable: 1, tradable: 1 });
+    // A owns 2 × $100 = $200 · B owns 1 × $5 = $5 — two different people
+    const f1PayloadA = { success: 1, total_inventory_count: 2,
+      assets: [f1asset("1"), f1asset("1")], descriptions: [f1desc("1", "F1 Alpha Item")] };
+    const f1PayloadB = { success: 1, total_inventory_count: 1,
+      assets: [f1asset("2")], descriptions: [f1desc("2", "F1 Beta Item")] };
+    // A after buying one $7 item — SAME person, DIFFERENT basket ($207)
+    const f1PayloadA2 = { success: 1, total_inventory_count: 3,
+      assets: [f1asset("1"), f1asset("1"), f1asset("3")],
+      descriptions: [f1desc("1", "F1 Alpha Item"), f1desc("3", "F1 Extra Item")] };
+    // Steam sent the assets half without the descriptions half: every asset
+    // joins NOTHING (a broken read, not an empty inventory)
+    const f1PayloadDrop = { success: 1, total_inventory_count: 3,
+      assets: [f1asset("1"), f1asset("2"), f1asset("3")], descriptions: [] };
+    const f1PayloadMix = { success: 1, total_inventory_count: 5,   // 5 assets, 2 orphans
+      assets: [f1asset("1"), f1asset("1"), f1asset("3"), f1asset("8"), f1asset("9")],
+      descriptions: [f1desc("1", "F1 Alpha Item"), f1desc("3", "F1 Extra Item")] };
+    const f1PayloadShort = { success: 1, total_inventory_count: 9, // declares 9, sends 1
+      assets: [f1asset("1")], descriptions: [f1desc("1", "F1 Alpha Item")] };
+    let f1A = f1PayloadA;
+    M.setTransport(async (url, headers) => {
+      const m = /\/inventory\/(\d{17})\/730\/2/.exec(url);
+      if (!m) return fixtureTransport(url, headers);
+      const body = m[1] === F1_A ? f1A : m[1] === F1_B ? f1PayloadB : m[1] === F1_DROP ? f1PayloadDrop
+        : m[1] === F1_MIX ? f1PayloadMix : m[1] === F1_SHORT ? f1PayloadShort : null;
+      return body ? { status: 200, body: JSON.stringify(body) } : { status: 404, body: "" };
+    });
+
+    const F1_DATA = path.join(os.tmpdir(), "hh-skin-f1-" + Date.now());
+    const F1_NOW = Date.now();
+    fs.mkdirSync(path.join(F1_DATA, "cache"), { recursive: true });
+    fs.writeFileSync(path.join(F1_DATA, "watchlist.json"), JSON.stringify(["A1 Case"]));
+    fs.writeFileSync(path.join(F1_DATA, "cache", "skinport-items.json"), JSON.stringify({ t: F1_NOW, items: [
+      { name: "F1 Alpha Item", min: 100, mean: 100, median: 100, max: 100, qty: 5 },
+      { name: "F1 Beta Item", min: 5, mean: 5, median: 5, max: 5, qty: 5 },
+      { name: "F1 Extra Item", min: 7, mean: 7, median: 7, max: 7, qty: 5 },
+    ] }));
+    // one earlier load PER PROFILE, both older than the 10-minute window,
+    // plus one UNTAGGED line of the kind written before snapshots carried an
+    // identity (it belongs to nobody we can name — it must not be adopted)
+    fs.writeFileSync(path.join(F1_DATA, "inventory.jsonl"),
+      JSON.stringify({ t: F1_NOW - 50 * 60000, value: 999, count: 1 }) + "\n" +
+      JSON.stringify({ t: F1_NOW - 40 * 60000, value: 111, count: 1, id: F1_A, sig: "seedA" }) + "\n" +
+      JSON.stringify({ t: F1_NOW - 30 * 60000, value: 222, count: 1, id: F1_B, sig: "seedB" }) + "\n");
+
+    const F1PORT = 5503;
+    const f1inst = startServer({ port: F1PORT, dataDir: F1_DATA, snapHours: 0, steamCookie: "" });
+    await new Promise((r) => f1inst.server.once("listening", r));
+    const f1api = async (p, body) => {
+      const opts = body
+        ? { method: "POST", headers: { "Content-Type": "application/json", Connection: "close" }, body: JSON.stringify(body) }
+        : { headers: { Connection: "close" } };
+      const r = await fetch("http://localhost:" + F1PORT + p, opts);
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    const f1vals = (s) => (s || []).map((r) => r.value).join(",");
+    const f1sig = (s) => (s && s.length ? s[s.length - 1].sig : null);
+    const f1last = (s) => (s && s.length ? s[s.length - 1].value : null);
+    const f1lines = () => { try {
+      return fs.readFileSync(path.join(F1_DATA, "inventory.jsonl"), "utf8").trim().split("\n").length;
+    } catch (e) { return 0; } };
+
+    // ── 1. the value line belongs to ONE inventory ──────────────────────────
+    const f1RA = await f1api("/api/skins/inventory?profile=" + F1_A);
+    const f1RB = await f1api("/api/skins/inventory?profile=" + F1_B);
+    ok(f1RA.status === 200 && f1RA.body.value.total === 200 && f1vals(f1RA.body.series) === "111,200"
+      && f1RB.status === 200 && f1RB.body.value.total === 5 && f1vals(f1RB.body.series) === "222,5",
+      "a second profile's load starts its OWN line: B's series is B's two points only — loading someone else's inventory can no longer extend yours (it used to print a −$195 'loss')");
+    const f1RA2 = await f1api("/api/skins/inventory", { profile: F1_A });
+    ok(f1RA2.status === 200 && f1vals(f1RA2.body.series) === "111,200"
+      && !/222|,5$/.test(f1vals(f1RA2.body.series)),
+      "profile A's line is intact and unpolluted after B was loaded in between (identity is per-snapshot, not per-file)");
+    ok(!/999/.test(f1vals(f1RA.body.series)) && !/999/.test(f1vals(f1RB.body.series))
+      && /Your value line starts here: 1 earlier load was recorded before/.test(f1RA.body.note),
+      "an untagged pre-fix load is neither adopted by the next profile that loads nor silently dropped — the report says the line restarts");
+
+    // ── 2. composition fingerprint: buying an item is not a return ──────────
+    const f1SigA = f1sig(f1RA2.body.series);
+    f1A = f1PayloadA2;                                  // A buys the $7 item
+    const f1RA3 = await f1api("/api/skins/inventory", { profile: F1_A });
+    const f1RA4 = await f1api("/api/skins/inventory", { profile: F1_A });  // identical basket again
+    ok(f1SigA && f1sig(f1RA3.body.series) && f1SigA !== f1sig(f1RA3.body.series)
+      && f1sig(f1RA3.body.series) === f1sig(f1RA4.body.series) && f1RA3.body.value.total === 207,
+      "every snapshot carries a composition fingerprint: identical holdings → identical sig, a bought item → a different sig, so a consumer can tell a value change from a return");
+
+    // ── 3. dedupe agrees with the browser: NEWEST wins inside the window ────
+    ok(f1vals(f1RA3.body.series) === "111,207" && f1vals(f1RA4.body.series) === "111,207"
+      && f1lines() === 8,
+      "inside the 10-minute window the NEWEST value wins (was: the first was kept and every correction silently dropped, disagreeing with the browser's own line) — and the file stays append-only, 8 lines for 5 loads + 3 seeds");
+
+    // ── 4. an all-drop payload is a broken read, not an empty inventory ─────
+    const f1LinesBefore = f1lines();
+    const f1Drop = await f1api("/api/skins/inventory?profile=" + F1_DROP);
+    const f1State = JSON.parse(fs.readFileSync(path.join(F1_DATA, "inventory.json"), "utf8"));
+    ok(f1Drop.status === 502 && /no matching description/.test(f1Drop.body.error)
+      && f1lines() === f1LinesBefore && f1State.cache && f1State.cache.steamid64 !== F1_DROP,
+      "a payload whose assets joined NOTHING fails with the reason (502) — no $0 point in the append-only series, no poisoned 10-minute cache (it used to report a cheerful $0 / 0 items)");
+    const f1DropPaste = await f1api("/api/skins/inventory", { paste: JSON.stringify(f1PayloadDrop) });
+    ok(f1DropPaste.status === 400 && /matched a description/.test(f1DropPaste.body.error)
+      && /3/.test(f1DropPaste.body.error) && f1lines() === f1LinesBefore,
+      "the same paste says how many items failed to join and what to do about it (\"copy it whole\"), instead of the misleading \"no CS2 items found\"");
+
+    // ── 5. the drop is surfaced when the read partly worked ────────────────
+    const f1Mix = await f1api("/api/skins/inventory?profile=" + F1_MIX);
+    ok(f1Mix.status === 200 && f1Mix.body.count === 3
+      && /2 assets had no matching description/.test(f1Mix.body.note),
+      "a partial join is disclosed in the note (\"2 assets had no matching description\") — the line existed but nothing ever set the counter");
+
+    // ── 6. the truncation note names the cause that actually fired ─────────
+    const f1Short = await f1api("/api/skins/inventory?profile=" + F1_SHORT);
+    ok(f1Short.status === 200 && /fewer items than it declared/.test(f1Short.body.note)
+      && !/5000/.test(f1Short.body.note),
+      "an 11-item short payload no longer claims \"Steam capped the read at 5000 items\" — the note names the cause that fired");
+    const f1Cap = A.parseSteamInventory({ success: 1, total_inventory_count: 3,
+      assets: [f1asset("1"), f1asset("2"), f1asset("3")],
+      descriptions: [f1desc("1", "N1"), f1desc("2", "N2"), f1desc("3", "N3")] }, null, 2);
+    const f1More = A.parseSteamInventory({ success: 1, total_inventory_count: 1, more_items: 1,
+      assets: [f1asset("1")], descriptions: [f1desc("1", "N1")] });
+    const f1ShortP = A.parseSteamInventory(f1PayloadShort);
+    ok(f1Cap.truncatedBy === "cap" && f1Cap.items.length === 2 && f1Cap.count === 2
+      && f1More.truncatedBy === "more_items" && f1ShortP.truncatedBy === "short_payload"
+      && A.parseSteamInventory(f1PayloadA).truncatedBy === null,
+      "parseSteamInventory reports WHICH truncation fired (cap / more_items / short_payload), and `max` is a real cap on the work — it used to parse every asset and only then set a flag");
+
+    // ── 7. `amount` cannot write an absurd valuation into the series ───────
+    const f1Huge = { success: 1, total_inventory_count: 1,
+      assets: [f1asset("1", "1e9")], descriptions: [f1desc("1", "F1 Alpha Item")] };
+    const f1HugeP = A.parseSteamInventory(f1Huge);
+    const f1HugeR = await f1api("/api/skins/inventory", { paste: JSON.stringify(f1Huge) });
+    ok(f1HugeP.count === 5000 && f1HugeP.items[0].qty === 5000
+      && f1HugeR.status === 200 && f1HugeR.body.count === 5000 && f1HugeR.body.value.total === 500000
+      && f1last(f1HugeR.body.series) === 500000,
+      "a single asset claiming amount 1e9 is clamped (5000, Steam's own page cap) — a $150bn point can no longer be written permanently into the append-only series");
+
+    // ── 8. an unbounded paste cannot run unbounded work ────────────────────
+    const f1BigAssets = [], f1BigDescs = [];
+    for (let i = 0; i < 5200; i++) { f1BigAssets.push(f1asset("b" + i)); f1BigDescs.push(f1desc("b" + i, "F1 Bulk " + i)); }
+    const f1BigPaste = await f1api("/api/skins/inventory",
+      { paste: JSON.stringify({ success: 1, total_inventory_count: 5200, assets: f1BigAssets, descriptions: f1BigDescs }) });
+    ok(f1BigPaste.status === 200 && f1BigPaste.body.count === 5000
+      && f1BigPaste.body.value.rows.length === 5000
+      && /Only the first 5000 items were read/.test(f1BigPaste.body.note),
+      "a 5200-asset paste is parsed, valued and sorted for 5000 items and no more — the cap bounds the synchronous work AND says so, instead of blocking this single-threaded server on whatever arrived");
+
+    // ── 9. two anonymous pastes are not one inventory ──────────────────────
+    const f1PA = await f1api("/api/skins/inventory", { paste: JSON.stringify(f1PayloadA) });
+    const f1PB = await f1api("/api/skins/inventory", { paste: JSON.stringify(f1PayloadB) });
+    ok(f1PA.status === 200 && f1vals(f1PA.body.series) === "200"
+      && f1PB.status === 200 && f1vals(f1PB.body.series) === "5",
+      "a paste carries no SteamID, so its line is keyed by COMPOSITION — two different people's anonymous pastes never share one value line");
+
+    // ── 10. the over-cap reply reaches the client in words ─────────────────
+    const f1Big = await fetch("http://localhost:" + F1PORT + "/api/skins/inventory", {
+      method: "POST", headers: { "Content-Type": "application/json", Connection: "close" },
+      body: JSON.stringify({ paste: "x".repeat(9 * 1024 * 1024) }),
+    }).then(async (r) => ({ status: r.status, body: await r.json().catch(() => null) }),
+      (e) => ({ status: 0, body: null, err: String((e && e.message) || e) }));
+    ok(f1Big.status === 400 && f1Big.body && /too large/.test(f1Big.body.error) && /8 MB/.test(f1Big.body.error),
+      "a body over the cap gets the plain-English 400 it was always meant to get — the socket used to be destroyed in the same tick, so the client saw only ECONNRESET");
+    const f1Ok = await f1api("/api/skins/inventory", { paste: JSON.stringify(f1PayloadA) });
+    ok(f1Ok.status === 200 && f1Ok.body.value.total === 200,
+      "and the connection is still usable for a normal paste afterwards (the cap closes one request, not the server)");
+
+    await f1inst.close();
+    M.setTransport(fixtureTransport);
+    fs.rmSync(F1_DATA, { recursive: true, force: true });
+  }
+  // ═══ END F1 PINS ═════════════════════════════════════════════════════════
 
   M.setTransport(null);
   fs.rmSync(DATA, { recursive: true, force: true });
