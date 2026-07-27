@@ -443,8 +443,11 @@ M.setTransport(async (url) => {
       return lit;
     });
     ok(invPainted > 200, "inventory value-over-time canvas actually painted (" + invPainted + " sampled px)");
+    // the label describes EVERY plotted series (here: the reconstruction
+    // alone — one recorded load is not a line yet); the two-series form is
+    // pinned in the F2 block below
     ok(await pageI.$eval("#invChart", (cv) => cv.getAttribute("role") === "img" &&
-      /Inventory value over time: \$/.test(cv.getAttribute("aria-label") || "") &&
+      /Inventory value over time, 1 series\. Reconstructed value: \$/.test(cv.getAttribute("aria-label") || "") &&
       /px$/.test(cv.style.width)),
       "inventory chart is role=img with a descriptive aria-label and a pinned style.width");
     ok((await pageI.$$eval("#invChartTable details.dataTable table.dt tr", (els) => els.length)) > 2,
@@ -523,6 +526,362 @@ M.setTransport(async (url) => {
     await ctxI.close();
     statI.close();
     fs.rmSync(IROOT, { recursive: true, force: true });
+  }
+
+  // ── ADDITIVE (F2): failed loads, the static SteamID64 dead-end, series
+  //    identity, chart/table honesty ───────────────────────────────────────
+  // Six defects an adversarial review found in the inventory flow, each with
+  // a check that goes RED without its fix (verified by reverting each fix in
+  // turn). Own ports 5520-5529, own collected roots.
+  //
+  // 1) LIVE MODE, on the tracker `page` already booted above: a load that
+  //    FAILS must leave the error in the panel's status region — it used to
+  //    render while busy was still true, so the region announced "Reading
+  //    your inventory…" for good and the only surface was an 8s toast.
+  //    The privacy copy must also be true HERE: in live mode the SteamID is
+  //    POSTed to the tracker and written to its local-data/.
+  {
+    const privLive = await page.textContent("#invPrivacy");
+    ok(!/stays in this browser/i.test(privLive) && /tracker/i.test(privLive) && /local-data/i.test(privLive),
+      "live mode: the privacy line says where the SteamID actually goes (the tracker + its local-data), not \"stays in this browser\"");
+
+    // 76561190000000002 resolves (17 digits, no lookup needed) but the
+    // fixture transport serves no inventory for it → a real failed first load
+    await page.fill("#invInput", "76561190000000002");
+    await page.click("#invGo");
+    await page.waitForFunction(() => {
+      const h = document.getElementById("invHint").textContent;
+      return h && !/Reading your inventory/.test(h) && /Couldn't load/.test(h);
+    }, { timeout: 15000 }).catch(() => {});
+    const failHint = (await page.textContent("#invHint")) || "";
+    const failToast = (await page.textContent("#toast")) || "";
+    const failBusy = await page.$eval("#invPanel", (el) => el.getAttribute("aria-busy"));
+    ok(!/Reading your inventory/.test(failHint) && /Couldn't load that inventory/.test(failHint) &&
+      failToast.length > 0 && failHint.includes(failToast.trim()) && failBusy === "false",
+      "a failed load leaves the ERROR in the panel (never a permanent \"Reading your inventory…\"), aria-busy=false — " +
+      JSON.stringify(failHint.slice(0, 60)));
+    ok(/Load inventory again/.test(failHint) && /Paste JSON/.test(failHint),
+      "the failure state says what to do next (retry, or paste the JSON yourself)");
+
+    // a LIVE paste must carry the profile, or the tracker keys the snapshot
+    // by composition instead of attaching it to the user's real value line
+    const posted = [];
+    const spy = (r) => { if (r.method() === "POST" && r.url().includes("/api/skins/inventory")) posted.push(r.postData() || ""); };
+    page.on("request", spy);
+    await page.fill("#invInput", "76561190000000001");
+    await page.click("#invPasteBtn");
+    await page.waitForSelector("#invPasteModal.open", { timeout: 4000 });
+    await page.fill("#invPasteText", JSON.stringify({
+      assets: [{ appid: 730, contextid: "2", assetid: "1", classid: "c1", instanceid: "0", amount: "1" }],
+      descriptions: [{ classid: "c1", instanceid: "0", market_hash_name: NAME, marketable: 1, tradable: 1 }],
+      total_inventory_count: 1,
+    }));
+    await page.click("#invPasteGo");
+    await page.waitForSelector("#invTotals .ds-tile", { timeout: 12000 });
+    ok(posted.some((b) => /"paste"/.test(b) && /"profile":"76561190000000001"/.test(b)),
+      "a live-mode paste sends the profile with it, so the tracker files it under the user's own identity");
+
+    // and the privacy control actually withdraws it: the tracker's stored
+    // SteamID + value series are gone after 🧹 Forget
+    ok(await page.$eval("#invForgetRow", (el) => !!el.getClientRects().length), "the 🧹 Forget control is offered once something is stored");
+    page.once("dialog", (d) => d.dismiss());
+    await page.click("#invForget");
+    await page.waitForTimeout(400);
+    const survived = await (await fetch("http://localhost:" + PORT + "/api/skins/inventory/series")).json();
+    ok((survived.series || []).length > 0 && !!(await page.$("#invTotals .ds-tile")),
+      "cancelling the confirm erases NOTHING (tracker series intact, report still on screen)");
+    page.once("dialog", (d) => d.accept());
+    await page.click("#invForget");
+    // a wait that THROWS would abort the run — let the assertion report instead
+    await page.waitForFunction(() => !document.querySelector("#invTotals .ds-tile"), { timeout: 8000 }).catch(() => {});
+    const afterForget = await (await fetch("http://localhost:" + PORT + "/api/skins/inventory/series")).json();
+    const forgetToast = await page.textContent("#toast");
+    ok((afterForget.series || []).length === 0 && /off the tracker/.test(forgetToast) &&
+      (await page.evaluate(() => localStorage.getItem("skinlab_inv_v1"))) == null,
+      "🧹 Forget erases the tracker's stored inventory AND this browser's loads, and says so");
+    page.off("request", spy);
+  }
+
+  // 2-6) STATIC MODE — its own collected root + static host on 5520.
+  const JROOT = path.join(os.tmpdir(), "hh-skin-inv-f2-" + Date.now());
+  {
+    const { collect } = require("./collect.js");
+    const { slug } = require(path.join(__dirname, "server.js"));
+    fs.mkdirSync(path.join(JROOT, "data", "import"), { recursive: true });
+    fs.writeFileSync(path.join(JROOT, "watchlist.json"), JSON.stringify({ items: [NAME, "Fracture Case"] }));
+    const impFor = (base) => Array.from({ length: 120 }, (_, i) =>
+      ({ t: Date.now() - (120 - i) * D, price: base * Math.exp(0.003 * i) * (1 + 0.05 * Math.sin(i / 6)), vol: 40 + (i % 20) }));
+    fs.writeFileSync(path.join(JROOT, "data", "import", slug(NAME) + ".json"), JSON.stringify({ t: Date.now(), source: "probe", rows: impFor(30) }));
+    // the CASE needs deep history too, or the published caseIdx is null on
+    // every day and benchmarkGrowth (hence the whole VS SKINDEX tile) is
+    // legitimately "—" — this scenario is about what the tile SAYS
+    fs.writeFileSync(path.join(JROOT, "data", "import", slug("Fracture Case") + ".json"), JSON.stringify({ t: Date.now(), source: "probe", rows: impFor(2) }));
+    await collect({ root: JROOT });
+
+    const statJ = makeStatic(5520, path.join(JROOT, "data"));
+    const ctxJ = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+    await ctxJ.route(/^https?:\/\/(localhost|127\.0\.0\.1):8790\//, (r) => r.abort());
+    // a settable clock skew: the 10-minute snapshot dedupe means "a second,
+    // later load" can only be exercised by moving time forward
+    await ctxJ.addInitScript(() => {
+      const realNow = Date.now;
+      window.__skew = 0;
+      Date.now = function () { return realNow() + (window.__skew || 0); };
+    });
+    const pageJ = await ctxJ.newPage();
+    const errorsJ = [];
+    pageJ.on("pageerror", (e) => errorsJ.push(String(e)));
+    await pageJ.goto("http://localhost:5520/", { waitUntil: "networkidle" });
+    await pageJ.waitForSelector(".mrow", { timeout: 10000 });
+
+    ok(/stays in this browser/i.test(await pageJ.textContent("#invPrivacy")) &&
+      /price history of the skins you own/i.test(await pageJ.textContent("#invPrivacy")),
+      "static mode: the privacy line keeps the true \"stays in this browser\" promise and discloses the per-holding history reads");
+
+    // 2) the static dead-end: a vanity name (and the field's OWN placeholder
+    //    used to be one) must never yield a URL Steam 404s
+    const ph = await pageJ.$eval("#invInput", (el) => el.getAttribute("placeholder") || "");
+    ok(/\/profiles\//.test(ph) && !/\/id\//.test(ph),
+      "the profile field's placeholder shows the form that works on a static host (" + ph + ")");
+    await pageJ.fill("#invInput", "steamcommunity.com/id/yourname");
+    await pageJ.click("#invGo");
+    await pageJ.waitForSelector("#invPasteModal.open", { timeout: 4000 });
+    const vanity = await pageJ.evaluate(() => ({
+      url: document.getElementById("invPasteUrl").textContent,
+      urlHidden: document.getElementById("invPasteUrl").hidden,
+      help: document.getElementById("invPasteIdHelp").textContent,
+      helpShown: !!document.getElementById("invPasteIdHelp").getClientRects().length,
+      modal: document.querySelector("#invPasteModal .modal").textContent,
+    }));
+    ok(!/YOUR_STEAMID64/.test(vanity.modal) && vanity.urlHidden && !vanity.url.trim() &&
+      vanity.helpShown && /SteamID64/.test(vanity.help) && /profiles/.test(vanity.help),
+      "a vanity name opens the paste modal with SteamID64 GUIDANCE, never a placeholder URL that 404s");
+    await pageJ.keyboard.press("Escape");
+    await pageJ.waitForFunction(() => !document.getElementById("invPasteModal").classList.contains("open"), { timeout: 4000 });
+    // ...and a real id still prefills the working address, with the help gone
+    await pageJ.fill("#invInput", "76561190000000001");
+    await pageJ.click("#invGo");
+    await pageJ.waitForSelector("#invPasteModal.open", { timeout: 4000 });
+    const withId = await pageJ.evaluate(() => ({
+      url: document.getElementById("invPasteUrl").textContent,
+      urlShown: !!document.getElementById("invPasteUrl").getClientRects().length,
+      helpHidden: document.getElementById("invPasteIdHelp").hidden,
+    }));
+    ok(withId.urlShown && /76561190000000001\/730\/2/.test(withId.url) && withId.helpHidden,
+      "a 17-digit SteamID64 still prefills the real inventory URL (guidance hidden)");
+    await pageJ.keyboard.press("Escape");
+    await pageJ.waitForFunction(() => !document.getElementById("invPasteModal").classList.contains("open"), { timeout: 4000 });
+
+    const FIX_A = JSON.stringify({
+      assets: [
+        { appid: 730, contextid: "2", assetid: "1", classid: "c1", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "2", classid: "c1", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "3", classid: "c2", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "4", classid: "c3", instanceid: "0", amount: "1" },
+        { appid: 730, contextid: "2", assetid: "6", classid: "c1", instanceid: "5", amount: "1" },
+      ],
+      descriptions: [
+        { classid: "c1", instanceid: "0", market_hash_name: NAME, marketable: 1, tradable: 1 },
+        { classid: "c1", instanceid: "5", market_hash_name: NAME, marketable: 1, tradable: 0 },
+        { classid: "c2", instanceid: "0", market_hash_name: "Fracture Case", marketable: 1, tradable: 1 },
+        { classid: "c3", instanceid: "0", market_hash_name: "Dreams & Nightmares Case", marketable: 1, tradable: 0 },
+      ],
+      total_inventory_count: 5,
+    });
+    // same person, ONE holding sold: 5 units → 4, $173.00 → $129.75
+    const FIX_A_SOLD = JSON.stringify(Object.assign(JSON.parse(FIX_A), {
+      assets: JSON.parse(FIX_A).assets.filter((a) => a.classid !== "c2"), total_inventory_count: 4 }));
+    // a DIFFERENT person: one Fracture Case, $43.25
+    const FIX_B = JSON.stringify({
+      assets: [{ appid: 730, contextid: "2", assetid: "9", classid: "c2", instanceid: "0", amount: "1" }],
+      descriptions: [{ classid: "c2", instanceid: "0", market_hash_name: "Fracture Case", marketable: 1, tradable: 1 }],
+      total_inventory_count: 1,
+    });
+    // every paste changes the tiles (value, or the since-first-load line), so
+    // "the totals text moved and the panel is idle again" is the settle signal
+    const pasteAs = async (profile, json) => {
+      const prev = await pageJ.textContent("#invTotals");
+      await pageJ.fill("#invInput", profile);
+      await pageJ.click("#invPasteBtn");
+      await pageJ.waitForSelector("#invPasteModal.open", { timeout: 4000 });
+      await pageJ.fill("#invPasteText", json);
+      await pageJ.click("#invPasteGo");
+      await pageJ.waitForFunction((p) => {
+        const el = document.getElementById("invTotals");
+        return el && el.querySelectorAll(".ds-tile").length > 0 && el.textContent !== p &&
+          document.getElementById("invPanel").getAttribute("aria-busy") === "false";
+      }, prev, { timeout: 20000 });
+      return pageJ.textContent("#invTotals");
+    };
+
+    const totA = await pasteAs("76561190000000001", FIX_A);
+    ok(/\$173\.00/.test(totA) && /first load — the line starts here/.test(totA),
+      "inventory A loads and starts its own value line");
+    // 6) the alpha window is TRIMMED to where both legs are like-for-like —
+    //    the tile must say WHICH window it measured
+    const alphaSub = await pageJ.$eval("#invTotals", (el) => {
+      const t = Array.from(el.querySelectorAll(".ds-tile")).find((x) => /VS SKINDEX/.test(x.textContent));
+      return t ? t.querySelector(".ds-tile-sub").textContent : "";
+    });
+    ok(/\d{4}-\d{2}-\d{2} → \d{4}-\d{2}-\d{2}/.test(alphaSub),
+      "VS SKINDEX discloses the measured window (from → to), not just a day count — " + JSON.stringify(alphaSub));
+
+    // 3) a SECOND, DIFFERENT inventory must start its own line — three days
+    //    later, so the 10-minute dedupe cannot mask it
+    await pageJ.evaluate(() => { window.__skew = 3 * 86400000; });
+    const totB = await pasteAs("76561190000000999", FIX_B);
+    ok(/\$43\.25/.test(totB) && /first load — the line starts here/.test(totB) && !/-75\.0%/.test(totB),
+      "a different inventory starts a FRESH line — no cross-inventory P/L (" +
+      (totB.match(/SINCE FIRST LOAD[^·]*/) || [""])[0].trim().slice(0, 60) + ")");
+    const buckets = await pageJ.evaluate(() => {
+      const rows = JSON.parse(localStorage.getItem("skinlab_inv_v1") || "[]");
+      return { n: rows.length, scopes: Array.from(new Set(rows.map((r) => r.inv || ""))),
+        raw: JSON.stringify(rows) };
+    });
+    ok(buckets.n === 2 && buckets.scopes.length === 2 &&
+      !/7656119000000/.test(buckets.raw) && buckets.raw.indexOf("\"inv\"") > 0,
+      "both loads are stored, scoped by a ONE-WAY digest — the SteamID itself never reaches localStorage");
+
+    // 4) same person, changed holdings: a value move across a changed basket
+    //    is not a return, and must not be printed as one
+    await pageJ.evaluate(() => { window.__skew = 6 * 86400000; });
+    const totSold = await pasteAs("76561190000000001", FIX_A_SOLD);
+    ok(/the holdings changed \(5 → 4 items\)/.test(totSold) && /not a return/.test(totSold) &&
+      !/-25\.0% over/.test(totSold),
+      "a changed basket is reported as a value change, never as a % return");
+    // a SWAP is the case identity + unit count cannot see: same 5 units, one
+    // name traded for another, same total — only the composition signature
+    // separates "the market moved" from "I changed what I hold"
+    const FIX_A_SWAP = JSON.stringify(Object.assign(JSON.parse(FIX_A), {
+      descriptions: JSON.parse(FIX_A).descriptions.map((d) => d.classid === "c3"
+        ? Object.assign({}, d, { market_hash_name: "Kilowatt Case" }) : d) }));
+    await pageJ.evaluate(() => { window.__skew = 8 * 86400000; });
+    await pasteAs("76561190000000001", FIX_A_SWAP);
+    // read the SINCE FIRST LOAD tile itself — "0.0% over" also appears in the
+    // alpha tile, so a whole-panel regex would be testing the wrong sentence
+    const swapSub = await pageJ.$eval("#invTotals", (el) => {
+      const t = Array.from(el.querySelectorAll(".ds-tile")).find((x) => /SINCE FIRST LOAD/.test(x.textContent));
+      return t ? t.querySelector(".ds-tile-sub").textContent : "";
+    });
+    ok(/the holdings changed \(different items\)/.test(swapSub) && !/% over/.test(swapSub),
+      "the same unit count with DIFFERENT items is caught by the composition signature, not read as a flat return — " +
+      JSON.stringify(swapSub.slice(0, 80)));
+
+    // 5) chart + data table with BOTH series plotted. Record a load 300 days
+    //    ago (before the reconstruction starts), then the same holdings
+    //    today — same line either way, id-less or not.
+    await pageJ.evaluate(() => { window.__skew = -300 * 86400000; });
+    await pasteAs("", FIX_A);
+    await pageJ.evaluate(() => { window.__skew = 6 * 86400000; });
+    await pasteAs("", FIX_A);
+    const chart = await pageJ.evaluate(() => ({
+      label: document.getElementById("invChart").getAttribute("aria-label") || "",
+      days: Array.from(document.querySelectorAll("#invChartTable table.dt tr td:first-child"))
+        .map((td) => td.textContent.replace("†", "")),
+    }));
+    const ordered = chart.days.every((d, i) => i === 0 || chart.days[i - 1] <= d);
+    ok(chart.days.length > 2 && ordered,
+      "the chart's data table is chronological — a recorded load older than the reconstruction sorts FIRST (" +
+      chart.days.slice(0, 3).join(", ") + " … " + chart.days.slice(-1) + ")");
+    ok(/2 series/.test(chart.label) && /Reconstructed value:/.test(chart.label) &&
+      chart.label.includes("Recorded loads: $173.00 on " + chart.days[0]),
+      "the chart aria-label describes BOTH plotted series, with the recorded line's real range — " +
+      JSON.stringify(chart.label.slice(0, 90)));
+
+    // 8) an oversized paste is CAPPED in the browser too (5000 assets), and
+    //    the note names the real cause instead of blaming Steam
+    const BIG = JSON.stringify({
+      assets: Array.from({ length: 5003 }, (_, i) => ({ appid: 730, contextid: "2", assetid: String(i + 1),
+        classid: "c1", instanceid: "0", amount: "1" })),
+      descriptions: [{ classid: "c1", instanceid: "0", market_hash_name: NAME, marketable: 1, tradable: 1 }],
+      total_inventory_count: 5003,
+    });
+    await pageJ.evaluate(() => { window.__skew = 9 * 86400000; });
+    const totBig = await pasteAs("76561190000000001", BIG);
+    ok(/5000 items/.test(totBig) && /Only the first 5000 items in that paste were read/.test(await pageJ.textContent("#invHint")),
+      "a 5003-asset paste is capped at 5000 in the browser, and the note names the cap (not \"Steam truncated it\")");
+
+    // 9) 🧹 Forget — the withdraw control, static half
+    const beforeForget = await pageJ.evaluate(() => (localStorage.getItem("skinlab_inv_v1") || "").length);
+    pageJ.once("dialog", (d) => d.dismiss());
+    await pageJ.click("#invForget");
+    await pageJ.waitForTimeout(300);
+    ok(beforeForget > 0 && (await pageJ.evaluate(() => (localStorage.getItem("skinlab_inv_v1") || "").length)) === beforeForget,
+      "static mode: cancelling the 🧹 Forget confirm keeps every recorded load");
+    pageJ.once("dialog", (d) => d.accept());
+    await pageJ.click("#invForget");
+    await pageJ.waitForFunction(() => !document.querySelector("#invTotals .ds-tile"), { timeout: 8000 }).catch(() => {});
+    const forgotten = await pageJ.evaluate(() => ({
+      raw: localStorage.getItem("skinlab_inv_v1"),
+      hint: document.getElementById("invHint").textContent,
+      rowShown: !!document.getElementById("invForgetRow").getClientRects().length,
+      toast: document.getElementById("toast").textContent,
+    }));
+    ok(forgotten.raw == null && /erased from this browser/.test(forgotten.toast) &&
+      /Load your inventory to value it/.test(forgotten.hint) && !forgotten.rowShown,
+      "static mode: 🧹 Forget clears the stored loads and the panel, and the control retires itself");
+
+    await pageJ.screenshot({ path: "/tmp/skin_lab_inventory_f2.png", fullPage: true });
+    console.log("  📸 /tmp/skin_lab_inventory_f2.png");
+    ok(errorsJ.length === 0, "F2 inventory flow: zero uncaught page errors" + (errorsJ.length ? " — " + errorsJ[0] : ""));
+    await ctxJ.close();
+    statJ.close();
+    fs.rmSync(JROOT, { recursive: true, force: true });
+  }
+
+  // 7) IDEMPOTENCE: the per-load history cap (60 names) must not make the
+  //    SAME paste answer differently on the second click. 61 tracked names,
+  //    pasted twice.
+  const KROOT = path.join(os.tmpdir(), "hh-skin-inv-f2cap-" + Date.now());
+  {
+    const { collect } = require("./collect.js");
+    const CAP_NAMES = Array.from({ length: 61 }, (_, i) => "Probe Case " + (i + 1));
+    fs.mkdirSync(path.join(KROOT, "data"), { recursive: true });
+    fs.writeFileSync(path.join(KROOT, "watchlist.json"), JSON.stringify({ items: CAP_NAMES }));
+    await collect({ root: KROOT });
+    const statK = makeStatic(5521, path.join(KROOT, "data"));
+    const ctxK = await browser.newContext({ viewport: { width: 1360, height: 900 } });
+    await ctxK.route(/^https?:\/\/(localhost|127\.0\.0\.1):8790\//, (r) => r.abort());
+    await ctxK.addInitScript(() => {
+      const realNow = Date.now;
+      window.__skew = 0;
+      Date.now = function () { return realNow() + (window.__skew || 0); };
+    });
+    const pageK = await ctxK.newPage();
+    await pageK.goto("http://localhost:5521/", { waitUntil: "networkidle" });
+    await pageK.waitForSelector(".mrow", { timeout: 15000 });
+    const CAP_FIXTURE = JSON.stringify({
+      assets: CAP_NAMES.map((n, i) => ({ appid: 730, contextid: "2", assetid: String(i + 1),
+        classid: "k" + i, instanceid: "0", amount: "1" })),
+      descriptions: CAP_NAMES.map((n, i) => ({ classid: "k" + i, instanceid: "0",
+        market_hash_name: n, marketable: 1, tradable: 1 })),
+      total_inventory_count: 61,
+    });
+    const capLoad = async () => {
+      const prev = await pageK.textContent("#invTotals");
+      await pageK.click("#invPasteBtn");
+      await pageK.waitForSelector("#invPasteModal.open", { timeout: 4000 });
+      await pageK.fill("#invPasteText", CAP_FIXTURE);
+      await pageK.click("#invPasteGo");
+      await pageK.waitForFunction((p) => {
+        const el = document.getElementById("invTotals");
+        return el && el.querySelectorAll(".ds-tile").length > 0 && el.textContent !== p &&
+          document.getElementById("invPanel").getAttribute("aria-busy") === "false";
+      }, prev, { timeout: 40000 });
+      const hint = await pageK.textContent("#invHint");
+      return { hint: hint, cov: (hint.match(/Reconstruction covers [^·]+·[^·]+·/) || [""])[0] };
+    };
+    const cap1 = await capLoad();
+    await pageK.evaluate(() => { window.__skew = 86400000; });
+    const cap2 = await capLoad();
+    ok(cap1.cov && cap1.cov === cap2.cov,
+      "the same paste yields the SAME coverage on a second load (over-cap names are negative-cached, not re-fetched) — " +
+      JSON.stringify((cap1.cov.match(/\d+ of \d+ names/) || [""])[0] + " vs " + (cap2.cov.match(/\d+ of \d+ names/) || [""])[0]));
+    ok(/Price history is read for at most 60 holdings/.test(cap1.hint) && /counted as having none/.test(cap1.hint),
+      "the browser-side history cap is disclosed instead of silently under-covering");
+    await ctxK.close();
+    statK.close();
+    fs.rmSync(KROOT, { recursive: true, force: true });
   }
 
   await browser.close();

@@ -1229,32 +1229,88 @@
   //            the user PASTES the inventory JSON (the same idiom as the
   //            price-history import modal) and the identical maths runs here,
   //            with snapshots in localStorage.
-  // PRIVACY: the SteamID lives in memory only — it is never written to
-  // localStorage and never sent anywhere but Steam. Only {t, value, count}
-  // snapshots are persisted.
+  // PRIVACY, per mode (the panel says this in plain English — renderInvPrivacy
+  // writes #invPrivacy from invLive(), because ONE sentence cannot be true in
+  // both modes):
+  //   static — the SteamID lives in memory only: never written to
+  //            localStorage, never sent anywhere but Steam. (This page does
+  //            ask its own host for the price history of the skins you own —
+  //            that is disclosed in the panel too.)
+  //   live   — the SteamID is sent to the tracker you pointed this page at
+  //            (which asks Steam) and that tracker persists it under its
+  //            gitignored local-data/ — nowhere else.
+  // Persisted here: {t, value, count, sig, inv} — value, unit count, the
+  // composition signature, and the snapshot's LINE key, which carries a
+  // ONE-WAY digest of the SteamID. Never the id itself. The 🧹 Forget control
+  // erases all of it (and, in live mode, the tracker's copy).
   const INV_SNAP_KEY = "skinlab_inv_v1";
   const INV_DEDUPE_MS = 600000;  // 10 min — matches the server's snapshot dedupe
   const INV_MAX_SNAPS = 2000;
   const INV_MAX_HISTORY_FETCH = 60; // never loop-fetch an unbounded item list
   const INV_TOP_ROWS = 12;
+  const INV_PASTE_MAX_ASSETS = 5000; // the cap the tracker + Steam both use
+  // callers MUST hold a real 17-digit id — printing a "YOUR_STEAMID64"
+  // placeholder in the one address the user is told to open is a dead end,
+  // not an instruction (openInvPaste shows how to FIND the id instead)
   const invUrlFor = (id) => "https://steamcommunity.com/inventory/" +
-    (id || "YOUR_STEAMID64") + "/730/2?l=english&count=5000";
+    id + "/730/2?l=english&count=5000";
 
-  // ── snapshots (static mode) — {t, value, count}, deduped inside 10 min ────
-  function invSnaps() {
+  // one-way 32-bit FNV-1a digest — the snapshot SCOPE key (so a SteamID can
+  // separate two inventories without ever being stored) and the composition
+  // fingerprint. A bucket label, not a security primitive.
+  function invDigest(s) {
+    let h = 0x811c9dc5;
+    s = String(s == null ? "" : s);
+    for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+    return h.toString(36);
+  }
+  // WHICH holdings, at what quantity — the composition signature. Identity
+  // alone cannot tell "the market moved" from "I bought a knife"; this can.
+  const invSignature = (rows) => invDigest((rows || [])
+    .map((r) => r.qty + "@" + r.name).sort().join("||"));
+  // The LINE a snapshot belongs to — the same rule the tracker applies to its
+  // own series (server.js invSnapKey), except the id is DIGESTED here because
+  // the raw SteamID must never reach localStorage: identity when we know it,
+  // else the composition (so two people's id-less pastes still don't merge),
+  // else the legacy bucket that pre-fix rows live in.
+  const invScope = (id, sig) => (id ? "id:" + invDigest(id) : sig ? "sig:" + sig : "");
+  // Same basket? The signature when both snapshots carry one (`sig` on both
+  // surfaces), else the unit count. An old row that recorded neither is not
+  // evidence of a change — never invent a mismatch.
+  const invSameBasket = (a, b) => {
+    if (!a || !b) return false;
+    if (a.sig && b.sig) return a.sig === b.sig;
+    if (a.count != null && b.count != null) return a.count === b.count;
+    return true;
+  };
+
+  // ── snapshots (static mode) — {t, value, count, sig, inv} ─────────────────
+  // SCOPED to the inventory they describe: loading a second profile starts its
+  // OWN line and never extends yours (a −75% "loss" measured across two
+  // different people's inventories is not a return).
+  function invSnapsRaw() {
     try {
       const a = JSON.parse(localStorage.getItem(INV_SNAP_KEY));
       return Array.isArray(a) ? a.filter((s) => s && isFinite(s.t) && isFinite(s.value)) : [];
     } catch (e) { return []; }
   }
-  function invAppendSnap(value, count) {
-    const list = invSnaps();
-    const last = list[list.length - 1];
+  function invSnaps(id, sig) {
+    const scope = invScope(id, sig);
+    return invSnapsRaw().filter((s) => (s.inv || "") === scope).sort((a, b) => a.t - b.t);
+  }
+  function invAppendSnap(value, count, id, sig) {
+    const scope = invScope(id, sig);
+    const all = invSnapsRaw();
+    // references INTO `all` (filter/sort keep them), so the dedupe below
+    // rewrites the stored row in place
+    const mine = all.filter((s) => (s.inv || "") === scope).sort((a, b) => a.t - b.t);
+    const last = mine[mine.length - 1];
     const now = Date.now();
-    if (last && now - last.t < INV_DEDUPE_MS) { last.t = now; last.value = value; last.count = count; }
-    else list.push({ t: now, value: value, count: count });
-    try { localStorage.setItem(INV_SNAP_KEY, JSON.stringify(list.slice(-INV_MAX_SNAPS))); } catch (e) { /* quota */ }
-    return invSnaps();
+    if (last && now - last.t < INV_DEDUPE_MS) {
+      last.t = now; last.value = value; last.count = count; last.sig = sig;
+    } else all.push({ t: now, value: value, count: count, sig: sig, inv: scope });
+    try { localStorage.setItem(INV_SNAP_KEY, JSON.stringify(all.slice(-INV_MAX_SNAPS))); } catch (e) { /* quota */ }
+    return invSnaps(id, sig);
   }
 
   // ── paste parsing: Steam's inventory JSON → the frozen item shape ─────────
@@ -1265,10 +1321,14 @@
   // below only while a host still serves an analytics.js without it — the two
   // agree by construction (same join key, same fold, same shape), so nothing
   // drifts when the shared one takes over.
+  // The CAP is not optional: a paste is unbounded user input and this is the
+  // page's main thread. The shared join takes the same 5000 the tracker and
+  // Steam both use (and clamps a single asset's `amount`, so "1e9" in a
+  // hand-edited paste can never write an absurd value into the series).
   function invParsePaste(raw) {
     const j = invCoerceJson(raw);
     return (A && typeof A.parseSteamInventory === "function")
-      ? A.parseSteamInventory(j) : invParseInventoryLocal(j);
+      ? A.parseSteamInventory(j, null, INV_PASTE_MAX_ASSETS) : invParseInventoryLocal(j);
   }
   // string → object, with the plain-English messages the UI shows. Kept out
   // of the join itself so both implementations get the same input handling.
@@ -1304,11 +1364,19 @@
     const byClass = new Map();
     for (const d of descs) byClass.set(String(d.classid) + "_" + String(d.instanceid), d);
     const acc = new Map();
-    for (const a of assets) {
+    let capped = false;
+    for (let ai = 0; ai < assets.length; ai++) {
+      // the SAME cap the shared join and the tracker apply — a real cap, not
+      // just a flag, so a hand-edited paste can't make this loop unbounded
+      if (ai >= INV_PASTE_MAX_ASSETS) { capped = true; break; }
+      const a = assets[ai];
       const key = String(a.classid) + "_" + String(a.instanceid);
       const d = byClass.get(key);
       if (!d || !d.market_hash_name) continue;
-      const qty = Math.max(1, Math.round(Number(a.amount)) || 1);
+      // clamped at BOTH ends: "1e9" in a hand-edited paste must never write an
+      // absurd value into the append-only series
+      const n = Math.round(Number(a.amount));
+      const qty = isFinite(n) && n > 0 ? Math.min(n, INV_PASTE_MAX_ASSETS) : 1;
       const cur = acc.get(key);
       if (cur) cur.qty += qty;
       else acc.set(key, { name: d.market_hash_name, qty: qty,
@@ -1318,7 +1386,8 @@
     if (!items.length) throw new Error("Could not match any items — the assets and descriptions in that JSON do not line up.");
     const total = Number(j.total_inventory_count);
     return { steamid64: null, count: items.reduce((s, i) => s + i.qty, 0), items: items,
-      truncated: isFinite(total) && total > assets.length };
+      truncated: capped || (isFinite(total) && total > assets.length),
+      truncatedBy: capped ? "cap" : (isFinite(total) && total > assets.length) ? "short_payload" : null };
   }
 
   // ── client-side maths (static mode) ──────────────────────────────────────
@@ -1417,9 +1486,18 @@
   // Per-item daily history for the reconstruction. Same DISPLAY-ONLY sources
   // the item chart uses (collected jsonl + paste-import + the backtest deep
   // base) — this never reaches the index, fixings, or the collector.
+  // IDEMPOTENCE: the per-load cap must not make the SAME paste answer
+  // differently on the second click. Names past the cap are negative-cached
+  // (and remembered in invHistSkipped) so a repeat load reads the identical
+  // history set — the chart, the coverage and the alpha stop drifting. The
+  // returned count is how many of THESE names the cap skipped, so the panel
+  // can say so instead of quietly under-covering.
   const invHistCache = new Map();
+  const invHistSkipped = new Set();
   async function invLoadHistory(names) {
-    const want = names.filter((n) => !invHistCache.has(n)).slice(0, INV_MAX_HISTORY_FETCH);
+    const miss = names.filter((n) => !invHistCache.has(n));
+    const want = miss.slice(0, INV_MAX_HISTORY_FETCH);
+    for (const n of miss.slice(INV_MAX_HISTORY_FETCH)) { invHistCache.set(n, null); invHistSkipped.add(n); }
     await Promise.all(want.map(async (name) => {
       const row = state.manifest && state.manifest.items.find((m) => m.name === name);
       if (!row || !row.slug) { invHistCache.set(name, null); return; }
@@ -1452,6 +1530,7 @@
       const out = daily.filter((d) => d.price > 0).map((d) => ({ day: d.day, price: d.price }));
       invHistCache.set(name, out.length ? out : null);
     }));
+    return names.filter((n) => invHistSkipped.has(n)).length;
   }
 
   // "did the inventory beat the Skindex over the same span" — the same
@@ -1463,7 +1542,9 @@
   // item ENTERING the line reads as a gain) nor than index inception (else
   // benchmarkGrowth clamps its own leg and the two legs differ), and truncate
   // the index at the inventory's last day. The snaps fallback requires an
-  // unchanged item count — two different inventories are not a return.
+  // UNCHANGED BASKET (composition fingerprint, or the unit count when a
+  // snapshot predates it) — a different inventory, or a deposit, is not a
+  // return.
   function invBenchmark(recon, snaps) {
     const series = state.market && state.market.series;
     if (!series || !series.length) return null;
@@ -1476,7 +1557,7 @@
       if (win.length < 2) return null;
       first = { t: Date.parse(win[0].day + "T00:00:00Z"), v: win[0].value };
       last = { t: Date.parse(win[win.length - 1].day + "T00:00:00Z"), v: win[win.length - 1].value };
-    } else if (snaps && snaps.length >= 2 && snaps[0].count === snaps[snaps.length - 1].count) {
+    } else if (snaps && snaps.length >= 2 && invSameBasket(snaps[0], snaps[snaps.length - 1])) {
       first = { t: snaps[0].t, v: snaps[0].value };
       last = { t: snaps[snaps.length - 1].t, v: snaps[snaps.length - 1].value };
     }
@@ -1497,15 +1578,26 @@
     const prices = invPriceMap();
     const priceOf = (n) => (prices.has(n) ? prices.get(n) : null);
     const value = invValue(parsed.items, priceOf);
-    await invLoadHistory(value.rows.filter((r) => r.value != null).map((r) => r.name));
+    const historyCapped = await invLoadHistory(value.rows.filter((r) => r.value != null).map((r) => r.name));
     const historyOf = (n) => invHistCache.get(n) || null;
     const recon = invRecon(parsed.items, historyOf, { priceOf: priceOf });
-    const series = invAppendSnap(value.total, parsed.count);
+    // the snapshot line is scoped to THIS inventory (digest of the id, or the
+    // composition when there is no id) and stamped with the basket it describes
+    const sig = invSignature(value.rows);
+    const series = invAppendSnap(value.total, parsed.count, parsed.steamid64, sig);
     return {
       steamid64: parsed.steamid64, profile: profile || "", fetchedAt: Date.now(), cached: false,
       count: parsed.count, value: value, recon: recon, series: series,
-      benchmark: invBenchmark(recon, series),
-      note: parsed.truncated ? "Steam truncated this inventory — only the first page of items is included." : "",
+      benchmark: invBenchmark(recon, series), historyCapped: historyCapped,
+      // three different causes, three different user fixes (the server's note
+      // branches the same way) — "Steam truncated it" was wrong for two of them
+      note: parsed.truncatedBy === "cap"
+        ? "Only the first " + INV_PASTE_MAX_ASSETS + " items in that paste were read — this inventory is truncated."
+        : parsed.truncatedBy === "more_items"
+          ? "Steam has more pages of this inventory — only the first is included."
+          : parsed.truncated
+            ? "Steam returned fewer items than it declared — reload the inventory page and copy it again."
+            : "",
     };
   }
 
@@ -1523,6 +1615,12 @@
   function invDataTableHtml(days, snaps) {
     const fam = (days || []).map((d) => ({ day: d.day, v: d.value, mark: false }))
       .concat((snaps || []).map((s) => ({ day: new Date(s.t).toISOString().slice(0, 10), v: s.value, mark: true })));
+    // CHRONOLOGICAL, always: this table is the keyboard/screen-reader
+    // equivalent of the mouse-only crosshair, and a recorded load predating
+    // the reconstruction used to be appended AFTER it (the Map month buckets
+    // preserve insertion order, so it also mislabelled the month). Ties put
+    // the reconstructed day first and the recorded mark second.
+    fam.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : (a.mark ? 1 : -1)));
     if (fam.length < 2) return "";
     let rows = fam, how = "daily";
     if (fam.length > 40) {
@@ -1544,17 +1642,29 @@
     const rep = state.inv.report;
     const totals = $("invTotals"), tbl = $("invTable"), hint = $("invHint");
     const wrap = $("invChartWrap"), cv = $("invChart");
+    renderInvPrivacy();
+    // the withdraw control appears whenever something CAN be forgotten: a
+    // report on screen, loads recorded in this browser, or a tracker that may
+    // be holding a SteamID from an earlier session
+    $("invForgetRow").hidden = !(rep || invSnapsRaw().length || invLive());
     $("invPanel").setAttribute("aria-busy", state.inv.busy ? "true" : "false");
     if (!rep) {
       totals.innerHTML = ""; tbl.innerHTML = ""; wrap.hidden = true;
       $("invLegend").innerHTML = ""; $("invChartTable").innerHTML = "";
       invChartArgs = null;
-      const n = invSnaps().length;
+      const n = invSnapsRaw().length;
+      // A FAILED first load must say what went wrong and what to do — it used
+      // to sit on "Reading your inventory…" forever (invRun's catch rendered
+      // while busy was still true, so this error branch was unreachable and
+      // the only surface was an 8-second toast).
       hint.innerHTML = state.inv.busy ? DS.hint({ text: "Reading your inventory…", cls: "hint" })
-        : state.inv.error ? DS.hint({ text: state.inv.error, cls: "hint" })
-        : DS.hint({ text: n
-            ? n + " earlier load" + (n === 1 ? "" : "s") + " recorded in this browser — load again to chart it."
-            : "Load your inventory to value it and chart it against the Skindex.", cls: "hint" });
+        : state.inv.error
+          ? DS.hint({ text: "Couldn't load that inventory: " + state.inv.error, cls: "hint" }) +
+            DS.hint({ text: "Nothing was recorded. Fix that and press 📈 Load inventory again, " +
+              "or use 📋 Paste JSON to load it from the inventory page yourself.", cls: "hint" })
+          : DS.hint({ text: n
+              ? n + " earlier load" + (n === 1 ? "" : "s") + " recorded in this browser — load again to chart it."
+              : "Load your inventory to value it and chart it against the Skindex.", cls: "hint" });
       return;
     }
     // carry the data table's open state + focus across the re-render
@@ -1569,8 +1679,14 @@
     // inventory's unit count); v.rows.length is the distinct-skin count
     const names = v.rows.length;
     const units = (v.pricedCount || 0) + (v.unpricedCount || 0);
-    // since-first-load: only real recorded loads, never a reconstructed day
+    // since-first-load: only real recorded loads, never a reconstructed day.
+    // A % move is a RETURN only when the basket is unchanged — buying (or
+    // loading a different inventory into a legacy, unscoped line) is a
+    // deposit, and printing it as a return is a lie.
     const firstSnap = snaps.length ? snaps[0] : null;
+    const lastSnap = snaps.length ? snaps[snaps.length - 1] : null;
+    const sameBasket = invSameBasket(firstSnap, lastSnap);
+    const lastCount = lastSnap && lastSnap.count != null ? lastSnap.count : rep.count;
     const delta = firstSnap && snaps.length >= 2 && firstSnap.value > 0 ? v.total - firstSnap.value : null;
     totals.innerHTML =
       DS.tile({ label: "INVENTORY VALUE", value: fmt$(v.total),
@@ -1582,10 +1698,19 @@
       DS.tile({ label: "SINCE FIRST LOAD",
         value: delta == null ? "—" : (delta >= 0 ? "+" : "") + fmt$(delta).replace("$-", "-$"),
         sub: delta == null ? "first load — the line starts here"
-          : fmtPct(delta / firstSnap.value, 1) + " over " + snaps.length + " recorded loads",
+          : sameBasket ? fmtPct(delta / firstSnap.value, 1) + " over " + snaps.length + " recorded loads"
+            // a SWAP keeps the unit count identical, so only the composition
+            // signature can see it — say "different items" rather than "5 → 5"
+            : "value change over " + snaps.length + " recorded loads — the holdings changed" +
+              (firstSnap.count != null && lastCount != null && firstSnap.count !== lastCount
+                ? " (" + firstSnap.count + " → " + lastCount + " items)" : " (different items)") +
+              ", so this is not a return",
         tone: delta == null ? null : cls(delta) }) +
       (b ? DS.tile({ label: "VS SKINDEX", value: (b.alpha > 0 ? "+" : "") + b.alpha + "pp α",
-        sub: "you " + fmtPct(b.invPct / 100, 1) + " · Skindex " + fmtPct(b.idxPct / 100, 1) + " over " + b.spanDays + "d",
+        // the window is TRIMMED to where both legs are like-for-like (the
+        // basket is whole and the index exists), so say which window it is
+        sub: "you " + fmtPct(b.invPct / 100, 1) + " · Skindex " + fmtPct(b.idxPct / 100, 1) +
+          " over " + b.spanDays + "d" + (b.from && b.to ? " · " + b.from + " → " + b.to : ""),
         tone: cls(b.alpha) })
         // say which side is missing rather than a bare dash — the alpha needs
         // BOTH a value path for the holdings AND a published index level over
@@ -1603,8 +1728,8 @@
       .filter((p) => isFinite(p.t) && p.v > 0);
     const snapPts = snaps.map((s) => ({ t: s.t, v: s.value })).filter((p) => isFinite(p.t) && p.v > 0);
     const lines = [];
-    if (reconPts.length >= 2) lines.push({ pts: reconPts, col: COL.price, w: 2 });
-    if (snapPts.length >= 2) lines.push({ pts: snapPts, col: COL.sma30, w: 1.5, dash: [5, 4] });
+    if (reconPts.length >= 2) lines.push({ pts: reconPts, col: COL.price, w: 2, name: "Reconstructed value" });
+    if (snapPts.length >= 2) lines.push({ pts: snapPts, col: COL.sma30, w: 1.5, dash: [5, 4], name: "Recorded loads" });
     if (lines.length) {
       wrap.hidden = false;
       $("invLegend").innerHTML =
@@ -1612,12 +1737,17 @@
         (snapPts.length >= 2 ? DS.legendItem({ swatch: COL.sma30, label: "Recorded loads" }) : "");
       const all = lines.flatMap((l) => l.pts.map((p) => p.v)).filter((x) => x > 0);
       const useLog = all.length > 1 && Math.max.apply(null, all) / Math.min.apply(null, all) > 6;
-      const span = reconPts.length >= 2 ? reconPts : snapPts;
       const dayOf = (t) => new Date(t).toISOString().slice(0, 10);
+      // describe EVERY plotted series. Naming only the reconstruction reported
+      // the wrong end value and a start date up to months late whenever the
+      // recorded-loads line was drawn too — and that line is often the one
+      // setting the visible x-range and the peak.
       cv.setAttribute("aria-label",
-        "Inventory value over time: " + fmt$(span[0].v) + " on " + dayOf(span[0].t) + " to " +
-        fmt$(span[span.length - 1].v) + " on " + dayOf(span[span.length - 1].t) + ", " +
-        span.length + " points. Full figures in the data table below the chart.");
+        "Inventory value over time, " + lines.length + " series. " +
+        lines.map((l) => l.name + ": " + fmt$(l.pts[0].v) + " on " + dayOf(l.pts[0].t) + " to " +
+          fmt$(l.pts[l.pts.length - 1].v) + " on " + dayOf(l.pts[l.pts.length - 1].t) +
+          ", " + l.pts.length + " points").join(". ") +
+        ". Full figures in the data table below the chart.");
       invChartArgs = { lines: lines, opts: { log: useLog, h: 150, fmt: invAxisFmt } };
       drawIdxChart(cv, lines, invChartArgs.opts);
       $("invChartTable").innerHTML = invDataTableHtml(recon.days, snaps);
@@ -1649,6 +1779,11 @@
         "today's holdings priced at past marks, each name entering the line when its own history starts.",
         cls: "hint" }) +
       (rep.note ? DS.hint({ text: rep.note, cls: "hint" }) : "") +
+      // the per-load history cap is now stable across identical loads — say it
+      // out loud instead of letting coverage creep up on every repeat paste
+      (rep.historyCapped ? DS.hint({ text: "Price history is read for at most " + INV_MAX_HISTORY_FETCH +
+        " holdings in this browser — " + rep.historyCapped + " name" + (rep.historyCapped === 1 ? " is" : "s are") +
+        " counted as having none. Run the local tracker to chart them all.", cls: "hint" }) : "") +
       (rep.cached ? DS.hint({ text: "Served from the tracker's cache (Steam rate-limits inventory reads).", cls: "hint" }) : "") +
       // a refresh that failed leaves the PREVIOUS report on screen — say so
       // next to it rather than letting stale numbers look fresh
@@ -1672,6 +1807,22 @@
   // flow is the whole story.
   const invLive = () => state.mode === "live" && !!state.health;
   const invSteamId = (s) => { const m = /(7656\d{13})/.exec(String(s || "")); return m ? m[1] : null; };
+  // ONE privacy sentence cannot be true in both modes: in live mode the
+  // SteamID IS sent (to the tracker the user is running) and IS written to
+  // disk there, so "stays in this browser" would be a false promise on the
+  // surface the panel is mostly used from. Written per mode, from invLive().
+  // Static mode also discloses the one host request the maths needs.
+  function renderInvPrivacy() {
+    const el = $("invPrivacy");
+    if (!el) return;
+    el.textContent = invLive()
+      ? "No sign-in, no password, no API key — public inventory data only. Your SteamID goes to the " +
+        "tracker you connected to (which asks Steam for you) and is stored in that machine's gitignored " +
+        "local-data/ folder — never uploaded anywhere else."
+      : "No sign-in, no password, no API key — public inventory data only. Your SteamID stays in this " +
+        "browser (it is only ever sent to Steam). To chart it, this page asks its own host for the " +
+        "recorded price history of the skins you own.";
+  }
   async function invRun(fn) {
     if (state.inv.busy) return;
     state.inv.busy = true; state.inv.error = "";
@@ -1683,6 +1834,11 @@
       renderInventory();
       toast("Inventory loaded: " + (rep.count || 0) + " items, " + fmt$(rep.value && rep.value.total));
     } catch (e) {
+      // clear busy BEFORE the render or the panel's status region keeps
+      // announcing "Reading your inventory…" for good: the no-report branch
+      // tests busy first, so the error text never reached the panel and the
+      // 8-second toast was the only surface. (finally stays idempotent.)
+      state.inv.busy = false;
       state.inv.error = e.message;
       renderInventory();
       toast(e.message, true);
@@ -1714,7 +1870,16 @@
   let invPasteOpener = null;
   function openInvPaste() {
     invPasteOpener = document.activeElement;
-    $("invPasteUrl").textContent = invUrlFor(invSteamId($("invInput").value));
+    // A static host cannot resolve a vanity name (no CORS to Steam), and the
+    // inventory URL needs the 17-digit id. Printing a "YOUR_STEAMID64"
+    // placeholder made the one address the user is told to open 404 — for the
+    // field's OWN placeholder, no less. So: URL when we have an id, and how
+    // to FIND the id when we don't. Pasting stays possible either way.
+    const id = invSteamId($("invInput").value);
+    $("invPasteUrl").textContent = id ? invUrlFor(id) : "";
+    $("invPasteUrl").hidden = !id;
+    $("invPasteStep1Lead").hidden = !id;
+    $("invPasteIdHelp").hidden = !!id;
     $("invPasteText").value = "";
     $("invPasteErr").textContent = "";
     $("invPasteModal").classList.add("open");
@@ -1751,10 +1916,64 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && $("invPasteModal").classList.contains("open")) closeInvPaste();
   });
+  // ── forget (the withdraw control) ────────────────────────────────────────
+  // A panel that promises "your SteamID is only stored here" must let the
+  // user UNDO that. Live mode erases the tracker's copy (stored id, cached
+  // holdings, whole value series) through its own POST route; both modes then
+  // clear this browser's snapshots and the rendered report. Destructive, so
+  // it confirms first — and it never half-clears: a failed server call leaves
+  // the browser's copy alone and says so.
+  async function invForget() {
+    const live = invLive();
+    const localN = invSnapsRaw().length;
+    const loads = localN + " recorded load" + (localN === 1 ? "" : "s");
+    if (!window.confirm(live
+      ? "Forget the stored inventory?\n\nThe tracker deletes your SteamID, the cached holdings and " +
+        "every recorded load from its local-data/ folder. This browser's " + loads + " go too.\n\nThis cannot be undone."
+      : "Forget the " + loads + " stored in this browser?\n\nThe value line starts over.\n\nThis cannot be undone.")) return;
+    let cleared = localN, wiped = false;
+    if (live) {
+      try {
+        const r = await api("/api/skins/inventory/forget", {});
+        cleared = r && r.cleared != null ? r.cleared : cleared;
+        wiped = true;
+      } catch (e) {
+        toast(/HTTP 404|HTTP 405/.test(e.message)
+          ? "This tracker is too old to erase stored inventories — update it, or delete its local-data/inventory files."
+          : e.message, true);
+        return; // nothing cleared anywhere — never leave the two copies out of step
+      }
+    }
+    try { localStorage.removeItem(INV_SNAP_KEY); } catch (e) { /* private mode */ }
+    state.inv.report = null; state.inv.error = "";
+    const wasFocused = document.activeElement === $("invForget") || document.activeElement === document.body;
+    renderInventory();
+    // in static mode the control RETIRES itself once there is nothing left to
+    // forget — never leave the keyboard standing on a hidden button
+    if (wasFocused && $("invForgetRow").hidden && $("invInput")) $("invInput").focus();
+    toast(wiped
+      ? "Forgotten: " + cleared + " recorded load" + (cleared === 1 ? "" : "s") + ", the stored SteamID and the cached holdings are off the tracker and out of this browser."
+      : "Forgotten: " + cleared + " recorded load" + (cleared === 1 ? "" : "s") + " erased from this browser.");
+  }
+  $("invForget").addEventListener("click", invForget);
   $("invPasteBtn").addEventListener("click", openInvPaste);
+  // WHICH inventory a paste belongs to. The value line is identity-keyed on
+  // both surfaces, so a paste sent with no profile lands in a
+  // composition-keyed line instead of the user's real one. What the user
+  // typed always wins; only when the field is empty (or still holds the
+  // profile this session already resolved) do we attach the resolved
+  // SteamID64 the tracker gave us — never someone else's id.
+  function invPasteProfile(typed) {
+    const rep = state.inv.report;
+    const known = rep && rep.steamid64 ? String(rep.steamid64) : "";
+    if (invSteamId(typed)) return typed;
+    if (known && (!typed || (rep.profile && typed === rep.profile))) return known;
+    return typed;
+  }
   $("invPasteGo").addEventListener("click", async () => {
     const raw = $("invPasteText").value;
-    const profile = $("invInput").value.trim();
+    const typed = $("invInput").value.trim();
+    const profile = invPasteProfile(typed);
     let parsed;
     try { parsed = invParsePaste(raw); }
     catch (e) { $("invPasteErr").textContent = e.message; return; }
@@ -1763,7 +1982,7 @@
     // no form control, so the keyboard simply stays where it landed
     closeInvPaste();
     await invRun(async () => invLive()
-      ? await invLoadLive({ paste: raw }, profile)
+      ? await invLoadLive({ paste: raw, profile: profile }, profile)
       : await invBuildClientReport(parsed, profile));
   });
 
@@ -1864,6 +2083,7 @@
     }
     try {
       state.health = await api("/api/skins/health");
+      renderInventory(); // the mode is only known now — live privacy copy, live controls
       $("netStatus").textContent = "ready · " + (API ? API.replace(/^https?:\/\//, "") : "local") +
         (state.health.steamCookie ? " · steam cookie set" : "") +
         (state.health.snapHours ? " · auto-snap " + state.health.snapHours + "h" : "");

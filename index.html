@@ -62,15 +62,31 @@
       <h2 id="invPanelH">MY INVENTORY</h2>
       <form class="lotForm invForm" id="invForm">
         <label for="invInput">Steam profile URL, vanity name, or SteamID64</label>
+        <!-- the placeholder shows the form that works on EVERY host: a static
+             build cannot resolve a vanity name (no CORS to Steam), so
+             /profiles/<17 digits> is the example that never dead-ends. The
+             live tracker still accepts a vanity name or a plain profile URL. -->
         <input id="invInput" type="text" autocomplete="off" spellcheck="false"
-               placeholder="steamcommunity.com/id/yourname" aria-describedby="invPrivacy">
+               placeholder="steamcommunity.com/profiles/76561198…" aria-describedby="invPrivacy">
         <div class="btnrow">
           <button class="ds-btn primary btn" type="submit" id="invGo">📈 Load inventory</button>
           <button class="ds-btn btn" type="button" id="invPasteBtn">📋 Paste JSON</button>
         </div>
       </form>
+      <!-- MODE-DEPENDENT: renderInvPrivacy() rewrites this from invLive() —
+           in live mode the SteamID IS sent to (and stored by) the tracker, so
+           a single "stays in this browser" sentence would be false there.
+           This markup is the static-mode wording, and the pre-boot default. -->
       <p class="ds-hint hint" id="invPrivacy">No sign-in, no password, no API key — public inventory
-        data only. Your SteamID stays in this browser (it is only ever sent to Steam).</p>
+        data only. Your SteamID stays in this browser (it is only ever sent to Steam). To chart it,
+        this page asks its own host for the recorded price history of the skins you own.</p>
+      <!-- the control that makes the promise above actionable: withdraw the
+           SteamID + the recorded value line from this browser AND (live mode)
+           from the tracker's disk. Shown only when there is something to
+           erase; confirms before wiping. -->
+      <div class="btnrow" id="invForgetRow" hidden>
+        <button class="ds-btn btn" type="button" id="invForget">🧹 Forget recorded loads</button>
+      </div>
       <div id="invTotals" class="pfTotals"></div>
       <div id="invChartWrap" class="invChartWrap" hidden>
         <div class="ds-legend invLegend" id="invLegend"></div>
@@ -121,7 +137,21 @@
         This page is a static site, and browsers are not allowed to read steamcommunity.com
         directly (Steam sends no CORS headers), so you fetch it and paste it:</p>
       <ol>
-        <li>Open this address in a new tab:<br><code id="invPasteUrl"></code></li>
+        <!-- With a 17-digit SteamID64 in the field, step 1 is the real
+             inventory URL. WITHOUT one (a vanity name / /id/ URL, which a
+             static host cannot resolve) openInvPaste hides the address and
+             shows #invPasteIdHelp instead — printing a YOUR_STEAMID64
+             placeholder here handed the user a URL that 404s. -->
+        <li><span id="invPasteStep1Lead">Open this address in a new tab:</span><br>
+          <code id="invPasteUrl"></code>
+          <span class="ds-hint hint" id="invPasteIdHelp" hidden>We need your <b>17-digit SteamID64</b>
+            to build that address — this page has no way to look up a vanity name (Steam sends no CORS
+            headers). Open your Steam profile: if the address reads
+            <code>steamcommunity.com/profiles/7656…</code>, that number is it. If it reads
+            <code>/id/&lt;name&gt;</code>, add <code>?xml=1</code> to that address and read the
+            <code>&lt;steamID64&gt;</code> value. Then close this dialog, put the number in the profile
+            field and press 📈 Load inventory again. (Running the tracker locally resolves vanity names
+            for you.) Already have the JSON? Paste it below — it works without the ID.</span></li>
         <li>Select all (<b>Ctrl/⌘+A</b>) and copy (<b>Ctrl/⌘+C</b>).</li>
         <li>Paste it below and press Load.</li>
       </ol>

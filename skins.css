@@ -214,8 +214,20 @@ table.dt th { color: var(--text-muted); }
 .modal h3 { margin: 0 0 8px; }
 .modal textarea { width: 100%; height: 180px; background: var(--surface-2); color: var(--text-primary);
   border: 1px solid var(--line-input); border-radius: 8px; padding: 9px; font: 11.5px/1.4 ui-monospace, monospace; }
+/* the paste textarea is the FIRST thing a modal focuses — it kept only the UA
+   default ring, unlike every other focusable in the house (F2 keyboard pass) */
+.modal textarea:focus-visible { border-color: var(--series-price);
+  outline: 2px solid var(--ds-focus); outline-offset: 1px; }
 .modal code, .disclaimer code { background: var(--surface-2); border: 1px solid var(--line);
   border-radius: 4px; padding: 0 4px; font-size: 11px; word-break: break-all; }
+/* the SteamID64 how-to that replaces the address when we have no id: a block
+   hint inside the numbered step, not an inline run-on. Both selectors are
+   [hidden]-aware ON PURPOSE — a class/id `display` rule outranks the UA
+   `[hidden] { display: none }`, so a plain rule here (and .btnrow's flex,
+   below) would leave a "hidden" element on screen. */
+#invPasteIdHelp:not([hidden]) { display: block; margin-top: 6px; }
+.btnrow[hidden] { display: none; }
+
 .modal .steps { color: var(--text-secondary); font-size: 12.5px; }
 .modalErr { color: var(--status-bad); font-size: 12.5px; min-height: 18px; margin-top: 6px; }
 
