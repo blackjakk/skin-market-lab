@@ -730,7 +730,7 @@
       const row = { id: v.id, label: v.label || v.id, kind: v.kind || null, ccy: v.ccy || null,
         mode: v.mode || null, status: "unavailable", reason: v.reason || null,
         strength: R.lanes.venue.strength, counts: R.lanes.venue.counts,
-        checked: "0/" + vEligible.length, agreed: "0/0", medianRatio: null, watch: 0, alert: 0,
+        checked: "0/" + vEligible.length, agreed: null, medianRatio: null, watch: 0, alert: 0,
         t: v.t != null ? v.t : null };
       if (!v.ok) { venueReport.push(row); continue; } // unavailable ≠ agreement
       venuesAnswered++;
@@ -745,6 +745,8 @@
       }
       row.checked = pairs.length + "/" + vEligible.length;
       if (pairs.length < R.venueMinQuotes) {
+        // agreed stays null: a venue that was never gated on evaluated no
+        // agreement, and "0/0" would read as "nothing agreed"
         // too few names to trust a cross-sectional median — publish the
         // coverage, raise nothing (the ratioMinDays discipline)
         row.status = pairs.length ? "insufficient" : "no-quotes";
