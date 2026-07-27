@@ -198,7 +198,16 @@ M.setTransport(async (url) => {
     const impRows = Array.from({ length: 120 }, (_, i) =>
       ({ t: Date.now() - (120 - i) * D, price: 30 * Math.exp(0.003 * i) * (1 + 0.05 * Math.sin(i / 6)), vol: 40 + (i % 20) }));
     fs.writeFileSync(path.join(SROOT, "data", "import", slug(NAME) + ".json"), JSON.stringify({ t: Date.now(), source: "probe", rows: impRows }));
-    await collect({ root: SROOT });
+    // committed deep Steam trade history so the VENUE MIX panel has a pair to
+    // render (the collector needs both sides; see probe.js for the arithmetic
+    // pins). ONE captured clock read — Date.now() inside the generator ticks
+    // between elements and drops the oldest row out of the 30d window.
+    const VM_NOW = Date.now();
+    fs.mkdirSync(path.join(SROOT, "backtest", "history"), { recursive: true });
+    fs.writeFileSync(path.join(SROOT, "backtest", "history", slug(NAME) + ".json"),
+      JSON.stringify({ rows: Array.from({ length: 31 }, (_, i) => [VM_NOW - (30 - i) * D, 20 + i * 0.1, 100]) }));
+    const sRun = await collect({ root: SROOT });
+    const vmPub = sRun.manifest.market.venueMix;
     const statD = makeStatic(5394, path.join(SROOT, "data"));
     const ctxD = await browser.newContext({ viewport: { width: 1360, height: 900 } });
     const pageD = await ctxD.newPage();
@@ -369,6 +378,17 @@ M.setTransport(async (url) => {
     ok(/SETTLEMENT FIXINGS/.test(await pageD.textContent("#itemView"))
       && (await pageD.$$eval("a", (as) => as.some((a) => /methodology\.html$/.test(a.href)))),
       "settlement panel on home links to the methodology page");
+    // VENUE MIX: the rendered share is compared against the COLLECTOR'S
+    // published number, not a literal — the display must echo the artifact,
+    // never compute its own. The FLOOR framing is a contract too, not
+    // decoration: it has to travel with the number, or a reader takes a lower
+    // bound on two visible venues for a market share.
+    const vmTxt = await pageD.textContent("#itemView");
+    ok(vmPub && vmPub.basket.paired !== 0
+      && vmTxt.indexOf("VENUE MIX · AT LEAST " + vmPub.basket.unitSharePct + "% OFF STEAM") >= 0
+      && /floor/i.test(vmTxt) && /one venue/i.test(vmTxt) && /realized sales/i.test(vmTxt),
+      "home echoes the collector's venue-mix floor (" + (vmPub && vmPub.basket.unitSharePct) +
+      "%) with its one-venue caveat attached — never framed as a market share");
     // methodology page: budget renders + in-browser hash verification
     await pageD.goto("http://localhost:5394/methodology.html", { waitUntil: "networkidle" });
     await pageD.waitForFunction(() => /\$/.test(document.getElementById("budgetOut").textContent), { timeout: 8000 });
@@ -376,6 +396,12 @@ M.setTransport(async (url) => {
     const integTxt = await pageD.textContent("#integOut");
     ok(/INTEG-1/.test(integTxt) && /NO FLAGS/.test(integTxt),
       "methodology page renders the INTEG-1 integrity state (clean fixture → NO FLAGS)");
+    await pageD.waitForFunction(() => /%/.test(document.getElementById("venueMixOut").textContent), { timeout: 8000 });
+    const vmSec = await pageD.textContent("#venueMixOut");
+    ok(vmSec.indexOf("At least " + vmPub.basket.unitSharePct + "% of observable units") >= 0
+      && vmSec.indexOf(vmPub.coverage.paired + " of " + vmPub.coverage.eligible + " tracked items") >= 0
+      && /timestamp/.test(vmSec),
+      "methodology §5d renders the venue-mix reading with its coverage and the timestamp-window rule");
     await pageD.click("#verifyBtn");
     await pageD.waitForFunction(() => /VERIFIED|MISMATCH/.test(document.getElementById("verifyOut").textContent), { timeout: 8000 });
     const verTxt = await pageD.textContent("#verifyOut");

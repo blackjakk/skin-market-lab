@@ -338,6 +338,31 @@ async function collect(opts) {
   if (manifest.market.integrity.flags.length)
     console.log("[collect] INTEGRITY FLAGS: " + manifest.market.integrity.flags
       .map((f) => f.severity + " " + f.lane + " " + f.name).join("; "));
+
+  // VENUE MIX (observation only): Steam's own sold-per-day counts against
+  // Skinport's realized-sale counts over the same trailing 30 days, per item
+  // and folded to the basket. Reads the DEEP committed pricehistory for the
+  // Steam side — the same display-only source the sparkline backfill uses,
+  // and for the same reason: mi.daily (the analytics/index input) never sees
+  // deep data, so this cannot reach a published level, weight or hash. It is
+  // a FLOOR, not a market-share estimate (analytics.venueMix explains why).
+  try {
+    const vmEntries = manifest.items.map((it) => {
+      const deep = readJson(path.join(root, "backtest", "history", it.slug + ".json"), null);
+      const st = salesStore[it.slug];
+      return {
+        name: it.name, slug: it.slug, cat: it.cat, tier: it.tier, price: it.latest,
+        steamRows: deep && Array.isArray(deep.rows) ? deep.rows : [],
+        sp: st ? st.data : null, spAsOf: st ? st.t : null,
+      };
+    });
+    manifest.market.venueMix = A.venueMix(vmEntries, { now: Date.now() });
+    const vb = manifest.market.venueMix.basket;
+    console.log("[collect] venue mix: off-steam floor " + vb.unitSharePct + "% of units / "
+      + vb.dollarSharePct + "% of dollars over " + manifest.market.venueMix.coverage.paired
+      + " paired items");
+  } catch (e) { console.log("[collect] venue mix: " + String(e.message || e)); }
+
   const macroFile = path.join(dataDir, "market.jsonl");
   const reading = { t: Date.now() };
   try { const p = await M.steamPlayers(); if (p != null) reading.players = p; }

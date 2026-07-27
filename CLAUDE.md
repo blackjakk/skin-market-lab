@@ -126,6 +126,31 @@ THIRD-VENUE LANE (INTEG-1 `venue`, 2026-07-27, WEAK tier — see above)
 - Known limits: all three publish ASKS not realized sales (hence weak tier);
   TM Market and Waxpeer correlate strongly (~1.3 independent reads, not 3).
 
+VENUE MIX (`analytics.venueMix`, 2026-07-27) — how much trade is OFF Steam:
+- Steam sold-per-day (deep committed pricehistory) vs an off-Steam venue's
+  REALIZED-sale counts over the same trailing 30 days, per item + folded to
+  the basket, with a dollar-weighted twin. Published at
+  `market.venueMix`; rendered on the home VENUE MIX panel and methodology
+  §5d. Measured 2026-07-27: 1.1% of units / 1.6% of dollars over 43 paired
+  items, rising monotonically with price (0.7% under $2 → 13.4% over $50 —
+  the shape Steam's own wallet-lock + 15% fee + price cap predict).
+- IT IS A FLOOR, NOT A MARKET SHARE, and the copy must say so wherever the
+  number appears (a client-probe check enforces this on the home panel).
+  We see two venues; BUFF163/CSFloat/DMarket/P2P are invisible and would
+  only ADD. `floor:true` rides in the payload.
+- Both sides must be REALIZED SALES. Listing counts are not sale counts.
+  A trade is not a sale either — Steam publishes no trade data at all, and
+  bot/alt/gambling-deposit/trade-up/gift transfers are not purchases.
+- WINDOW BY TIMESTAMP, never row count (see Traps — this is the one that
+  produced a wrong answer). A partial Steam window is REFUSED, not folded
+  in short: 10 days of Steam trade against 30 days of venue sales would
+  print a ~3x-inflated share. Skips are counted and named in `coverage`.
+- Display/surveillance ONLY. The Steam side reads deep history — the same
+  display-only source the sparkline backfill uses, which `mi.daily` (the
+  index input) is firewalled from. The firewall pin runs the collector with
+  the layer live vs `venueMix` throwing and asserts byte-identical series,
+  weights, budget, fixing preimages and hashes.
+
 STEAM INVENTORY (2026-07-27) — "value my inventory, chart it, beat the index":
 - NO SIGN-IN BY DESIGN. CS2 inventories are PUBLIC JSON
   (`steamcommunity.com/inventory/<id>/730/2`); Steam OpenID would only prove
@@ -569,6 +594,21 @@ Traps learned (do not re-learn):
   Logged-out listing pages no longer embed `var line1` history.
 - Snapshot volume readings are trailing-24h → daily bucket uses `volMode:
   "max"`; imported history rows are per-interval → `volMode: "sum"`.
+- **`pricehistory` rows are HOURLY near the present**, daily further back,
+  and sparse-hourly for thin items. Any window over those rows must be cut
+  by TIMESTAMP, never by row count: `rows.slice(-30)` reads the last ~30
+  HOURS on a liquid item and ~30 scattered readings on a thin one. That
+  understates Steam trade by a large factor on liquid items and much less
+  on thin ones, so it biases WORST exactly where the item is illiquid. It
+  printed a 21% off-Steam share where the truth was 1.1% (venue mix,
+  2026-07-27). `analytics.venueMix` publishes
+  `rules.windowedBy:"timestamp"` and probe.js unit-proves daily ≡ hourly
+  for the same trade.
+- Building a fixture with `Array.from({length:n}, (_,i) => [Date.now() - …])`
+  calls `Date.now()` PER ELEMENT. The clock ticks mid-loop, so the oldest
+  row lands a millisecond before a window anchored on the newest row and
+  silently drops out — a fixture that flakes between 3100 and 3000 units.
+  Capture the clock ONCE.
 - Chart palette (blue/aqua/orange/violet on surface #15161a) is
   dataviz-validated (CVD + normal-vision floors) — don't substitute hues
   casually; magenta beside orange FAILS the normal-vision floor.

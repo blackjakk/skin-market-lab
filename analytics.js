@@ -790,6 +790,119 @@
       windowDays: windowDays, ready: days >= minDays && aN > 0 && uN > 0 };
   }
 
+  // ── VENUE MIX: how much observable trade happens OFF Steam ───────────────
+  // Steam's own sold-per-day counts vs an off-Steam venue's realized-sale
+  // counts over the same trailing window, per item and folded to a basket.
+  //
+  // THIS IS A FLOOR, NEVER AN ESTIMATE. We can see exactly two venues. The
+  // off-Steam side is Skinport alone — BUFF163, CSFloat, DMarket, Bitskins
+  // and the whole P2P/bot layer are invisible to us, and every one of them
+  // would ADD to the off-Steam count. So a reading of 1% means "at least 1%
+  // of observable trade is off Steam", and the true share is higher by an
+  // unknown amount. Any consumer that reads this as a market-share estimate
+  // is reading it wrong; `floor: true` says so in the payload.
+  //
+  // Both sides must be REALIZED SALES (the strong evidence tier — INTEG-1's
+  // 2026-07-27 revision). Listing counts are not comparable to sale counts
+  // and are deliberately not accepted here.
+  //
+  // THE GRANULARITY TRAP (measured 2026-07-27, cost one wrong answer):
+  // Steam's pricehistory is HOURLY for the recent window and daily further
+  // back, and for thin items the hourly rows are sparse. Windowing by ROW
+  // COUNT therefore reads the last ~30 HOURS, not 30 days — which understates
+  // Steam by ~40x on liquid items and much less on thin ones, so it inflates
+  // the off-Steam share WORST exactly where the item is illiquid. The first
+  // cut of this metric printed 21% that way; windowed by TIMESTAMP it is
+  // 1.06%. Window by time. Never by rows.
+  //
+  // Pure: no clock, no network, no RNG (`now` is an argument). Display and
+  // surveillance only — nothing here reaches the index, the weights, the
+  // fixings or any hash, and the Steam side reads the DEEP committed history
+  // that mi.daily is firewalled from (the spark-backfill precedent).
+  //
+  //   entries[]  { name, slug, cat, tier, price,
+  //                steamRows: [[t, price, vol], …]   deep pricehistory rows
+  //                sp: { last30d: { volume, avg, median } }, spAsOf }
+  function venueMix(entries, opts) {
+    opts = opts || {};
+    const now = opts.now || 0;
+    const windowDays = opts.windowDays || 30;
+    const minDays = opts.minDays || 25;        // distinct days inside the window
+    const maxStaleDays = opts.maxStaleDays || 3;
+    const venue = opts.venue || "skinport";
+    const DAY = 86400000, W = windowDays * DAY;
+    const tierDefs = opts.tiers || [
+      { label: "under $2", lo: 0, hi: 2 }, { label: "$2–10", lo: 2, hi: 10 },
+      { label: "$10–50", lo: 10, hi: 50 }, { label: "over $50", lo: 50, hi: Infinity },
+    ];
+    const skipped = { noDeep: 0, staleDeep: 0, thinWindow: 0, noSales: 0, staleSales: 0 };
+    const items = [];
+    let maxOffsetDays = 0;
+    for (const e of entries || []) {
+      if (!e || !e.name) continue;
+      const sp30 = e.sp && e.sp.last30d;
+      if (!sp30 || !isFinite(sp30.volume)) { skipped.noSales++; continue; }
+      if (e.spAsOf && now && (now - e.spAsOf) / DAY > maxStaleDays) { skipped.staleSales++; continue; }
+      const rows = (e.steamRows || []).filter((r) => r && isFinite(r[0]) && isFinite(r[2]));
+      if (!rows.length) { skipped.noDeep++; continue; }
+      const end = rows[rows.length - 1][0];
+      if (now && (now - end) / DAY > maxStaleDays) { skipped.staleDeep++; continue; }
+      // window by TIMESTAMP (see the granularity trap above), anchored on the
+      // series' own last reading so a slightly stale import still measures a
+      // full 30 days rather than a truncated one.
+      const win = rows.filter((r) => r[0] >= end - W);
+      const days = new Set();
+      for (const r of win) days.add(dayKey(r[0]));
+      if (days.size < minDays) { skipped.thinWindow++; continue; }
+      let steamUnits = 0, steamDollars = 0;
+      for (const r of win) {
+        const v = Number(r[2]) || 0, p = Number(r[1]) || 0;
+        steamUnits += v; steamDollars += v * p;
+      }
+      const venueUnits = Number(sp30.volume) || 0;
+      // dollars use the window MEAN, not the median: this is a total traded
+      // value, and a median times a count is not a sum.
+      const venueDollars = venueUnits * (Number(sp30.avg) || 0);
+      const tot = steamUnits + venueUnits, dtot = steamDollars + venueDollars;
+      // the two windows can be offset when the Steam import lags: Skinport's
+      // 30d aggregate always ends NOW, the Steam window ends at `end`.
+      if (now) maxOffsetDays = Math.max(maxOffsetDays, Math.round((now - end) / DAY * 10) / 10);
+      items.push({
+        name: e.name, slug: e.slug || null, cat: e.cat || null, tier: e.tier || null,
+        price: e.price != null ? round2(e.price) : null,
+        steamUnits: steamUnits, venueUnits: venueUnits,
+        steamDollars: Math.round(steamDollars), venueDollars: Math.round(venueDollars),
+        unitSharePct: tot > 0 ? Math.round(1000 * venueUnits / tot) / 10 : null,
+        dollarSharePct: dtot > 0 ? Math.round(1000 * venueDollars / dtot) / 10 : null,
+        days: days.size,
+      });
+    }
+    const fold = (rowsIn) => {
+      let su = 0, vu = 0, sd = 0, vd = 0;
+      for (const r of rowsIn) { su += r.steamUnits; vu += r.venueUnits; sd += r.steamDollars; vd += r.venueDollars; }
+      return { items: rowsIn.length, steamUnits: su, venueUnits: vu,
+        steamDollars: sd, venueDollars: vd,
+        unitSharePct: su + vu > 0 ? Math.round(1000 * vu / (su + vu)) / 10 : null,
+        dollarSharePct: sd + vd > 0 ? Math.round(1000 * vd / (sd + vd)) / 10 : null };
+    };
+    const tiers = tierDefs.map((t) => Object.assign({ label: t.label },
+      fold(items.filter((r) => r.price != null && r.price >= t.lo && r.price < t.hi))));
+    items.sort((a, b) => (b.unitSharePct || 0) - (a.unitSharePct || 0));
+    const eligible = (entries || []).length;
+    return {
+      venue: venue, windowDays: windowDays, floor: true,
+      basket: fold(items), tiers: tiers, items: items,
+      coverage: { paired: items.length, eligible: eligible, skipped: skipped,
+        maxWindowOffsetDays: maxOffsetDays },
+      rules: { minDays: minDays, maxStaleDays: maxStaleDays,
+        windowedBy: "timestamp",
+        why: "steam pricehistory is HOURLY near the present — a row-count window reads ~30 hours, "
+          + "not 30 days, and inflates the off-steam share most on the thinnest items" },
+      note: "a FLOOR on off-steam trade share: skinport is one venue among many and every unseen "
+        + "venue would only add to it. both sides are realized sales; listing counts are not accepted.",
+    };
+  }
+
   // ── Steam inventory join (CANONICAL, shared) ─────────────────────────────
   // assets × descriptions → holdings. Lives HERE (the UMD module) so the
   // Node fetch path (market.js delegates to this) and the browser paste path
@@ -1049,7 +1162,7 @@
     marketOverview: marketOverview, includedFromDay: includedFromDay, INDEX_RULES: INDEX_RULES,
     deepHistoryBase: deepHistoryBase,
     cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily, btcSessionSplit: btcSessionSplit,
-    benchmarkGrowth: benchmarkGrowth, parseSteamInventory: parseSteamInventory,
+    benchmarkGrowth: benchmarkGrowth, venueMix: venueMix, parseSteamInventory: parseSteamInventory,
     inventoryValue: inventoryValue, inventoryReconstruction: inventoryReconstruction,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,

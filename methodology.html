@@ -346,6 +346,31 @@
   compared against the collector-published copy when present.</p>
   <div id="perpOut"><p class="muted">Loading…</p></div>
 
+  <h2>5d · Venue mix — how much trade happens off Steam</h2>
+  <p>Steam is where this index is marked, but it is not the whole market. This section measures
+  <b>observable</b> off-Steam trade: Steam's own sold-per-day counts against an off-Steam venue's
+  realized-sale counts over the same trailing 30 days, per item and folded to the basket.</p>
+  <p><b>It is a floor, not a market share.</b> We can see exactly two venues. The off-Steam side is
+  Skinport alone — BUFF163, CSFloat, DMarket, Bitskins and the entire P2P/bot layer are invisible
+  here, and every one of them would only <i>add</i> to the off-Steam count. A reading of 1% means
+  &ldquo;at least 1% of observable trade is off Steam&rdquo;; the true share is higher by an unknown
+  amount. The payload carries <code>floor:true</code> so no consumer can mistake it for an estimate.</p>
+  <p>Both sides count <b>realized sales</b> — the strong evidence tier from §5a. Listing counts are
+  not sale counts and are not accepted here. Steam trade counts come from the committed deep
+  pricehistory, the same display-only source the sparklines use; the index input never sees it, so
+  nothing in this section can reach a published level, weight or hash.</p>
+  <p><b>One trap worth naming</b>, because it produced a wrong answer before it was caught: Steam's
+  pricehistory is <b>hourly</b> near the present and daily further back, and for thin items the
+  hourly rows are sparse. Windowing by <i>row count</i> therefore reads the last ~30 hours rather
+  than 30 days — which understates Steam by a large factor on liquid items and much less on thin
+  ones, so it inflates the off-Steam share worst exactly where the item is illiquid. The first cut
+  of this measurement printed 21% that way; windowed by <i>timestamp</i> the same data prints ~1%.
+  The published rule records <code>windowedBy:"timestamp"</code>.</p>
+  <p>A trade is also not a sale. Steam publishes no trade data at all, and the item transfers that
+  do happen — bot inventories, alt accounts, gambling-site deposits, trade-ups, gifts — are not
+  purchases and would not belong in this number even if they were visible.</p>
+  <div id="venueMixOut"><p class="muted">Loading…</p></div>
+
   <h2>6 · Verification — check the operator</h2>
   <p>Every fixing publishes a SHA-256 hash over its canonical form
   (<code>{methodology, name, window, days, values, value}</code>). The button below re-derives the
@@ -502,6 +527,58 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       "</span></p>";
   }
 
+  // §5d — venue mix, read straight from the collector's published block. This
+  // one is NOT re-derived in the browser: the Steam side needs the whole deep
+  // pricehistory corpus (tens of MB across 53 files), which is not something
+  // to pull into a page. It reads what the collector published and says so.
+  function renderVenueMix(idx) {
+    var el = document.getElementById("venueMixOut");
+    var vm = idx && idx.market && idx.market.venueMix;
+    if (!vm || !vm.basket || !vm.basket.items) {
+      el.innerHTML = "<p class='muted'>No venue-mix reading published yet — it needs items where " +
+        "BOTH venues report realized sales over the same window.</p>";
+      return;
+    }
+    var b = vm.basket, c = vm.coverage, pc = function (v) { return v == null ? "—" : v + "%"; };
+    var head = "<p><b>At least " + esc(pc(b.unitSharePct)) + " of observable units</b> and " +
+      esc(pc(b.dollarSharePct)) + " of observable dollars traded off Steam over the last " +
+      esc(String(vm.windowDays)) + " days — " + esc(fmtInt(b.venueUnits)) + " off-Steam sales against " +
+      esc(fmtInt(b.steamUnits)) + " on Steam, across " + esc(String(c.paired)) + " of " +
+      esc(String(c.eligible)) + " tracked items.</p>";
+    var tiers = (vm.tiers || []).filter(function (t) { return t.items; });
+    var body = tiers.length ? DS.specTable({
+      head: ["Price band", "Items", "Steam units", "Off-Steam units", "Off-Steam units %", "Off-Steam dollars %"],
+      rows: tiers.map(function (t) {
+        return [t.label, String(t.items), fmtInt(t.steamUnits), fmtInt(t.venueUnits),
+          pc(t.unitSharePct), pc(t.dollarSharePct)];
+      }),
+    }) : "";
+    // The price gradient is the interesting part, so it gets stated — with
+    // its own coverage caveat attached, because the top bands are thin.
+    var top = tiers[tiers.length - 1], bot = tiers[0];
+    var grad = (tiers.length > 1 && top && bot && top.unitSharePct != null && bot.unitSharePct != null
+      && top.unitSharePct > bot.unitSharePct)
+      ? "<p>Off-Steam share rises with price — " + esc(pc(bot.unitSharePct)) + " in the " + esc(bot.label) +
+        " band against " + esc(pc(top.unitSharePct)) + " in the " + esc(top.label) + " band. That is the shape " +
+        "Steam's own rules predict: proceeds are wallet-locked, the fee is 15%, and there is a price cap, " +
+        "so the more an item is worth the more reason a seller has to leave. Read it as a direction, not a " +
+        "measurement — the expensive bands hold only " + esc(String(top.items)) + " item(s) here, and the " +
+        "tracked basket is case-heavy.</p>" : "";
+    var skip = c.skipped || {};
+    el.innerHTML = head + body + grad +
+      "<p class='muted'>" + esc(String(c.eligible - c.paired)) + " item(s) not paired: " +
+      esc(String(skip.noDeep || 0)) + " without committed Steam trade history, " +
+      esc(String(skip.staleDeep || 0)) + " whose history is over " + esc(String(vm.rules.maxStaleDays)) +
+      " days stale, " + esc(String(skip.thinWindow || 0)) + " with under " + esc(String(vm.rules.minDays)) +
+      " days inside the window, " + esc(String((skip.noSales || 0) + (skip.staleSales || 0))) +
+      " without a fresh off-Steam sales aggregate. Windows can be offset by up to " +
+      esc(String(c.maxWindowOffsetDays)) + " day(s) — the off-Steam aggregate always ends now, the Steam " +
+      "window ends at its own last import. Window rule: <code>" + esc(vm.rules.windowedBy) + "</code>. " +
+      "Published by the collector; not re-derived in this browser (the Steam side is the full deep " +
+      "pricehistory corpus).</p>";
+  }
+  function fmtInt(n) { return n == null ? "—" : String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+
   function sha256Hex(str) {
     return crypto.subtle.digest("SHA-256", new TextEncoder().encode(str)).then(function (buf) {
       return Array.from(new Uint8Array(buf)).map(function (b) { return b.toString(16).padStart(2, "0"); }).join("");
@@ -562,8 +639,11 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   var settlement = null;
   var perpBoot = function () {
     fetch("data/index.json", { cache: "no-store" }).then(function (r) { return r.json(); })
-      .then(renderPerp)
-      .catch(function () { document.getElementById("perpOut").innerHTML = "<p class='muted'>data/index.json not published yet.</p>"; });
+      .then(function (idx) { renderPerp(idx); renderVenueMix(idx); })
+      .catch(function () {
+        document.getElementById("perpOut").innerHTML = "<p class='muted'>data/index.json not published yet.</p>";
+        document.getElementById("venueMixOut").innerHTML = "<p class='muted'>data/index.json not published yet.</p>";
+      });
   };
   fetch("data/settlement.json", { cache: "no-store" }).then(function (r) { return r.json(); }).then(function (j) {
     settlement = j;

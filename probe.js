@@ -1076,6 +1076,18 @@ async function fixtureTransport(url, headers) {
   fs.mkdirSync(path.join(CROOT, "backtest", "history"), { recursive: true });
   fs.writeFileSync(path.join(CROOT, "backtest", "history", slug("Fracture Case") + ".json"),
     JSON.stringify({ rows: Array.from({ length: 18 }, (_, i) => [Date.now() - (20 - i) * D, 10 + i * 0.5, 100]) }));
+  // deep history for the VENUE MIX lane: 31 daily rows ending today, 100
+  // units each = 3100 Steam units in the 30d window. The fixture's skinport
+  // aggregate is 21 units for every item, so this pair must print
+  // 21/(3100+21) = 0.7%. Fracture's 18-row file stays as it is — it is the
+  // spark-backfill contract AND, at 18 days, a window-rule skip case.
+  // NOTE the single captured NOW: Date.now() called INSIDE the generator
+  // ticks between elements, so the oldest row lands a millisecond before the
+  // window's own anchor and silently drops out — 3100 units becomes 3000
+  // whenever the loop straddles a millisecond. One clock read, one window.
+  const VM_NOW = Date.now();
+  fs.writeFileSync(path.join(CROOT, "backtest", "history", slug(NAME) + ".json"),
+    JSON.stringify({ rows: Array.from({ length: 31 }, (_, i) => [VM_NOW - (30 - i) * D, 20 + i * 0.1, 100]) }));
   // grandfather the case + art grail (see seedFounding note) so the index
   // bases at 100 instead of seasoning out now that "today" > adoption date
   seedFounding(path.join(CROOT, "data"), "Fracture Case", { src: "steam", price: 23, lowest: 22.1, vol: 57 });
@@ -1149,6 +1161,77 @@ async function fixtureTransport(url, headers) {
     "14d spark backfills from committed deep history (display-only splice; ends at the collected mark)");
   ok(c1.manifest.market.today.btcSessions && c1.manifest.market.today.btcSessions.ready === false,
     "today publishes the BTC session-split slot (accruing until 3h-cadence samples exist)");
+  // ── VENUE MIX (off-Steam trade floor) ──────────────────────────────────
+  // HAND-COMPUTED against the fixture: NAME's deep file is 31 daily rows ×
+  // 100 units, so the 30d window holds 3100 Steam units at prices 20.1…23.0
+  // (dollars = 100 × Σprices). The fixture's skinport aggregate is volume 21
+  // at avg 21 for every item → 21 units / $441 off-Steam.
+  {
+    const vm = c1.manifest.market.venueMix;
+    const nmMix = vm.items.find((i) => i.name === NAME);
+    ok(nmMix && nmMix.steamUnits === 3100 && nmMix.venueUnits === 21
+      && nmMix.unitSharePct === 0.7 && nmMix.days === 31,
+      "venue mix: Steam units windowed by TIME (3100 over 31 days) vs the venue's realized 30d sales (21) → 0.7% off-Steam");
+    // dollars: venue = 21 units × $21 window MEAN = $441 (never median×count,
+    // which is not a sum); steam = 100 units × Σ(20.0…23.0) = 100 × 666.5.
+    ok(nmMix.venueDollars === 441 && nmMix.steamDollars === 66650,
+      "venue mix: dollars are the window MEAN × count on the venue side (21×$21=$441) and unit×price summed on the Steam side");
+    ok(vm.floor === true && vm.rules.windowedBy === "timestamp" && vm.windowDays === 30
+      && /floor/i.test(vm.note) && /realized sales/i.test(vm.note),
+      "venue mix publishes floor:true, the timestamp-window rule and the one-venue caveat — never presented as a market share");
+    // Fracture's deep file is 18 daily rows ending ~3 days back — short AND
+    // at the staleness edge. Either way it must be SKIPPED and COUNTED, never
+    // folded in over a partial window (which would overstate off-Steam share).
+    const skTot = Object.keys(vm.coverage.skipped).reduce((s, k) => s + vm.coverage.skipped[k], 0);
+    ok(!vm.items.some((i) => i.name === "Fracture Case")
+      && skTot === vm.coverage.eligible - vm.coverage.paired,
+      "venue mix: an item that fails a window rule is skipped and accounted for — skips + pairs always equal the eligible set");
+    ok(vm.coverage.skipped.noDeep >= 1 && vm.coverage.paired < vm.coverage.eligible,
+      "venue mix: items with no committed Steam trade history are reported unpaired, not treated as zero off-Steam");
+  }
+  // THE GRANULARITY TRAP, unit-proven: identical 30 days of trade, once as
+  // daily rows and once as hourly rows. A row-count window would read the
+  // hourly series as ~30 hours and print a wildly higher off-Steam share;
+  // windowing by timestamp must give the SAME answer for both shapes.
+  {
+    const T = Date.UTC(2026, 5, 30), DD = 86400000, H = 3600000;
+    const sp = { last30d: { volume: 100, avg: 10, median: 10 } };
+    const daily = Array.from({ length: 31 }, (_, i) => [T - (30 - i) * DD, 10, 100]);
+    // the SAME 3100 units over the SAME 30-day span, delivered hourly (721
+    // rows, T-30d … T) instead of daily. Same trade, different granularity.
+    const hourly = [];
+    for (let k = 30 * 24; k >= 0; k--) hourly.push([T - k * H, 10, 3100 / 721]);
+    const a = A.venueMix([{ name: "D", price: 10, steamRows: daily, sp: sp }], { now: T });
+    const b = A.venueMix([{ name: "H", price: 10, steamRows: hourly, sp: sp }], { now: T });
+    ok(Math.abs(a.basket.steamUnits - 3100) < 1e-6 && Math.abs(b.basket.steamUnits - 3100) < 1e-6
+      && a.basket.unitSharePct === b.basket.unitSharePct && a.basket.unitSharePct === 3.1,
+      "venue mix: the same 30 days of trade reads identically as daily or hourly rows — the window is time, not row count (the trap that first printed 21% instead of 1%)");
+    const rowCount = hourly.slice(-31).reduce((s, r) => s + r[2], 0);
+    ok(rowCount < b.basket.steamUnits / 20,
+      "venue mix: proof the trap is real — the last 31 ROWS of the hourly series hold under 5% of the units the last 31 DAYS do");
+  }
+  // Staleness: a venue aggregate or a Steam import older than the limit is
+  // dropped rather than compared across mismatched windows.
+  {
+    const T = Date.UTC(2026, 5, 30), DD = 86400000;
+    const rows = Array.from({ length: 31 }, (_, i) => [T - (30 - i) * DD, 10, 100]);
+    const sp = { last30d: { volume: 100, avg: 10 } };
+    const fresh = A.venueMix([{ name: "F", price: 10, steamRows: rows, sp: sp, spAsOf: T }], { now: T });
+    const stale = A.venueMix([{ name: "S", price: 10, steamRows: rows, sp: sp, spAsOf: T - 10 * DD }], { now: T });
+    const old = A.venueMix([{ name: "O", price: 10,
+      steamRows: rows.map((r) => [r[0] - 10 * DD, r[1], r[2]]), sp: sp, spAsOf: T }], { now: T });
+    ok(fresh.coverage.paired === 1 && stale.coverage.paired === 0 && stale.coverage.skipped.staleSales === 1
+      && old.coverage.paired === 0 && old.coverage.skipped.staleDeep === 1,
+      "venue mix: a stale venue aggregate or a stale Steam import is dropped and named, never compared across mismatched windows");
+    // A partial window is the dangerous failure: 10 days of Steam trade
+    // against 30 days of venue sales would print a 3x-inflated off-Steam
+    // share. It must be refused, not folded in short.
+    const short = A.venueMix([{ name: "P", price: 10,
+      steamRows: rows.slice(-10), sp: sp, spAsOf: T }], { now: T });
+    ok(short.coverage.paired === 0 && short.coverage.skipped.thinWindow === 1
+      && short.basket.unitSharePct === null,
+      "venue mix: 10 days of Steam trade never gets compared to 30 days of venue sales — a short window is refused, not folded in (it would print a 3x-inflated share)");
+  }
   // ── embed API + benchmark pins ─────────────────────────────────────────
   const emb = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "skindex.json"), "utf8"));
   ok(emb.v === 1 && emb.name === "Skindex" && emb.methodology === "SMLX-6"
@@ -2300,11 +2383,14 @@ async function fixtureTransport(url, headers) {
       && lInteg.summary.corroboration.strong.byLane.volume === "6/6"
       && lRun.manifest.market.settlement.integrity.summary.corroboration.weak.counted === false,
       "collector runs the volume lane end to end on the marks it already publishes: 6/6 checked, one hand-computed ALERT (move +0.288, response −1.379 vs the market) — and the tiered coverage rides into the settlement record");
-    // the whole surveillance layer is now switched OFF for an identical run
-    const realAssess = S.assessIntegrity;
+    // the whole surveillance layer — integrity lanes AND the venue-mix
+    // observation — is now switched OFF for an identical run
+    const realAssess = S.assessIntegrity, realVenueMix = A.venueMix;
     S.assessIntegrity = () => ({ version: "INTEG-1", flags: [], venues: [], volume: null, summary: {} });
+    A.venueMix = () => { throw new Error("venue mix disabled for the firewall run"); };
     let dRun;
-    try { dRun = await collect({ root: D_ROOT, env: {} }); } finally { S.assessIntegrity = realAssess; }
+    try { dRun = await collect({ root: D_ROOT, env: {} }); }
+    finally { S.assessIntegrity = realAssess; A.venueMix = realVenueMix; }
     const fwSeries = (m) => JSON.stringify(m.market.series.map((d) => Object.assign({}, d, { t: undefined })));
     const lSet = JSON.parse(fs.readFileSync(path.join(L_ROOT, "data", "settlement.json"), "utf8"));
     const dSet = JSON.parse(fs.readFileSync(path.join(D_ROOT, "data", "settlement.json"), "utf8"));
@@ -2314,13 +2400,14 @@ async function fixtureTransport(url, headers) {
     const dHashes = Object.keys(dSet.latest.fixings).map((k) => dSet.latest.fixings[k].hash).join("|");
     const lReHash = Object.keys(lSet.detail).map((k) =>
       crypto.createHash("sha256").update(S.canonical(lSet.detail[k])).digest("hex")).join("|");
-    ok(S.assessIntegrity === realAssess
+    ok(S.assessIntegrity === realAssess && A.venueMix === realVenueMix
+      && lRun.manifest.market.venueMix && !dRun.manifest.market.venueMix
       && fwSeries(lRun.manifest) === fwSeries(dRun.manifest)
       && JSON.stringify(lRun.manifest.market.today) === JSON.stringify(dRun.manifest.market.today)
       && JSON.stringify(lRun.manifest.market.weights) === JSON.stringify(dRun.manifest.market.weights)
       && JSON.stringify(lRun.manifest.market.settlement.budget) === JSON.stringify(dRun.manifest.market.settlement.budget)
       && lCanon === dCanon && lHashes === dHashes && lHashes === lReHash && lHashes.length > 0,
-      "FIREWALL: the integrity layer LIVE (volume lane firing an alert) and DEAD (assessIntegrity stubbed out) publish a byte-identical series, today block, index weights, manipulation budget, fixing canonical preimages and fixing hashes — the new lane, like every other, is surveillance that can never move a settlement number");
+      "FIREWALL: the surveillance layer LIVE (volume lane firing an alert, venue mix published) and DEAD (assessIntegrity stubbed, venueMix throwing) publish a byte-identical series, today block, index weights, manipulation budget, fixing canonical preimages and fixing hashes — every lane, and the venue-mix observation, can never move a settlement number");
     fs.rmSync(L_ROOT, { recursive: true, force: true });
     fs.rmSync(D_ROOT, { recursive: true, force: true });
   }

@@ -208,6 +208,49 @@ until more ids accrue or a cookie lands. The CN PREMIUM metric designed
 here is not built: with Buff coverage thin it would be a headline number
 resting on a handful of items.
 
+### 4c · Venue mix — sizing what we cannot see (shipped 2026-07-27)
+
+Every lane above corroborates a mark. This one sizes the **blind spot**: how
+much of the market trades where we are not looking. It compares Steam's own
+sold-per-day counts against an off-Steam venue's realized-sale counts over
+the same trailing 30 days, per item and folded to the basket.
+
+Measured 2026-07-27 over 43 paired items: **≥1.1% of units, ≥1.6% of
+dollars** off Steam, rising monotonically with price — 0.7% under $2 against
+13.4% over $50. That gradient is not a surprise, it is what Steam's rules
+mechanically produce: proceeds are wallet-locked, the fee is 15%, and there
+is a price cap, so the more an item is worth the more reason a seller has to
+leave. The expensive bands are thin here (the tracked basket is case-heavy),
+so read the gradient as a direction, not a measurement.
+
+Three disciplines make it honest rather than a headline:
+
+1. **It is a floor.** Two venues are visible; BUFF163, CSFloat, DMarket,
+   Bitskins and the P2P/bot layer are not, and every one of them would only
+   add. `floor:true` rides in the payload, and the caveat is enforced on the
+   surface by a client-probe check rather than left to editorial discipline.
+2. **Both sides are realized sales** — the strong tier from §4. Listing
+   counts are not sale counts and are refused. A *trade* is not a sale
+   either: Steam publishes no trade data at all, and bot inventories, alt
+   accounts, gambling deposits, trade-ups and gifts are not purchases.
+3. **A partial window is refused, not folded in short.** Ten days of Steam
+   trade against thirty days of venue sales would print a ~3x-inflated
+   share. Items failing a window rule are skipped and *counted* in
+   `coverage`, so thin coverage stays visible instead of silently flattering
+   the number.
+
+The measurement detail that cost the most: Steam's `pricehistory` is hourly
+near the present and daily further back, so a row-count window reads ~30
+hours instead of 30 days — and because thin items have sparse hourly rows,
+it inflates the off-Steam share worst exactly where the item is illiquid.
+The first cut printed 21%; windowed by timestamp the same data prints 1.1%.
+`rules.windowedBy:"timestamp"` is published and unit-proven (daily rows ≡
+hourly rows for the same trade).
+
+Like every lane here it is **observation only** — the firewall pin runs the
+collector with the layer live and with `venueMix` throwing, and asserts
+byte-identical series, weights, budget, fixing preimages and hashes.
+
 ## 5 · The ceiling — what nothing in this file fixes
 
 - **A Valve-side lie is invisible to everyone.** Every witness reads the

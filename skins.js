@@ -502,6 +502,7 @@
           (lose.length ? '<span class="ds-hint hint" style="margin-left:12px">losers</span>' + lose.map(moverChip).join("") : "") +
         "</div>" : "") +
       (state.market && state.market.settlement ? settlementPanel(state.market.settlement) : "") +
+      (state.market && state.market.venueMix ? venueMixPanel(state.market.venueMix) : "") +
       '<div class="ds-panel panel" id="mktPanel" tabindex="-1">' +
       // segment tabs: a real ARIA tablist (aria-selected + roving tabindex +
       // arrow keys via DS.tabsKeyNav) over ONE table, so the 64-row wall
@@ -606,6 +607,38 @@
       "</div>" +
       '<div class="ds-hint hint">Dated settlement marks, re-derivable bit-exactly from the committed data — ' +
       '<a href="methodology.html">methodology &amp; verification</a>. A measurement, not an offer of any instrument.</div></div>';
+  }
+  // VENUE MIX — how much of the observable trade happens OFF Steam.
+  // Every number here is published by the collector (analytics.venueMix);
+  // the display invents nothing. The FLOOR framing is not decoration: we can
+  // see two venues, so the reading is a lower bound and the copy has to say
+  // that wherever the number appears, not only in the methodology.
+  function venueMixPanel(vm) {
+    const b = vm.basket || {};
+    if (!b.items) return "";
+    const pct = (v) => (v == null ? "—" : v + "%");
+    const tierRows = (vm.tiers || []).filter((t) => t.items).map((t) => [
+      t.label, String(t.items), pct(t.unitSharePct), pct(t.dollarSharePct),
+    ]);
+    return '<div class="ds-panel panel"><h2>VENUE MIX · AT LEAST ' + esc(pct(b.unitSharePct)) + " OFF STEAM</h2>" +
+      '<div class="tiles">' +
+      tile2("OFF-STEAM UNITS", pct(b.unitSharePct),
+        fmtCompact(b.venueUnits) + " of " + fmtCompact(b.steamUnits + b.venueUnits) + " units, 30d", "") +
+      tile2("OFF-STEAM DOLLARS", pct(b.dollarSharePct),
+        "$" + fmtCompact(b.venueDollars) + " of $" + fmtCompact(b.steamDollars + b.venueDollars) + ", 30d", "") +
+      tile2("PAIRED ITEMS", String(vm.coverage.paired) + " / " + String(vm.coverage.eligible),
+        "both venues report realized sales", "") +
+      "</div>" +
+      (tierRows.length ? DS.specTable({
+        cls: "venueMixTiers",
+        head: ["Price band", "Items", "Off-Steam units", "Off-Steam dollars"],
+        rows: tierRows,
+      }) : "") +
+      '<div class="ds-hint hint">A <b>floor</b>, not a market share: the off-Steam side is one venue ' +
+      "(" + esc(vm.venue) + ") and every venue we cannot see — BUFF163, CSFloat, DMarket, the P2P/bot layer — " +
+      "would only add to it. Both sides count realized sales over " + esc(String(vm.windowDays)) + " days; " +
+      "listing counts are not comparable and are not accepted. Observation only — it never touches the index " +
+      "or a fixing. <a href=\"methodology.html\">How it is measured</a>.</div></div>";
   }
   // tile2 → DS.tile (home strip + settlement; read by TEXT only, no .lb hook needed).
   const tile2 = (lb, v, sub, c) => DS.tile({ label: lb, value: v, sub: sub || null, tone: c || null });
