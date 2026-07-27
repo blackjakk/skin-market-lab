@@ -1,5 +1,5 @@
 {
- "t": 1785126353040,
+ "t": 1785148143597,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,24 +18,17 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Snakebite Case",
-    "primary": 0.74,
-    "witnessed": 0.74,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Operation Riptide Case",
-    "primary": 13.82,
-    "witnessed": 13.82,
-    "devLog": 0,
+    "primary": 13.98,
+    "witnessed": 14.09,
+    "devLog": 0.008,
     "ok": true
    },
    {
     "name": "Dreams & Nightmares Case",
     "primary": 1.89,
-    "witnessed": 1.89,
-    "devLog": 0,
+    "witnessed": 1.85,
+    "devLog": -0.021,
     "ok": true
    },
    {
@@ -48,15 +41,22 @@
    {
     "name": "Revolution Case",
     "primary": 0.39,
-    "witnessed": 0.4,
-    "devLog": 0.025,
+    "witnessed": 0.39,
+    "devLog": 0,
     "ok": true
    },
    {
     "name": "Anubis Collection Package",
-    "primary": 2.94,
+    "primary": 2.92,
     "witnessed": 2.93,
-    "devLog": -0.003,
+    "devLog": 0.003,
+    "ok": true
+   },
+   {
+    "name": "Kilowatt Case",
+    "primary": 0.24,
+    "witnessed": 0.24,
+    "devLog": 0,
     "ok": true
    }
   ]
