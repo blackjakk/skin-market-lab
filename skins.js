@@ -244,6 +244,8 @@
         t && t.idx1 != null ? cls(t.idx1) : "") +
       tile2("LIQUIDS INDEX", t && t.liqIdx != null ? t.liqIdx.toFixed(1) : "—", "commodity skins & knives, steam marks", "") +
       tile2("ART INDEX", t && t.artIdx != null ? t.artIdx.toFixed(1) : "—", "grails, marked to 30d realized sales", "") +
+      // SMLX-7 draft preview — NOT a settlement input (label per methodology)
+      tile2("MARKET INDEX", t && t.marketIdx != null ? t.marketIdx.toFixed(1) : "—", "SMLX-7 preview · cases + liquids", "") +
       tile2("CASH RATIO", t && t.cashRatio != null ? Math.round(t.cashRatio * 100) + "%" : "—",
         "cash sale vs steam price", "") +
       tile2("UNITS SOLD / DAY", t ? fmtCompact(t.volTotal) : "—", "across tracked items", "") +

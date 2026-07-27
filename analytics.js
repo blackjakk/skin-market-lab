@@ -413,6 +413,29 @@
   const INDEX_RULES = { version: "SMLX-6", adoption: "2026-07-25", seasoningDays: 365, clampLog: 0.05,
     weightWindowDays: 60, weightMinObs: 5, weightCap: 0.10,
     minPrice: 0.25, minContributors: 3 };
+  // ── SMLX-7 DRAFT PREVIEW (ADDITIVE — the shipped SMLX-6 fields above are
+  // byte-identical; this subobject only DESCRIBES the preview). `marketIdx`
+  // applies the EXACT SMLX-6 construction — chaining, ±clampLog
+  // winsorization about the WEIGHT-weighted-median center, lagged monthly
+  // volume weights capped at weightCap, 365d seasoning, and the
+  // minPrice/minContributors mark-quality floors — over the COMBINED
+  // case + liquids universe (the same self-gating liquids set liqIdx uses;
+  // art stays out: appraisal marks). It is published for observation only
+  // and is NOT in the settlement catalog: no fixing reads it, nothing
+  // hashes it, and it carries the label below everywhere it surfaces.
+  // Params are load-time copies of the SMLX-6 fields (one build can never
+  // drift); centerToleranceLog is preview-only — the corroboration band
+  // for |steam clamp center − Skinport realized-cash center| in log space
+  // (see the centerCheck block in marketOverview: flag-only today).
+  INDEX_RULES.marketPreview = {
+    label: "SMLX-7 draft preview — NOT a settlement input",
+    universe: "case+liq",
+    seasoningDays: INDEX_RULES.seasoningDays, clampLog: INDEX_RULES.clampLog,
+    weightWindowDays: INDEX_RULES.weightWindowDays, weightMinObs: INDEX_RULES.weightMinObs,
+    weightCap: INDEX_RULES.weightCap, minPrice: INDEX_RULES.minPrice,
+    minContributors: INDEX_RULES.minContributors,
+    centerToleranceLog: 0.03,
+  };
   function dayT(day) {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day));
     return m ? Date.UTC(+m[1], +m[2] - 1, +m[3]) : NaN;
@@ -451,7 +474,11 @@
         const dvBy = new Map(src.filter((d) => d.price > 0 && d.vol != null && isFinite(d.vol))
           .map((d) => [d.day, d.price * d.vol]));
         if (priceBy.size) fam[key].push({ name: it.name, priceBy: priceBy, dvBy: dvBy,
-          includedFrom: includedFromDay(src[0].day), carry: isArt });
+          includedFrom: includedFromDay(src[0].day), carry: isArt,
+          // Skinport realized-cash marks (day → price) — feeds ONLY the
+          // SMLX-7 center-corroboration observation lane; no index level
+          // reads these (art is excluded: it MARKS to skinport already).
+          cashBy: isArt ? null : spBy });
       }
     }
     const days = Array.from(dayRec.keys()).sort();
@@ -466,6 +493,11 @@
       }
       m.priceBy = filled;
     }
+    // SMLX-7 draft preview universe: the case family + the liquids family,
+    // COMBINED (same member objects — inclusion calendars are identical;
+    // monthWeights("mkt", …) recomputes weights over the union, so the cap
+    // and the median-fallback see the full basket). Art stays out.
+    fam.mkt = fam.case.concat(fam.liq);
     // SMLX-4 weights: per family, per calendar month — median daily $volume
     // over the window ending on the LAST DAY OF THE PRIOR MONTH, normalized,
     // capped at max(weightCap, 1/N) with pro-rata redistribution. Returns
@@ -508,8 +540,8 @@
       wCache.set(ck, out);
       return out;
     }
-    const levels = { case: [], liq: [], art: [] };
-    for (const key of ["case", "liq", "art"]) {
+    const levels = { case: [], liq: [], art: [], mkt: [] };
+    for (const key of ["case", "liq", "art", "mkt"]) {
       let level = null;
       for (let k = 0; k < days.length; k++) {
         const day = days[k];
@@ -520,7 +552,11 @@
           continue;
         }
         const prev = days[k - 1];
-        const strict = key === "case"; // SMLX-6 mark-quality floors: settlement family only
+        // SMLX-6 mark-quality floors: the settlement family, plus the
+        // SMLX-7 combined preview (it rehearses the full settlement-grade
+        // ruleset — floors included — per its published spec). liq/art
+        // paths are byte-identical to pre-preview behavior.
+        const strict = key === "case" || key === "mkt";
         const floor = strict ? INDEX_RULES.minPrice : 0;
         const contrib = []; // [member, log-return]
         for (const m of fam[key]) {
@@ -566,6 +602,10 @@
         artIdx: levels.art[k] != null ? round2(levels.art[k]) : null,
         cashRatio: r.ratios.length ? Math.round(median(r.ratios) * 1000) / 1000 : null,
         volTotal: r.sawVol ? r.vol : null,
+        // ADDITIVE (SMLX-7 draft preview — NOT a settlement input): the
+        // combined case+liquids index under the exact SMLX-6 rules. Key is
+        // appended so every pre-existing key keeps its position/bytes.
+        marketIdx: levels.mkt[k] != null ? round2(levels.mkt[k]) : null,
       };
     });
     const idx = series.filter((s) => s.caseIdx != null);
@@ -584,8 +624,92 @@
       idx7: last && back7 && back7 !== last ? last.caseIdx / back7.caseIdx - 1 : null,
       liqIdx: lastNonNull("liqIdx"), artIdx: lastNonNull("artIdx"),
       cashRatio: lastNonNull("cashRatio"), volTotal: lastNonNull("volTotal"),
+      marketIdx: lastNonNull("marketIdx"), // SMLX-7 draft preview — NOT a settlement input
     } : null;
-    return { series: series, today: today, rules: INDEX_RULES, weights: weightsOut };
+    // ── SMLX-7 CENTER-CORROBORATION LANE (observation phase, flag-only) ────
+    // Per day, the clamp center the combined-universe preview actually used
+    // (WEIGHT-weighted median of the steam-mark log-returns) is corroborated
+    // against the center implied by Skinport REALIZED-CASH returns — the
+    // SAME weighted-median construction, same lagged monthly weights, over
+    // the names with sales data on both days (≥ minContributors names on
+    // each side, ≥ minPrice marks, post-inclusion — else the day is not an
+    // observation). |steamCenter − cashCenter| > centerToleranceLog (0.03
+    // log) publishes a flag row in the INTEG-1 shape (flag, NEVER reject —
+    // rejection would hand the thin venue a lever, same reasoning as
+    // assessIntegrity). This is the observation phase for the future SMLX-7
+    // hardening (the center must corroborate or the day carries); the
+    // running counts of days observed vs days the rule WOULD have bound are
+    // published per collector run so the hardening decision is evidence-
+    // based. Note what the ratio lane CANNOT see and this lane CAN: a
+    // market-wide steam pump moves every name's ratio together and slips
+    // the cross-sectional gate — but it drags the steam CENTER off the cash
+    // center, which is exactly the divergence measured here.
+    // BACKTEST SCOPE GUARD: backfill/backtest stay CASE-only — there is no
+    // committed deep history for liquids, and a partial backfill would bias
+    // any reconstruction. The preview index + this flag lane + the
+    // would-have-bound stats ARE the SMLX-7 observation evidence.
+    const ccTol = INDEX_RULES.marketPreview.centerToleranceLog;
+    const r4 = (v) => Math.round(v * 1e4) / 1e4;
+    const ccBound = [];
+    let ccObserved = 0, ccLatest = null;
+    for (let k = 1; k < days.length; k++) {
+      const day = days[k], prev = days[k - 1];
+      const wm = monthWeights("mkt", day.slice(0, 7));
+      const steamC = [], cashC = [];
+      for (const m of fam.mkt) {
+        if (prev < m.includedFrom) continue;
+        const w = wm ? wm.get(m) : 1;
+        const p0 = m.priceBy.get(prev), p1 = m.priceBy.get(day);
+        if (p0 > 0 && p1 > 0 && p0 >= INDEX_RULES.minPrice && p1 >= INDEX_RULES.minPrice)
+          steamC.push([Math.log(p1 / p0), w]);
+        const c0 = m.cashBy ? m.cashBy.get(prev) : null, c1 = m.cashBy ? m.cashBy.get(day) : null;
+        if (c0 > 0 && c1 > 0 && c0 >= INDEX_RULES.minPrice && c1 >= INDEX_RULES.minPrice)
+          cashC.push([Math.log(c1 / c0), w]);
+      }
+      if (steamC.length < INDEX_RULES.minContributors || cashC.length < INDEX_RULES.minContributors) continue;
+      const sc = weightedMedian(steamC), cc = weightedMedian(cashC);
+      const dev = sc - cc;
+      ccObserved++;
+      ccLatest = { day: day, steamCenter: r4(sc), cashCenter: r4(cc), devLog: r4(dev),
+        wouldBind: Math.abs(dev) > ccTol };
+      if (ccLatest.wouldBind) ccBound.push({ day: day, steamCenter: r4(sc), cashCenter: r4(cc), devLog: r4(dev) });
+    }
+    // flag rows carry the current state (latest observed day), INTEG-1 shape;
+    // the full bound-day history rides in boundDays for the evidence trail
+    const ccFlags = [];
+    if (ccLatest && ccLatest.wouldBind) ccFlags.push({
+      name: "(market)", lane: "center", severity: "watch", dev: ccLatest.devLog,
+      detail: "day " + ccLatest.day + ": steam clamp center " + ccLatest.steamCenter
+        + " vs Skinport realized-cash center " + ccLatest.cashCenter
+        + " (|log dev| > " + ccTol + ") — SMLX-7 observation phase: the center must corroborate"
+        + " or the day carries; flag-only today, no fixing computation changes",
+    });
+    // current-month combined-universe weights: the capture-economics input
+    // for the market index (kMin/weightNeeded/cost wiring happens in the
+    // settlement budget at integration — settlement.js is not touched here;
+    // per-name latest/vol24h already ride on the manifest items)
+    const mktWeights = {};
+    if (days.length && fam.mkt.length) {
+      const wmNow = monthWeights("mkt", days[days.length - 1].slice(0, 7));
+      for (const m of fam.mkt) mktWeights[m.name] = Math.round((wmNow ? wmNow.get(m) : 1 / fam.mkt.length) * 1e6) / 1e6;
+    }
+    const marketPreview = {
+      label: INDEX_RULES.marketPreview.label,
+      universe: { members: fam.mkt.length, caseMembers: fam.case.length, liqMembers: fam.liq.length },
+      weights: mktWeights,
+      centerCheck: {
+        toleranceLog: ccTol,
+        note: "observation phase for the future SMLX-7 hardening: the clamp center must corroborate"
+          + " against Skinport realized-cash returns or the day carries. Flag-only (INTEG-1"
+          + " discipline) — flags change no fixing computation.",
+        stats: { daysObserved: ccObserved, daysWouldBind: ccBound.length },
+        latest: ccLatest,
+        boundDays: ccBound,
+        flags: ccFlags,
+      },
+    };
+    return { series: series, today: today, rules: INDEX_RULES, weights: weightsOut,
+      marketPreview: marketPreview };
   }
 
   // ── slosh detection (measured, not vibed) ────────────────────────────────
