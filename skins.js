@@ -1120,11 +1120,27 @@
     const p = state.portfolio;
     if (!p) return;
     const t = p.totals;
+    // benchmark-relative P/L: same money, same holding periods, in the index
+    const bench = (() => {
+      if (!t.cost || !p.lots.length) return null;
+      const entries = p.lots.map((l) => ({ t: l.addedAt, cost: l.cost }));
+      const bg = A.benchmarkGrowth(entries, state.market && state.market.series);
+      if (bg.factor == null) return null;
+      const portPct = Math.round((t.gross - t.cost) / t.cost * 1000) / 10;
+      const alpha = Math.round((portPct - bg.idxPct) * 10) / 10;
+      return { alpha, portPct, idxPct: bg.idxPct, covered: bg.covered, total: bg.total };
+    })();
     $("pfTotals").innerHTML =
       tile("COST BASIS", fmt$(t.cost), "") +
       tile("MARKET VALUE", fmt$(t.gross), "") +
       tile("NET IF SOLD (STEAM)", fmt$(t.netSteam), "") +
-      tile("P/L AFTER FEES", fmt$(t.pl) + (t.cost ? " (" + fmtPct(t.pl / t.cost, 1) + ")" : ""), cls(t.pl));
+      tile("P/L AFTER FEES", fmt$(t.pl) + (t.cost ? " (" + fmtPct(t.pl / t.cost, 1) + ")" : ""), cls(t.pl)) +
+      (bench
+        ? tile("VS SKINDEX", (bench.alpha > 0 ? "+" : "") + bench.alpha + "pp α", cls(bench.alpha)) +
+          '<div class="ds-hint hint" style="grid-column:1/-1">you ' + fmtPct(bench.portPct / 100, 1)
+            + " · Skindex " + fmtPct(bench.idxPct / 100, 1) + " over the same money &amp; time"
+            + (bench.covered < bench.total ? " · " + bench.covered + "/" + bench.total + " lots dated" : "") + "</div>"
+        : "");
     const tb = $("pfTable");
     if (!p.lots.length) { tb.innerHTML = ""; $("pfTotals").insertAdjacentHTML("beforeend", ""); return; }
     tb.innerHTML = "<tr><th>Item</th><th>Qty</th><th>Cost</th><th>Now</th><th>P/L</th><th></th></tr>" +

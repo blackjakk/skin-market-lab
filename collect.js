@@ -308,6 +308,41 @@ async function collect(opts) {
   writeJson(cursorFile, { i: names.length ? (cursor + SALES_BUDGET) % names.length : 0 });
   writeJson(salesStoreFile, salesStore);
   fs.writeFileSync(path.join(dataDir, "index.json"), JSON.stringify(manifest));
+
+  // ── the Skindex public embed JSON (STABLE API — README "Embed the Skindex").
+  // Contract: within v:1 fields are never renamed or removed, only added.
+  // Everything here is a copy of already-published numbers — no new math.
+  const t0 = manifest.market.today || {};
+  const ser = manifest.market.series || [];
+  const prevIdx = ser.length >= 2 ? ser[ser.length - 2].caseIdx : null;
+  const chg24hPct = t0.caseIdx != null && prevIdx > 0
+    ? Math.round((t0.caseIdx / prevIdx - 1) * 1000) / 10 : null;
+  writeJson(path.join(dataDir, "skindex.json"), {
+    v: 1, name: "Skindex", methodology: S.METHODOLOGY,
+    updatedAt: new Date(manifest.generatedAt || Date.now()).toISOString(),
+    day: fix.day,
+    level: t0.caseIdx != null ? t0.caseIdx : null,
+    chg24hPct: chg24hPct,
+    cashRatio: t0.cashRatio != null ? t0.cashRatio : null,
+    liquidsIdx: t0.liqIdx != null ? t0.liqIdx : null,
+    artIdx: t0.artIdx != null ? t0.artIdx : null,
+    players: t0.players != null ? t0.players : null,
+    fixings: fix.fixings,
+    links: {
+      site: "https://blackjakk.github.io/skin-market-lab/",
+      methodology: "https://blackjakk.github.io/skin-market-lab/methodology.html",
+      data: "https://raw.githubusercontent.com/blackjakk/skin-market-lab/main/data/",
+    },
+    terms: "Free to embed with attribution ('Skindex' + link). A measurement, not financial advice; not an offer of any instrument.",
+  });
+  // shields.io endpoint format → ![Skindex](https://img.shields.io/endpoint?url=…/data/badge.json)
+  writeJson(path.join(dataDir, "badge.json"), {
+    schemaVersion: 1, label: "Skindex",
+    message: t0.caseIdx != null
+      ? t0.caseIdx.toFixed(1) + (chg24hPct != null ? " (" + (chg24hPct > 0 ? "+" : "") + chg24hPct + "% 24h)" : "")
+      : "accruing",
+    color: chg24hPct == null ? "lightgrey" : chg24hPct > 0 ? "brightgreen" : chg24hPct < 0 ? "red" : "lightgrey",
+  });
   return { manifest, steamOk, total: names.length };
 }
 
