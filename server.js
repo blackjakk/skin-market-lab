@@ -24,6 +24,9 @@
 //   POST /api/skins/import                {name, prices:[[dateStr,price,vol],...]} paste-in
 //   GET  /api/skins/portfolio             lots valued at latest, net of sell fees
 //   POST /api/skins/lot                   {name, qty, unitCost, note?} | {remove:id}
+//   GET  /api/skins/inventory?profile=    Steam inventory valued + reconstructed
+//   POST /api/skins/inventory             {profile} force refresh | {paste} raw JSON
+//   GET  /api/skins/inventory/series      snapshot series [{t,value,count}]
 "use strict";
 const http = require("http");
 const fs = require("fs");
@@ -37,6 +40,11 @@ const ROOT = __dirname; // static root = the repo itself — the dashboard ships
 const SNAP_DEDUPE_MS = 30 * 60 * 1000;      // skip snapshots <30min apart per source
 const SALES_TTL_MS = 6 * 3600 * 1000;       // skinport per-item aggregates cache
 const DUMP_TTL_MS = 12 * 3600 * 1000;       // skinport full-dump cache
+// Steam IP-rate-limits inventory reads, so a fetched inventory is cached and a
+// cached read makes NO network call at all (not even the vanity resolve).
+const INV_TTL_MS = 10 * 60 * 1000;          // inventory fetch cache (contract: ≥10 min)
+const INV_SNAP_DEDUPE_MS = 10 * 60 * 1000;  // one snapshot line per distinct load
+const INV_BODY_MAX = 32 * 1024 * 1024;      // a 5000-item pasted inventory is megabytes
 
 function slug(name) {
   const h = crypto.createHash("sha1").update(name).digest("hex").slice(0, 8);
@@ -44,6 +52,81 @@ function slug(name) {
 }
 function readJson(f, fb) { try { return JSON.parse(fs.readFileSync(f, "utf8")); } catch { return fb; } }
 function writeJson(f, v) { fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, JSON.stringify(v)); }
+
+// ── inventory errors: plain English, never a stack trace ───────────────────
+// Every inventory failure carries the status the user's situation deserves:
+//   400 the input can't be used (no profile given, unparseable paste)
+//   404 no PUBLIC inventory to read (unknown profile, or private/hidden — the
+//       resource this API serves is "the public inventory", which then does
+//       not exist; Steam's own 403 is translated, not forwarded)
+//   429 Steam is rate-limiting us     502 anything upstream broke
+function invErr(status, message) { const e = new Error(message); e.httpStatus = status; return e; }
+// A resolve that failed means we have no profile — default 404, not 502.
+function invResolveStatus(msg) {
+  const m = String(msg || "").toLowerCase();
+  if (/rate.?limit|429|too many/.test(m)) return 429;
+  if (/http \d|timeout|timed out|network|econn|socket|unreachable|dns/.test(m)) return 502;
+  return 404;
+}
+// A fetch that failed is upstream by default — unless Steam told us why.
+function invFetchStatus(msg) {
+  const m = String(msg || "").toLowerCase();
+  if (/rate.?limit|429|too many/.test(m)) return 429;
+  if (/private|hidden|not public/.test(m)) return 404;
+  if (/not found|no such|does ?n[o']t exist|404/.test(m)) return 404;
+  return 502;
+}
+
+// Steam's public inventory payload → the frozen steamInventory shape
+// { steamid64, count, items:[{name,qty,marketable,tradable}], truncated }.
+// assets carry ownership, descriptions carry the item — they join on
+// classid+"_"+instanceid; duplicate stacks of one name sum into qty and the
+// market_hash_name is the key everything else prices on. This is the PASTE
+// path (a hosted static page can't fetch steamcommunity.com — same idiom as
+// the price-history paste import).
+//
+// The CANONICAL join is the data layer's `parseSteamInventory` — the very
+// function its fetcher uses — so a PASTED inventory parses byte-identically
+// to a FETCHED one; invParsePaste() below delegates to it whenever it is
+// present. What follows is the standalone FALLBACK for a tracker whose
+// market.js predates it, kept behaviour-identical on purpose.
+function parseInventoryPayload(raw) {
+  let j = raw;
+  if (typeof j === "string") {
+    try { j = JSON.parse(j); } catch (e) {
+      throw invErr(400, "that paste isn't valid JSON — open the inventory URL in your browser and copy the WHOLE page");
+    }
+  }
+  if (!j || typeof j !== "object" || Array.isArray(j))
+    throw invErr(400, "that paste isn't a Steam inventory payload (expected a JSON object)");
+  const assets = Array.isArray(j.assets) ? j.assets : null;
+  const descs = Array.isArray(j.descriptions) ? j.descriptions : null;
+  if (!assets || !descs)
+    throw invErr(400, "that JSON has no assets/descriptions — copy the whole response from " +
+      "https://steamcommunity.com/inventory/<steamid64>/730/2?l=english&count=5000 (if it says {\"success\":false} your inventory is private)");
+  const byKey = new Map();
+  for (const d of descs) if (d) byKey.set(String(d.classid) + "_" + String(d.instanceid), d);
+  const byName = new Map();
+  let unknown = 0;
+  for (const a of assets) {
+    const d = a ? byKey.get(String(a.classid) + "_" + String(a.instanceid)) : null;
+    const name = d && typeof d.market_hash_name === "string" ? d.market_hash_name : null;
+    if (!name) { unknown++; continue; }
+    const qty = Math.max(1, Math.round(Number(a.amount) || 1));
+    const row = byName.get(name);
+    if (row) row.qty += qty;
+    else byName.set(name, { name: name, qty: qty, marketable: !!Number(d.marketable), tradable: !!Number(d.tradable) });
+  }
+  const items = Array.from(byName.values());
+  if (!items.length) throw invErr(400, "no CS2 items found in that paste — check you copied the 730/2 inventory");
+  return {
+    steamid64: j.steamid64 != null ? String(j.steamid64) : null,
+    count: items.reduce((a, i) => a + i.qty, 0),
+    items: items,
+    truncated: !!(j.more_items || j.last_assetid),
+    unknown: unknown,
+  };
+}
 
 function startServer(opts) {
   opts = opts || {};
@@ -264,14 +347,19 @@ function startServer(opts) {
 
   // market overview (Skindex / cash ratio / volume / players) —
   // same shared math the collector publishes for the static site
-  async function marketReport() {
-    const items = watchlist.map((name) => {
+  // the watchlist as marketOverview's input — ONE builder, so the inventory
+  // benchmark below reads the very same index the market report publishes
+  function marketItems() {
+    return watchlist.map((name) => {
       const imported = readJson(importFile(name), null);
       const s = A.assembleSeries(imported && imported.rows, snaps(name));
       const tier = artSet.has(name) ? "art" : null;
       return { name, cat: catOf(name), tier, daily: s.daily, skinportDaily: s.skinportDaily,
         artDaily: tier ? artDailyFor(name) : [] };
     });
+  }
+  async function marketReport() {
+    const items = marketItems();
     const mkt = A.marketOverview(items);
     // INTEG-1 parity (assessIntegrity — one function, all surfaces): the live
     // tracker feeds the lanes it has — ratio + staleness; the book and sales-
@@ -343,6 +431,266 @@ function startServer(opts) {
     return { lots, totals: { cost: sum("cost"), gross: sum("gross"), netSteam: sum("netSteam"), netSkinport: sum("netSkinport"), pl: sum("pl") } };
   }
 
+  // ── Steam inventory ("load my inventory, chart its performance") ─────────
+  // NO SIGN-IN: CS2 inventories are PUBLIC JSON, so all we ever need is a
+  // profile URL / vanity name / SteamID64. Steam OpenID would only prove
+  // identity (useless for a personal analytics tool) and needs a callback URL
+  // the static Pages build can't have.
+  //
+  // DETERMINISM FIREWALL: this whole section is a DISPLAY/analytics layer,
+  // exactly like the item-view deep history. Nothing here feeds dailyFor,
+  // marketReport, the collector's published series, a fixing, or a hash — it
+  // only READS them.
+  // PRIVACY: a SteamID is personal data. It is stored under local-data/
+  // (gitignored) and sent nowhere but Steam.
+  const invFile = path.join(DATA, "inventory.json");
+  const invSeriesFile = path.join(DATA, "inventory.jsonl");
+
+  function invState() { const s = readJson(invFile, null); return s && typeof s === "object" ? s : {}; }
+
+  // append-only {t,value,count} — one line per distinct load, deduped inside
+  // 10 minutes. Read from disk every time, so a restart just picks it back up.
+  function invSeries() {
+    const out = [];
+    try {
+      for (const ln of fs.readFileSync(invSeriesFile, "utf8").split("\n")) {
+        if (!ln.trim()) continue;
+        try {
+          const r = JSON.parse(ln);
+          if (r && isFinite(r.t)) out.push({ t: r.t, value: r.value, count: r.count });
+        } catch { /* torn line — skip, keep the rest */ }
+      }
+    } catch { /* no file yet */ }
+    return out.sort((a, b) => a.t - b.t);
+  }
+  function invAppendSnap(snap) {
+    const list = invSeries();
+    const last = list.length ? list[list.length - 1] : null;
+    if (last && snap.t - last.t < INV_SNAP_DEDUPE_MS) return false;
+    fs.mkdirSync(path.dirname(invSeriesFile), { recursive: true });
+    fs.appendFileSync(invSeriesFile, JSON.stringify(snap) + "\n");
+    return true;
+  }
+
+  // slugs we hold marks for — ONE readdir instead of a stat per inventory item
+  // (a 5000-item inventory would otherwise be 5000 misses).
+  function trackedSlugs() {
+    const set = new Set();
+    for (const [dir, ext] of [["history", ".jsonl"], ["import", ".json"]]) {
+      try {
+        for (const f of fs.readdirSync(path.join(DATA, dir)))
+          if (f.endsWith(ext)) set.add(f.slice(0, -ext.length));
+      } catch { /* dir may not exist yet */ }
+    }
+    return set;
+  }
+  function deepSlugs() {
+    const set = new Set();
+    try {
+      for (const f of fs.readdirSync(path.join(ROOT, "backtest", "history")))
+        if (f.endsWith(".json")) set.add(f.slice(0, -5));
+    } catch { /* no committed deep history */ }
+    return set;
+  }
+
+  // priceOf(name) → number|null. NEVER fabricates: an item we hold no mark for
+  // and that isn't listed on Skinport comes back null and is reported unpriced.
+  //   1. our own tracked marks (latest steam quote → merged daily close →
+  //      skinport 30d median for grails above Steam's ~$1,800 listing cap)
+  //   2. the cached Skinport universe dump (lowest ask, else median)
+  //   3. null
+  function invPricer() {
+    const tracked = trackedSlugs();
+    const dumpBy = new Map();
+    const dump = dumpCached();
+    if (dump) for (const i of dump.items || []) if (i && i.name) dumpBy.set(i.name, i);
+    return function priceOf(name) {
+      if (tracked.has(slug(name))) {
+        const last = latestSteam(name);
+        if (last && last.price > 0) return last.price;
+        const d = dailyFor(name);
+        if (d.length && d[d.length - 1].price > 0) return d[d.length - 1].price;
+        const art = artDailyFor(name);
+        if (art.length && art[art.length - 1].price > 0) return art[art.length - 1].price;
+      }
+      const row = dumpBy.get(name);
+      if (row) {
+        if (row.min > 0) return row.min;
+        if (row.median > 0) return row.median;
+      }
+      return null;
+    };
+  }
+
+  // historyOf(name) → [{day,price}] | null — the item's own collected series,
+  // extended by the committed deep-history file exactly the way the item view
+  // does it (deepHistoryBase: strictly BEFORE the first collected day, never
+  // overriding a collected mark). Display-only, same as itemReport.
+  function invHistorian() {
+    const tracked = trackedSlugs();
+    const deep = deepSlugs();
+    return function historyOf(name) {
+      const sg = slug(name);
+      const hasDeep = deep.has(sg);
+      if (!tracked.has(sg) && !hasDeep) return null;
+      const deepJson = hasDeep ? readJson(path.join(ROOT, "backtest", "history", sg + ".json"), null) : null;
+      const deepRows = deepJson && Array.isArray(deepJson.rows)
+        ? deepJson.rows.map((r) => ({ t: r[0], price: r[1], vol: r[2] })) : null;
+      const imported = readJson(importFile(name), null);
+      const snapRows = snaps(name);
+      const base = A.deepHistoryBase(deepRows, imported && imported.rows, snapRows);
+      let daily = A.assembleSeries(base, snapRows).daily;
+      if (!daily.length) daily = artDailyFor(name); // grails mark to skinport
+      return daily.length ? daily.map((d) => ({ day: d.day, price: d.price })) : null;
+    };
+  }
+
+  // alpha vs the Skindex over the reconstruction's own span. benchmarkGrowth
+  // (the portfolio's number) does the index lookup: one "lot" = the
+  // reconstruction's opening value on its opening day. The index series is
+  // truncated at the reconstruction's last day so both legs measure the SAME
+  // window; lots predating the index clamp to inception (documented there).
+  function invBenchmark(recon) {
+    if (!recon || !Array.isArray(recon.days) || recon.days.length < 2) return null;
+    const first = recon.days[0], last = recon.days[recon.days.length - 1];
+    if (!(first.value > 0) || last.value == null) return null;
+    let series = [];
+    try { series = A.marketOverview(marketItems()).series || []; } catch (e) { return null; }
+    const span = series.filter((s) => s && s.day <= last.day);
+    if (!span.length) return null;
+    const bg = A.benchmarkGrowth([{ t: Date.parse(first.day + "T00:00:00Z"), cost: first.value }], span);
+    if (bg.idxPct == null) return null;
+    const invPct = Math.round((last.value / first.value - 1) * 1000) / 10;
+    return { idxPct: bg.idxPct, invPct: invPct,
+      alpha: Math.round((invPct - bg.idxPct) * 10) / 10, spanDays: recon.days.length };
+  }
+
+  // paste → inventory, through the SHARED join when market.js carries it (one
+  // implementation for fetched and pasted alike), else the local fallback.
+  function invParsePaste(raw) {
+    if (typeof M.parseSteamInventory !== "function") return parseInventoryPayload(raw);
+    let j = raw;
+    if (typeof j === "string") {
+      try { j = JSON.parse(j); } catch (e) {
+        throw invErr(400, "that paste isn't valid JSON — open the inventory URL in your browser and copy the WHOLE page");
+      }
+    }
+    let p;
+    try { p = M.parseSteamInventory(j); }
+    catch (e) { throw e.httpStatus ? e : invErr(400, String((e && e.message) || e)); }
+    if (!p || !Array.isArray(p.items) || !p.items.length)
+      throw invErr(400, "no CS2 items found in that paste — check you copied the whole 730/2 inventory response");
+    return p;
+  }
+
+  async function invResolve(raw) {
+    if (typeof M.resolveSteamProfile === "function") {
+      let r;
+      try { r = await M.resolveSteamProfile(raw); }
+      catch (e) { throw e.httpStatus ? e : invErr(invResolveStatus(e && e.message), String((e && e.message) || e)); }
+      if (!r || !/^\d{17}$/.test(String(r.steamid64 || "")))
+        throw invErr(404, "couldn't find a Steam profile for \"" + raw + "\" — check the URL, or paste your 17-digit SteamID64");
+      return { steamid64: String(r.steamid64), vanity: r.vanity || null, source: r.source || "resolved" };
+    }
+    // graceful degradation when the data layer hasn't landed: a bare
+    // SteamID64 needs no resolution at all
+    if (/^\d{17}$/.test(raw)) return { steamid64: raw, vanity: null, source: "steamid64" };
+    throw invErr(502, "this build can't look up profile names yet — paste your 17-digit SteamID64 instead");
+  }
+  async function invFetch(steamid64) {
+    if (typeof M.steamInventory !== "function")
+      throw invErr(502, "this build is missing the Steam inventory reader — update market.js and restart the tracker");
+    let inv;
+    try { inv = await M.steamInventory(steamid64, { appid: 730, count: 5000 }); }
+    catch (e) { throw e.httpStatus ? e : invErr(invFetchStatus(e && e.message), String((e && e.message) || e)); }
+    if (!inv || !Array.isArray(inv.items))
+      throw invErr(502, "Steam returned no readable inventory for " + steamid64);
+    return inv;
+  }
+
+  // INV_REPORT — the frozen shape, identical for live and pasted inventories.
+  async function inventoryReport(input) {
+    for (const fn of ["inventoryValue", "inventoryReconstruction"]) {
+      if (typeof A[fn] !== "function")
+        throw invErr(502, "this build is missing the inventory analytics (" + fn + ") — update analytics.js and restart the tracker");
+    }
+    const state = invState();
+    const raw = input.profile != null ? String(input.profile).trim() : "";
+    let inv, cached = false, fetchedAt = Date.now(), steamid64 = null, source = "steam";
+    let profile = raw || state.profile || null;
+
+    if (input.paste != null) {
+      inv = invParsePaste(input.paste);
+      source = "paste";
+      steamid64 = /^\d{17}$/.test(raw) ? raw : (inv.steamid64 || null);
+      profile = raw || steamid64 || "pasted inventory";
+    } else {
+      const c = state.cache;
+      const fresh = c && c.items && Date.now() - c.t < INV_TTL_MS;
+      // A CACHED READ MAKES NO NETWORK CALL — not even the vanity resolve, so
+      // the cache genuinely shields Steam's IP rate limit.
+      if (!input.force && fresh && (!raw || c.input === raw || c.steamid64 === raw)) {
+        inv = { steamid64: c.steamid64, count: c.count, items: c.items, truncated: !!c.truncated };
+        steamid64 = c.steamid64; profile = c.profile || profile; cached = true; fetchedAt = c.t;
+      } else {
+        if (!raw && !state.profile)
+          throw invErr(400, "give me a Steam profile URL, vanity name, or 17-digit SteamID64 — no sign-in, no password, no API key, public inventory data only");
+        const target = raw || state.profile;
+        const resolved = await invResolve(target);
+        steamid64 = resolved.steamid64;
+        profile = target;
+        if (!input.force && fresh && c.steamid64 === steamid64) {
+          inv = { steamid64: c.steamid64, count: c.count, items: c.items, truncated: !!c.truncated };
+          cached = true; fetchedAt = c.t;
+        } else {
+          inv = await invFetch(steamid64);
+          fetchedAt = Date.now();
+        }
+      }
+      // only a real Steam read refreshes the fetch cache — a paste is the
+      // user's own copy of the data, not evidence about the live inventory
+      if (!cached)
+        state.cache = { t: fetchedAt, input: raw || profile, profile: profile, steamid64: steamid64,
+          count: inv.count, items: inv.items, truncated: !!inv.truncated };
+    }
+
+    const priceOf = invPricer();
+    const value = A.inventoryValue(inv.items, priceOf);
+    const historyOf = invHistorian();
+    let recon = A.inventoryReconstruction(inv.items, historyOf,
+      { priceOf: priceOf, total: value.total, now: Date.now() });
+    if (!recon || !Array.isArray(recon.days)) // frozen shape holds even if a name has no history at all
+      recon = { days: [], coveragePct: 0, pricedNames: 0, totalNames: inv.items.length };
+    const count = inv.count != null ? inv.count : inv.items.reduce((a, i) => a + (i.qty || 0), 0);
+    invAppendSnap({ t: Date.now(), value: value.total, count: count });
+
+    const types = value.pricedCount + value.unpricedCount;
+    const note = [
+      "No sign-in, no password, no API key — public inventory data only.",
+      cached ? "Cached read from " + Math.round((Date.now() - fetchedAt) / 60000) + " min ago (Steam rate-limits inventory reads, so they are cached for 10 minutes)."
+        : source === "paste" ? "Read from pasted inventory JSON — nothing left this machine."
+          : "Fresh read of the public Steam inventory.",
+      "Priced " + value.pricedCount + " of " + types + " item types" +
+        (value.unpricedCount ? " — " + value.unpricedCount + " have no tracked mark and no Skinport listing, so they are reported unpriced, never guessed." : "."),
+      recon.days.length
+        ? "Reconstruction covers " + recon.coveragePct + "% of today's value (" + recon.pricedNames + " of " + recon.totalNames + " names have usable history)."
+        : "No usable price history behind these items yet — track them to start accruing one.",
+      inv.truncated ? "Steam capped the read at 5000 items — this inventory is truncated." : "",
+      inv.unknown ? inv.unknown + " assets had no matching description and were skipped." : "",
+    ].filter(Boolean).join(" ");
+
+    // a paste without an id must NOT overwrite the last KNOWN profile (the
+    // next "refresh" would have nothing resolvable to go back to)
+    if (source !== "paste" || steamid64) { state.profile = profile; state.steamid64 = steamid64; }
+    state.last = { t: Date.now(), profile: profile, steamid64: steamid64, source: source,
+      count: count, total: value.total, coveragePct: recon.coveragePct };
+    writeJson(invFile, state);
+
+    return { steamid64: steamid64, profile: profile, fetchedAt: fetchedAt, cached: cached,
+      count: count, value: value, recon: recon, series: invSeries(),
+      benchmark: invBenchmark(recon), note: note };
+  }
+
   // ── search ───────────────────────────────────────────────────────────────
   function search(q) {
     q = String(q || "").trim().toLowerCase();
@@ -378,12 +726,19 @@ function startServer(opts) {
     });
     res.end(body);
   }
-  function readBody(req) {
+  // inventory failures answer in plain English with the right status — the
+  // user reads this string, so it never carries a stack trace or a raw HTTP code
+  function invFail(res, e) {
+    const msg = String((e && e.message) || e || "inventory read failed");
+    return sendJson(res, (e && e.httpStatus) || invFetchStatus(msg), { error: msg });
+  }
+  function readBody(req, maxBytes) {
+    const cap = maxBytes || 4 * 1024 * 1024;
     return new Promise((resolve, reject) => {
       let size = 0; const chunks = [];
       req.on("data", (c) => {
         size += c.length;
-        if (size > 4 * 1024 * 1024) { reject(new Error("body too large")); req.destroy(); return; }
+        if (size > cap) { reject(new Error("body too large")); req.destroy(); return; }
         chunks.push(c);
       });
       req.on("end", () => {
@@ -429,9 +784,30 @@ function startServer(opts) {
         return sendJson(res, 200, await itemReport(name));
       }
       if (p === "/api/skins/portfolio") return sendJson(res, 200, portfolioReport());
+      if (p === "/api/skins/inventory/series") return sendJson(res, 200, { series: invSeries() });
+      if (p === "/api/skins/inventory" && req.method !== "POST") {
+        try { return sendJson(res, 200, await inventoryReport({ profile: u.searchParams.get("profile") })); }
+        catch (e) { return invFail(res, e); }
+      }
 
       if (req.method !== "POST") { serveStatic(req, res, p); return; }
-      const body = await readBody(req);
+      let body;
+      try { body = await readBody(req, p === "/api/skins/inventory" ? INV_BODY_MAX : 0); }
+      catch (e) {
+        return sendJson(res, 400, { error: /too large/.test(String(e && e.message))
+          ? "that upload is too large — a Steam inventory paste should be well under 32 MB"
+          : "the request body wasn't valid JSON" });
+      }
+
+      if (p === "/api/skins/inventory") {
+        // {profile} = force a fresh read · {paste} = raw inventory JSON
+        try {
+          return sendJson(res, 200, await inventoryReport({
+            profile: body.profile, paste: body.paste != null ? body.paste : null,
+            force: body.paste == null,
+          }));
+        } catch (e) { return invFail(res, e); }
+      }
 
       if (p === "/api/skins/watch") {
         const name = String(body.name || "").slice(0, 200);
@@ -505,4 +881,4 @@ if (require.main === module) {
   console.log("[skins] STEAM_COOKIE " + (process.env.STEAM_COOKIE ? "set — full-history bootstrap enabled" : "not set — use paste-import for history"));
 }
 
-module.exports = { startServer, slug };
+module.exports = { startServer, slug, parseInventoryPayload };

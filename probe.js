@@ -709,6 +709,290 @@ async function fixtureTransport(url, headers) {
   await inst3.close();
   fs.rmSync(FRESH, { recursive: true, force: true });
 
+  // ═════════════════════════════════════════════════════════════════════════
+  // S2 PIN BLOCK (lane S2, feat/inv-server) — Steam INVENTORY routes, storage
+  // and INV_REPORT assembly. ONE contiguous block, hand-computed fixtures, on
+  // its own temp data dir + port so nothing above or below is disturbed.
+  //
+  // NO NETWORK: market.js's transport is replaced with a counting fixture, and
+  // the data-layer functions (market.js resolve/fetch, analytics.js value/
+  // reconstruction) are injected ONLY IF MISSING — so these pins pass before
+  // that lane lands and then exercise the REAL functions once it does. The
+  // injected stand-ins implement the frozen cross-lane contract exactly, so
+  // every number below holds either way (a mismatch after the merge is a
+  // genuine contract break, and should fail loudly).
+  console.log("— inventory (server) —");
+  {
+    const { parseInventoryPayload } = require("./server.js");
+    ok(/^local-data\/$/m.test(fs.readFileSync(path.join(__dirname, ".gitignore"), "utf8")),
+      "local-data/ is gitignored — an inventory + its SteamID can never reach the repo");
+
+    // fake-but-well-formed identity (privacy invariant: never a real SteamID)
+    const FAKE_ID = "76561190000000001";
+    let invMode = "ok";
+    const invHits = { total: 0, inventory: 0, profile: 0 };
+    // one CS2 inventory: a duplicate stack (2 assets → qty 2), a case, an item
+    // we only know from the Skinport dump, and an unmarketable sticker we
+    // cannot price at all
+    const asset = (classid, amount) => ({ appid: 730, contextid: "2", assetid: String(invHits.total) + classid,
+      classid: classid, instanceid: "0", amount: String(amount) });
+    const desc = (classid, name, marketable) => ({ appid: 730, classid: classid, instanceid: "0",
+      market_hash_name: name, marketable: marketable, tradable: marketable, currency: 0 });
+    const INV_PAYLOAD = {
+      success: 1, total_inventory_count: 5,
+      assets: [asset("c1", 1), asset("c1", 1), asset("c2", 1), asset("c3", 1), asset("c4", 1)],
+      descriptions: [desc("c1", "QQ Skin", 1), desc("c2", "A1 Case", 1),
+        desc("c3", "Dump Only Item", 1), desc("c4", "Unknown Sticker", 0)],
+    };
+    async function invTransport(url, headers) {
+      if (url.includes("/inventory/")) {
+        invHits.total++; invHits.inventory++;
+        if (invMode === "private") return { status: 403, body: JSON.stringify({ success: false }) };
+        if (invMode === "ratelimited") return { status: 429, body: "" };
+        return { status: 200, body: JSON.stringify(INV_PAYLOAD) };
+      }
+      if (/steamcommunity\.com\/id\//.test(url)) {
+        invHits.total++; invHits.profile++;
+        if (invMode === "noprofile") return { status: 200, body: "<html><body>The specified profile could not be found.</body></html>" };
+        return { status: 200, body: '<html><script>g_rgProfileData = {"url":"https://steamcommunity.com/id/probe-fake-user",' +
+          '"steamid":"' + FAKE_ID + '","personaname":"probe"};</script></html>' };
+      }
+      return fixtureTransport(url, headers);
+    }
+    // ── contract stand-ins (installed only where the data lane is absent) ──
+    const invSaved = { rp: M.resolveSteamProfile, si: M.steamInventory,
+      iv: A.inventoryValue, ir: A.inventoryReconstruction };
+    if (typeof M.resolveSteamProfile !== "function") {
+      M.resolveSteamProfile = async function (input) {
+        const raw = String(input || "").trim();
+        if (/^\d{17}$/.test(raw)) return { steamid64: raw, vanity: null, source: "steamid64" };
+        const pr = /\/profiles\/(\d{17})/.exec(raw);
+        if (pr) return { steamid64: pr[1], vanity: null, source: "url" };
+        const vanity = (/\/id\/([^/?#]+)/.exec(raw) || [null, raw])[1];
+        const res = await invTransport("https://steamcommunity.com/id/" + encodeURIComponent(vanity));
+        const g = /"steamid"\s*:\s*"(\d{17})"/.exec(res.body || "");
+        if (!g) throw new Error("no Steam profile named \"" + vanity + "\" — check the URL");
+        return { steamid64: g[1], vanity: vanity, source: "vanity" };
+      };
+    }
+    if (typeof M.steamInventory !== "function") {
+      M.steamInventory = async function (steamid64) {
+        const res = await invTransport("https://steamcommunity.com/inventory/" + steamid64 + "/730/2?l=english&count=5000");
+        if (res.status === 403) throw new Error("inventory is private or hidden — set it to Public in Steam privacy settings");
+        if (res.status === 429) throw new Error("Steam is rate-limiting inventory reads — try again in a few minutes");
+        if (res.status !== 200) throw new Error("steam inventory HTTP " + res.status);
+        const p = parseInventoryPayload(res.body);
+        return { steamid64: steamid64, count: p.count, items: p.items, truncated: p.truncated };
+      };
+    }
+    if (typeof A.inventoryValue !== "function") {
+      A.inventoryValue = function (items, priceOf) {
+        let total = 0, pricedCount = 0, unpricedCount = 0;
+        const rows = (items || []).map((it) => {
+          const p = priceOf(it.name);
+          const price = p != null && isFinite(p) && p > 0 ? p : null;
+          const value = price != null ? Math.round(price * it.qty * 100) / 100 : null;
+          if (price != null) { pricedCount++; total += value; } else unpricedCount++;
+          return { name: it.name, qty: it.qty, price: price, value: value };
+        });
+        rows.sort((a, b) => (b.value == null ? -1 : b.value) - (a.value == null ? -1 : a.value));
+        return { total: Math.round(total * 100) / 100, pricedCount: pricedCount, unpricedCount: unpricedCount, rows: rows };
+      };
+    }
+    if (typeof A.inventoryReconstruction !== "function") {
+      A.inventoryReconstruction = function (items, historyOf, opts) {
+        const priceOf = opts && typeof opts.priceOf === "function" ? opts.priceOf : null;
+        const held = [];
+        let totalNames = 0, pricedNames = 0;
+        const hist = new Map();
+        for (const it of items || []) {
+          totalNames++;
+          const h = (historyOf(it.name) || []).filter((r) => r && r.day && r.price > 0)
+            .slice().sort((a, b) => (a.day < b.day ? -1 : 1));
+          hist.set(it.name, h);
+          if (h.length) { pricedNames++; held.push({ qty: it.qty, rows: h }); }
+        }
+        const dayset = new Set();
+        for (const x of held) for (const r of x.rows) dayset.add(r.day);
+        const cur = held.map(() => ({ i: 0, last: null }));
+        const days = [];
+        for (const day of Array.from(dayset).sort()) {
+          let v = 0;
+          for (let k = 0; k < held.length; k++) {
+            const st = cur[k], rows = held[k].rows;
+            // carry forward within THIS item's own series only — never across items
+            while (st.i < rows.length && rows[st.i].day <= day) { st.last = rows[st.i].price; st.i++; }
+            if (st.last != null) v += st.last * held[k].qty;
+          }
+          days.push({ day: day, value: Math.round(v * 100) / 100 });
+        }
+        let num = 0, den = 0;
+        for (const it of items || []) {
+          const h = hist.get(it.name) || [];
+          let p = priceOf ? priceOf(it.name) : null;
+          if (p == null && h.length) p = h[h.length - 1].price;
+          if (!(p > 0)) continue;
+          den += p * it.qty;
+          if (h.length) num += p * it.qty;
+        }
+        return { days: days, coveragePct: den > 0 ? Math.round((num / den) * 1000) / 10 : 0,
+          pricedNames: pricedNames, totalNames: totalNames };
+      };
+    }
+    M.setTransport(invTransport);
+
+    // ── fixture tracker state (all synthetic; no repo artifacts involved) ──
+    // 3 founding cases 10 → 11 today  ⇒ Skindex 100 → 110 (+10.0%)
+    // QQ Skin 100 → 150 today, held ×2;  "Dump Only Item" priced by the dump
+    // at $89 with NO history;  "Unknown Sticker" unpriceable.
+    const INV_DATA = path.join(os.tmpdir(), "hh-skin-inv-" + Date.now());
+    const INV_NOW = Date.now();
+    fs.mkdirSync(path.join(INV_DATA, "history"), { recursive: true });
+    fs.mkdirSync(path.join(INV_DATA, "cache"), { recursive: true });
+    fs.writeFileSync(path.join(INV_DATA, "watchlist.json"), JSON.stringify(["A1 Case", "A2 Case", "A3 Case"]));
+    const invMark = (name, t, price) => fs.appendFileSync(path.join(INV_DATA, "history", slug(name) + ".jsonl"),
+      JSON.stringify({ t: t, src: "steam", price: price, lowest: price, vol: 1 }) + "\n");
+    for (const n of ["A1 Case", "A2 Case", "A3 Case"]) { invMark(n, ADOPT_T, 10); invMark(n, INV_NOW, 11); }
+    invMark("QQ Skin", ADOPT_T, 100); invMark("QQ Skin", INV_NOW, 150);
+    fs.writeFileSync(path.join(INV_DATA, "cache", "skinport-items.json"), JSON.stringify({ t: INV_NOW, items: [
+      { name: "Dump Only Item", min: 89, mean: 95, median: 92, max: 120, qty: 7 },
+      { name: "A1 Case", min: 999, mean: 999, median: 999, max: 999, qty: 3 }, // tracked mark must WIN this
+    ] }));
+    // an earlier load, 20 min ago — the next load must APPEND beside it
+    fs.writeFileSync(path.join(INV_DATA, "inventory.jsonl"),
+      JSON.stringify({ t: INV_NOW - 20 * 60000, value: 350, count: 5 }) + "\n");
+
+    const IPORT = 5501;
+    let iinst = startServer({ port: IPORT, dataDir: INV_DATA, snapHours: 0, steamCookie: "" });
+    await new Promise((r) => iinst.server.once("listening", r));
+    const iapi = async (p, body) => {
+      const opts = body
+        ? { method: "POST", headers: { "Content-Type": "application/json", Connection: "close" }, body: JSON.stringify(body) }
+        : { headers: { Connection: "close" } };
+      const r = await fetch("http://localhost:" + IPORT + p, opts);
+      return { status: r.status, body: await r.json().catch(() => null) };
+    };
+    const noStack = (s) => typeof s === "string" && s.length > 0 && !/\n\s*at /.test(s);
+
+    // (1) plain-English errors, correct codes, never a stack trace
+    const iBad = await iapi("/api/skins/inventory");
+    ok(iBad.status === 400 && noStack(iBad.body.error) && /SteamID64/.test(iBad.body.error)
+      && /no sign-in/i.test(iBad.body.error),
+      "GET inventory with no profile → 400 plain English (and says the no-sign-in part out loud)");
+    const iBadPaste = await iapi("/api/skins/inventory", { paste: "<html>not json</html>" });
+    ok(iBadPaste.status === 400 && noStack(iBadPaste.body.error) && /JSON/.test(iBadPaste.body.error),
+      "POST paste that isn't inventory JSON → 400 with the fix, not a parser stack");
+
+    // (2) full flow: resolve vanity → fetch → price → value → recon → series
+    const iR1 = await iapi("/api/skins/inventory?profile=probe-fake-user");
+    ok(iR1.status === 200 && iR1.body.steamid64 === FAKE_ID && iR1.body.cached === false
+      && iR1.body.count === 5 && iR1.body.profile === "probe-fake-user",
+      "GET ?profile=<vanity> resolves → fetches → INV_REPORT (5 assets, 4 item types)");
+    const iV = iR1.body.value;
+    ok(iV.total === 400 && iV.pricedCount === 3 && iV.unpricedCount === 1 && iV.rows.length === 4,
+      "inventoryValue: 2×QQ Skin@150 + A1 Case@11 + Dump Only@89 = $400, 1 item unpriced (never guessed)");
+    ok(iV.rows[0].name === "QQ Skin" && iV.rows[0].qty === 2 && iV.rows[0].value === 300
+      && iV.rows[3].name === "Unknown Sticker" && iV.rows[3].price === null,
+      "rows sort by value desc, duplicate stacks merged to qty 2, the unpriceable item reports null");
+    ok(iV.rows.find((r) => r.name === "A1 Case").price === 11,
+      "pricing order: our own tracked mark ($11) beats the Skinport dump ($999) for the same name");
+    ok(iV.rows.find((r) => r.name === "Dump Only Item").price === 89,
+      "pricing order: an untracked item falls back to the cached Skinport dump ($89)");
+    ok(invHits.profile === 1 && invHits.inventory === 1 && invHits.total === 2,
+      "one vanity resolve + one inventory read, nothing else (Steam is IP-rate-limited)");
+
+    // (3) reconstruction — hand-computed. Only names with their OWN history
+    // count: 2×QQ Skin + 1×A1 Case = 2×100+10 = 210 on the founding day,
+    // 2×150+11 = 311 today. Coverage is by VALUE: 311 of the $400 total = 77.8%.
+    const iRec = iR1.body.recon;
+    ok(iRec.days.length === 2 && iRec.days[0].day === "2026-07-25" && iRec.days[0].value === 210
+      && iRec.days[1].value === 311,
+      "inventoryReconstruction values TODAY's holdings backwards on each item's own history (210 → 311)");
+    ok(iRec.coveragePct === 77.8 && iRec.pricedNames === 2 && iRec.totalNames === 4,
+      "coverage is share of VALUE with usable history (311/400 = 77.8%), 2 of 4 names — no interpolation for the rest");
+
+    // (4) alpha vs the Skindex over that same span: inventory +48.1%
+    // (311/210), index 100 → 110 = +10.0% ⇒ alpha +38.1
+    const iB = iR1.body.benchmark;
+    ok(iB && iB.invPct === 48.1 && iB.idxPct === 10 && iB.alpha === 38.1 && iB.spanDays === 2,
+      "benchmark: inventory +48.1% vs Skindex +10.0% over the reconstruction span → alpha +38.1");
+
+    // (5) snapshot series: appended beside the 20-min-old line, then deduped
+    ok(iR1.body.series.length === 2 && iR1.body.series[0].value === 350
+      && iR1.body.series[1].value === 400 && iR1.body.series[1].count === 5,
+      "snapshot appended to local-data/inventory.jsonl (prior load 20 min ago kept, new one beside it)");
+
+    // (6) a cached read must not touch the network AT ALL — not the inventory
+    // fetch, not even the vanity resolve
+    const iR2 = await iapi("/api/skins/inventory?profile=probe-fake-user");
+    ok(iR2.status === 200 && iR2.body.cached === true && iR2.body.value.total === 400
+      && iR2.body.fetchedAt === iR1.body.fetchedAt && invHits.total === 2,
+      "second read inside the 10-min TTL is served from cache — transport call count still 2 (no re-fetch)");
+    ok(iR2.body.series.length === 2 && /Cached read/.test(iR2.body.note),
+      "snapshot deduped inside 10 minutes (series still 2 lines) and the note says the read was cached");
+    ok(fs.readFileSync(path.join(INV_DATA, "inventory.jsonl"), "utf8").trim().split("\n").length === 2,
+      "exactly two lines on disk after the deduped load");
+
+    // (7) paste path (the static-host idiom) — identical math, zero network
+    const iPaste = await iapi("/api/skins/inventory", { paste: JSON.stringify(INV_PAYLOAD) });
+    ok(iPaste.status === 200 && iPaste.body.value.total === 400 && iPaste.body.count === 5
+      && iPaste.body.recon.coveragePct === 77.8 && invHits.total === 2,
+      "POST {paste} parses assets+descriptions locally → identical INV_REPORT, no network call");
+    ok(iPaste.body.value.rows[0].qty === 2 && /pasted inventory JSON/.test(iPaste.body.note),
+      "paste path merges duplicate stacks on classid_instanceid the same way the fetcher does");
+    // the join itself: the server's standalone fallback must agree item-for-
+    // item with the data layer's SHARED parseSteamInventory (the function its
+    // fetcher uses), which the paste route delegates to once market.js has it
+    const iNorm = (its) => JSON.stringify(its.slice().sort((a, b) => (a.name < b.name ? -1 : 1))
+      .map((i) => [i.name, i.qty, !!i.marketable, !!i.tradable]));
+    const iLocal = parseInventoryPayload(JSON.stringify(INV_PAYLOAD));
+    ok(iLocal.count === 5 && iLocal.items.length === 4 && iLocal.truncated === false
+      && iNorm(iLocal.items) === '[["A1 Case",1,true,true],["Dump Only Item",1,true,true],["QQ Skin",2,true,true],["Unknown Sticker",1,false,false]]'
+      && (typeof M.parseSteamInventory !== "function"
+        || iNorm(M.parseSteamInventory(INV_PAYLOAD).items) === iNorm(iLocal.items)),
+      "paste join: the server fallback matches the shared parseSteamInventory item-for-item (qty summed, marketable/tradable carried)");
+
+    // (8) upstream failures surface as the user's own next action
+    invMode = "private";
+    const iPriv = await iapi("/api/skins/inventory", { profile: "probe-fake-user" });
+    ok(iPriv.status === 404 && noStack(iPriv.body.error) && /private or hidden/.test(iPriv.body.error)
+      && /Public/.test(iPriv.body.error),
+      "private inventory → 404 + Steam's own fix (\"set it to Public\"), never a 500 or a stack");
+    invMode = "ratelimited";
+    const iRate = await iapi("/api/skins/inventory", { profile: "probe-fake-user" });
+    ok(iRate.status === 429 && /rate-limiting/.test(iRate.body.error),
+      "Steam rate-limit → 429 with the wait-and-retry message");
+    invMode = "noprofile";
+    const iMiss = await iapi("/api/skins/inventory", { profile: "no-such-probe-user" });
+    ok(iMiss.status === 404 && noStack(iMiss.body.error),
+      "unknown vanity name → 404 (a failed resolve is a missing profile, not an upstream fault)");
+    invMode = "ok";
+
+    // (9) restart: the snapshot series, the last profile and the fetch cache
+    // all come back from local-data/ — and the cached read still costs nothing
+    const hitsBefore = invHits.total;
+    await iinst.close();
+    iinst = startServer({ port: IPORT, dataDir: INV_DATA, snapHours: 0, steamCookie: "" });
+    await new Promise((r) => iinst.server.once("listening", r));
+    const iSer = await iapi("/api/skins/inventory/series");
+    ok(iSer.status === 200 && iSer.body.series.length === 2 && iSer.body.series[0].value === 350
+      && iSer.body.series[1].value === 400,
+      "restart: GET /api/skins/inventory/series replays the snapshots from disk");
+    const iR3 = await iapi("/api/skins/inventory");
+    ok(iR3.status === 200 && iR3.body.cached === true && iR3.body.profile === "probe-fake-user"
+      && iR3.body.value.total === 400 && invHits.total === hitsBefore,
+      "restart: the last profile + its cached inventory survive, and re-reading still makes no network call");
+    await iinst.close();
+
+    M.setTransport(fixtureTransport);
+    M.resolveSteamProfile = invSaved.rp; M.steamInventory = invSaved.si;
+    A.inventoryValue = invSaved.iv; A.inventoryReconstruction = invSaved.ir;
+    for (const [o, k] of [[M, "resolveSteamProfile"], [M, "steamInventory"],
+      [A, "inventoryValue"], [A, "inventoryReconstruction"]]) if (o[k] === undefined) delete o[k];
+    fs.rmSync(INV_DATA, { recursive: true, force: true });
+  }
+  // ═══ end S2 pin block ═════════════════════════════════════════════════════
+
   // ── collector (the hosted always-on tracker) ─────────────────────────────
   console.log("— collector —");
   const { collect } = require("./collect.js");
