@@ -18,6 +18,7 @@
 //     below for the endpoints and why OpenID is neither used nor needed).
 "use strict";
 const https = require("https");
+const A = require("./analytics.js");
 const zlib = require("zlib");
 
 const APP_ID = 730; // Counter-Strike 2
@@ -325,47 +326,9 @@ async function steamInventory(steamid64, opts) {
 // pastes the same JSON out of their own browser) parses byte-identically to
 // the fetched one. Pure — no network, no clock.
 function parseSteamInventory(payload, steamid64, max) {
-  let p = payload;
-  if (typeof p === "string") {
-    try { p = JSON.parse(p); }
-    catch (e) { throw new Error("that does not look like Steam inventory JSON — copy the whole page, starting with {"); }
-  }
-  if (!p || typeof p !== "object")
-    throw new Error("that does not look like Steam inventory JSON — copy the whole page, starting with {");
-  const assets = Array.isArray(p.assets) ? p.assets : [];
-  const descs = Array.isArray(p.descriptions) ? p.descriptions : [];
-  const empty = p.success === 1 || p.success === true || Number(p.total_inventory_count) === 0;
-  if (!assets.length && !empty)
-    throw new Error("Steam did not return an inventory for that profile — it may be private, hidden, or empty");
-  const byKey = new Map();
-  for (const d of descs) {
-    if (!d) continue;
-    const k = String(d.classid) + "_" + String(d.instanceid);
-    if (!byKey.has(k)) byKey.set(k, d);
-  }
-  const rows = new Map();
-  let count = 0;
-  for (const a of assets) {
-    if (!a) continue;
-    const d = byKey.get(String(a.classid) + "_" + String(a.instanceid));
-    if (!d || typeof d.market_hash_name !== "string" || !d.market_hash_name) continue; // never invent a name
-    const n = Number(a.amount);
-    const qty = isFinite(n) && n > 0 ? Math.round(n) : 1;
-    const k = String(a.classid) + "_" + String(a.instanceid);
-    const cur = rows.get(k);
-    if (cur) cur.qty += qty;   // duplicate stack of the SAME item → one row, qty summed
-    else rows.set(k, { name: d.market_hash_name, qty: qty,
-      marketable: !!Number(d.marketable), tradable: !!Number(d.tradable) });
-    count += qty;
-  }
-  const declared = Number(p.total_inventory_count);
-  return {
-    steamid64: String(steamid64 == null ? "" : steamid64),
-    count: count,
-    items: Array.from(rows.values()),
-    truncated: Boolean(p.more_items) || (isFinite(declared) && declared > assets.length) ||
-      (max > 0 && assets.length >= max),
-  };
+  // Delegates to the CANONICAL implementation in analytics.js (UMD) so the
+  // fetched path and the browser's paste path can never drift apart.
+  return A.parseSteamInventory(payload, steamid64, max);
 }
 
 // ── Skinport ───────────────────────────────────────────────────────────────

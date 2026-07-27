@@ -790,6 +790,58 @@
       windowDays: windowDays, ready: days >= minDays && aN > 0 && uN > 0 };
   }
 
+  // ── Steam inventory join (CANONICAL, shared) ─────────────────────────────
+  // assets × descriptions → holdings. Lives HERE (the UMD module) so the
+  // Node fetch path (market.js delegates to this) and the browser paste path
+  // run ONE implementation — the assembleSeries rule: never fork raw→
+  // structured assembly per surface. Pure: no network, no clock, no RNG.
+  // NOTE: rows are keyed by classid_instanceid, so an inventory CAN carry
+  // several rows sharing one market_hash_name (different floats/stickers);
+  // inventoryValue() aggregates them by name, which is where value is summed.
+  function parseSteamInventory(payload, steamid64, max) {
+    let p = payload;
+    if (typeof p === "string") {
+      try { p = JSON.parse(p); }
+      catch (e) { throw new Error("that does not look like Steam inventory JSON — copy the whole page, starting with {"); }
+    }
+    if (!p || typeof p !== "object")
+      throw new Error("that does not look like Steam inventory JSON — copy the whole page, starting with {");
+    const assets = Array.isArray(p.assets) ? p.assets : [];
+    const descs = Array.isArray(p.descriptions) ? p.descriptions : [];
+    const empty = p.success === 1 || p.success === true || Number(p.total_inventory_count) === 0;
+    if (!assets.length && !empty)
+      throw new Error("Steam did not return an inventory for that profile — it may be private, hidden, or empty");
+    const byKey = new Map();
+    for (const d of descs) {
+      if (!d) continue;
+      const k = String(d.classid) + "_" + String(d.instanceid);
+      if (!byKey.has(k)) byKey.set(k, d);
+    }
+    const rows = new Map();
+    let count = 0;
+    for (const a of assets) {
+      if (!a) continue;
+      const d = byKey.get(String(a.classid) + "_" + String(a.instanceid));
+      if (!d || typeof d.market_hash_name !== "string" || !d.market_hash_name) continue; // never invent a name
+      const n = Number(a.amount);
+      const qty = isFinite(n) && n > 0 ? Math.round(n) : 1;
+      const k = String(a.classid) + "_" + String(a.instanceid);
+      const cur = rows.get(k);
+      if (cur) cur.qty += qty;   // duplicate stack of the SAME item → one row, qty summed
+      else rows.set(k, { name: d.market_hash_name, qty: qty,
+        marketable: !!Number(d.marketable), tradable: !!Number(d.tradable) });
+      count += qty;
+    }
+    const declared = Number(p.total_inventory_count);
+    return {
+      steamid64: String(steamid64 == null ? "" : steamid64),
+      count: count,
+      items: Array.from(rows.values()),
+      truncated: Boolean(p.more_items) || (isFinite(declared) && declared > assets.length) ||
+        (max > 0 && assets.length >= max),
+    };
+  }
+
   // ── benchmark-relative portfolio (the "did you beat the Skindex" number) ──
   // entries = [{ t, cost }] — one per lot, t = acquisition time, cost = the
   // lot's cost basis. For each entry the benchmark factor is
@@ -963,7 +1015,7 @@
     marketOverview: marketOverview, includedFromDay: includedFromDay, INDEX_RULES: INDEX_RULES,
     deepHistoryBase: deepHistoryBase,
     cashAdjustedIndex: cashAdjustedIndex, corrDaily: corrDaily, btcSessionSplit: btcSessionSplit,
-    benchmarkGrowth: benchmarkGrowth,
+    benchmarkGrowth: benchmarkGrowth, parseSteamInventory: parseSteamInventory,
     inventoryValue: inventoryValue, inventoryReconstruction: inventoryReconstruction,
     assembleSeries: assembleSeries, mergeDaily: mergeDaily, round2: round2, sma: sma, smaTrack: smaTrack,
     ema: ema, rsi: rsi, logReturns: logReturns, volAnnualized: volAnnualized,
