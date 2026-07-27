@@ -1744,9 +1744,13 @@ async function fixtureTransport(url, headers) {
     //    moves with FX and fee changes — every item at 0.50× must flag NOTHING.
     const vWide = vLane(["A", "B", "C", "D", "E", "F"].map((n) => vItem(n + " Case", "case", vq(5))));
     ok(vFlags(vWide).length === 0 && vRow(vWide).status === "ok"
-      && vRow(vWide).medianRatio === 0.5 && vRow(vWide).corroborated === "6/6"
-      && vWide.summary.venueCorroborated === "6/6" && vWide.summary.venuesAnswered === "1/1",
-      "venue lane: a whole-venue discount/FX shift (every item 0.50×) flags NOTHING — the gate is median-relative, exactly like the ratio lane and the index clamp");
+      && vRow(vWide).medianRatio === 0.5 && vRow(vWide).checked === "6/6"
+      && vRow(vWide).agreed === "6/6" && vRow(vWide).counts === false
+      && vWide.summary.venueChecked === "6/6" && vWide.summary.venuesAnswered === "1/1"
+      && vWide.summary.corroboration.weak.counted === false
+      && vWide.summary.corroboration.weak.countedItems === 0
+      && vWide.summary.corroboration.strong.items === "0/6",
+      "venue lane: a whole-venue discount/FX shift (every item 0.50×) flags NOTHING — the gate is median-relative, exactly like the ratio lane and the index clamp — and six AGREEING ask venues buy 0 strong corroboration (weak tier, counts:false)");
 
     // 2. one name escaping its venue's own consensus flags — and an IDENTICAL
     //    divergence on a unique item does not (venueUniqueMult: a venue quote
@@ -1790,7 +1794,7 @@ async function fixtureTransport(url, headers) {
     const vGone = vLane(["A", "B", "C", "D", "E", "F"].map((n) => vItem(n + " Case", "case", vq(6.5))),
       [{ id: "vx", label: "VX Market", kind: "ask", ccy: "USD", ok: true },
         { id: "vy", label: "VY Market", kind: "ask", ccy: "USD", ok: false, reason: "not configured — set VY_COOKIE" }]);
-    ok(vRow(vGone, "vy").status === "unavailable" && vRow(vGone, "vy").corroborated === "0/6"
+    ok(vRow(vGone, "vy").status === "unavailable" && vRow(vGone, "vy").checked === "0/6"
       && /not configured/.test(vRow(vGone, "vy").reason) && vRow(vGone, "vy").medianRatio === null
       && vGone.summary.venuesAnswered === "1/2" && vFlags(vGone).length === 0,
       "venue lane: an unavailable venue publishes status \"unavailable\" + its reason + 0/6 coverage — it is never counted as a venue that agreed");
@@ -1804,11 +1808,11 @@ async function fixtureTransport(url, headers) {
       vItem("D Case", "case", vq(6.5)), vItem("E Case", "case", vq(6.5)),
       vItem("F Case", "case", { vz: { price: 6.5, t: VNOW } })],
       [{ id: "vx", label: "VX Market", ok: true }, { id: "vz", label: "VZ Market", ok: true }]);
-    ok(vRow(vThin, "vx").status === "ok" && vRow(vThin, "vx").corroborated === "5/6"
-      && vRow(vThin, "vz").status === "insufficient" && vRow(vThin, "vz").corroborated === "2/6"
+    ok(vRow(vThin, "vx").status === "ok" && vRow(vThin, "vx").checked === "5/6"
+      && vRow(vThin, "vz").status === "insufficient" && vRow(vThin, "vz").checked === "2/6"
       && /below venueMinQuotes 5/.test(vRow(vThin, "vz").reason)
-      && vThin.summary.venueCorroborated === "5/6" && vThin.summary.venuesAnswered === "2/2",
-      "venue lane coverage: 5/6 from the gated venue, 2/6 published-but-not-gated from the thin one — the item only VZ holds is not counted as corroborated (5/6, not 6/6)");
+      && vThin.summary.venueChecked === "5/6" && vThin.summary.venuesAnswered === "2/2",
+      "venue lane coverage: 5/6 CHECKED by the gated venue, 2/6 published-but-not-gated from the thin one — the item only VZ holds is not counted (5/6, not 6/6)");
 
     // 6. a stale reading is not agreement: past venueMaxAgeH it drops out of
     //    the pairing and out of the coverage count
@@ -1817,9 +1821,9 @@ async function fixtureTransport(url, headers) {
       vItem("A Case", "case", vq(6.5)), vItem("B Case", "case", vq(6.5)),
       vItem("C Case", "case", vq(6.5)), vItem("D Case", "case", vq(6.5)),
       vItem("E Case", "case", vq(6.5)), vItem("S Case", "case", vq(3.5, vStaleT))]);
-    ok(vRow(vStale).corroborated === "5/6" && vFlags(vStale).length === 0
-      && vStale.summary.venueCorroborated === "5/6",
-      "venue lane: a reading older than venueMaxAgeH is dropped from coverage rather than carried — a stale quote that happens to agree is not corroboration");
+    ok(vRow(vStale).checked === "5/6" && vFlags(vStale).length === 0
+      && vStale.summary.venueChecked === "5/6",
+      "venue lane: a reading older than venueMaxAgeH is dropped from coverage rather than carried — a stale quote that happens to agree is not even checked, let alone corroboration");
 
     // 7. art marks never enter the lane (they have no steam quote by nature —
     //    grails sit above the ~$1,800 listing cap), same exclusion as ratio
@@ -1828,15 +1832,15 @@ async function fixtureTransport(url, headers) {
       vItem("C Case", "case", vq(6.5)), vItem("D Case", "case", vq(6.5)),
       vItem("E Case", "case", vq(6.5)),
       Object.assign(vItem("Grail", "knife", vq(999)), { tier: "art", steamPrice: null })]);
-    ok(vRow(vArt).corroborated === "5/5" && vFlags(vArt).length === 0,
+    ok(vRow(vArt).checked === "5/5" && vFlags(vArt).length === 0,
       "venue lane: art/appraisal items are outside the lane (no steam mark to corroborate) — 5/5, not 5/6");
 
     // 8. a caller with no venue layer at all (the live server) reports 0/0
     //    rather than pretending the marks were corroborated
     const vNone = S.assessIntegrity([vItem("A Case", "case", null)], { now: VNOW });
     ok(Array.isArray(vNone.venues) && vNone.venues.length === 0
-      && vNone.summary.venueCorroborated === "0/1" && vNone.summary.venuesAnswered === "0/0",
-      "venue lane: a surface with no venue adapters publishes 0 venues and 0/1 corroboration — absence is stated, never implied agreement");
+      && vNone.summary.venueChecked === "0/1" && vNone.summary.venuesAnswered === "0/0",
+      "venue lane: a surface with no venue adapters publishes 0 venues and 0/1 checked — absence is stated, never implied agreement");
 
     // ── adapter contract + fetchers (fixture transport, never the network) ──
     const V_COOKIE = "session=PROBE-VENUE-SECRET";
@@ -1958,12 +1962,12 @@ async function fixtureTransport(url, headers) {
     const vInteg = vRun.manifest.market.integrity;
     const vRowOf = (id) => vInteg.venues.find((x) => x.id === id);
     ok(vInteg.venues.length === 3 && vRowOf("market.csgo").status === "ok"
-      && vRowOf("market.csgo").corroborated === "6/7" && vRowOf("market.csgo").medianRatio === 0.65
+      && vRowOf("market.csgo").checked === "6/7" && vRowOf("market.csgo").medianRatio === 0.65
       && vRowOf("waxpeer").status === "unavailable" && vRowOf("buff163").status === "insufficient"
-      && vRowOf("buff163").corroborated === "4/7" && vRowOf("buff163").mode === "auth"
-      && vInteg.summary.venueCorroborated === "6/7" && vInteg.summary.venuesAnswered === "2/3"
+      && vRowOf("buff163").checked === "4/7" && vRowOf("buff163").mode === "auth"
+      && vInteg.summary.venueChecked === "6/7" && vInteg.summary.venuesAnswered === "2/3"
       && vInteg.flags.filter((f) => f.lane === "venue").length === 0,
-      "collector publishes the venue lane honestly: 6/7 from the gated venue, a DEAD venue as \"unavailable\" (not agreement), BUFF published-but-not-gated at 4/7 — and Clutch Case, which only the ungated venue holds, is not counted (6/7, not 7/7)");
+      "collector publishes the venue lane honestly: 6/7 checked by the gated venue, a DEAD venue as \"unavailable\" (not agreement), BUFF published-but-not-gated at 4/7 — and Clutch Case, which only the ungated venue holds, is not counted (6/7, not 7/7)");
     const vStore = JSON.parse(fs.readFileSync(path.join(V_ROOT, "data", "venues.json"), "utf8"));
     const vIdsAfter = JSON.parse(fs.readFileSync(path.join(V_ROOT, "data", "buff-ids.json"), "utf8"));
     const vFracRow = vRun.manifest.items.find((i) => i.name === "Fracture Case");
@@ -1992,7 +1996,7 @@ async function fixtureTransport(url, headers) {
     const nRun = await collect({ root: N_ROOT, env: {} });
     const nInteg = nRun.manifest.market.integrity;
     ok(nRun.steamOk === vNames.length && nRun.manifest.errors.length === 0
-      && nInteg.summary.venuesAnswered === "0/3" && nInteg.summary.venueCorroborated === "0/7"
+      && nInteg.summary.venuesAnswered === "0/3" && nInteg.summary.venueChecked === "0/7"
       && nInteg.venues.every((v) => v.status === "unavailable")
       && /not configured/.test(nRun.manifest.market.settlement.integrity.venues
         .find((v) => v.id === "buff163").reason),
@@ -2027,6 +2031,300 @@ async function fixtureTransport(url, headers) {
     M.setTransport(fixtureTransport);
   }
   // ═══ END VENUE-LANE PINS ═════════════════════════════════════════════════
+
+  // ═══ BEGIN EVIDENCE-TIER + VOLUME-LANE PINS — INTEG-1 (2026-07-27) ═══════
+  // ONE contiguous block. The criticism that produced it: the third-venue lane
+  // corroborates against ASKS, which are free to post — quantity of evidence,
+  // of a weak kind. So every lane now publishes an evidence STRENGTH (cost to
+  // fake), ask AGREEMENT stops counting as corroboration while ask DIVERGENCE
+  // keeps full flagging power, and a new strong-tier `volume` lane reads the
+  // realized sold-per-day we already collect. Flag-only and firewalled, proven
+  // by the last pin the same way the venue lane proved it.
+  //
+  // Arithmetic used throughout (log space, base e; +1 volume smoothing so a
+  // zero-volume day is defined rather than dropped):
+  //   ln(12/10)   = 0.182322   a +20% move  (< volMoveAlert 0.20 → watch)
+  //   ln(13/10)   = 0.262364   a +30% move  (≥ volMoveAlert 0.20 → alert)
+  //   ln(21/101)  = −1.570595  20 units against a 100/day baseline
+  //   ln(301/101) = +1.091923  300 units against a 100/day baseline
+  //   ln(501/101) = +1.601406  500 units against a 100/day baseline
+  //   ln(0.65)    = −0.430783  the venue fixture's clean 0.65× ask ratio
+  //   ln(0.481532/0.65) = −0.300000 exactly → a venue WATCH on a case
+  console.log("— evidence tiers + volume lane (INTEG-1 2026-07-27) —");
+  {
+    const EV_NOW = Date.UTC(2026, 6, 20, 12);
+    const evDay = (n) => new Date(Date.UTC(2026, 6, n)).toISOString().slice(0, 10);
+    // 8 daily marks ending 2026-07-08; the lane compares the LAST day against
+    // the previous one, with the 7 before it as the baseline window.
+    const evItem = (name, prices, vols, over) => Object.assign({
+      name: name, cat: "case", tier: null, steamPrice: prices[prices.length - 1],
+      quoteT: EV_NOW, salesT: null, sales30: null, ratioDays: [], book: null,
+      volDays: prices.map((p, i) => ({ day: evDay(i + 1), price: p, vol: vols[i] })),
+      venues: null }, over || {});
+    const evFlat = (name, price, vol) => evItem(name, Array(8).fill(price), Array(8).fill(vol));
+    const evMove = (name, last, vol) => evItem(name, Array(7).fill(10).concat([last]),
+      Array(7).fill(100).concat([vol]));
+    const evClean = () => ["A", "B", "C", "D"].map((n) => evFlat(n + " Case", 10, 100));
+    const evLane = (items, opts) => S.assessIntegrity(items, Object.assign({ now: EV_NOW }, opts || {}));
+    const evVolFlags = (r) => r.flags.filter((f) => f.lane === "volume");
+
+    // 1. THE TIERING IS PUBLISHED, in the record, with the cost-to-fake reason
+    //    — a consumer can rank any flag or coverage number by how hard its
+    //    evidence would be to manufacture, without reading this repo.
+    const evBase = evLane(evClean());
+    const L = evBase.rules.lanes;
+    ok(evBase.version === "INTEG-1" && evBase.revision === "2026-07-27-evidence-tiers"
+      && L.ratio.strength === "strong" && L.volume.strength === "strong"
+      && L["art-evidence"].strength === "strong" && L.book.strength === "medium"
+      && L.venue.strength === "weak" && L.staleness.strength === "n/a"
+      && L.ratio.counts === true && L.volume.counts === true && L.book.counts === true
+      && L.venue.counts === false && L.staleness.counts === false
+      && /fee/.test(L.volume.costToFake) && /15%/.test(L.volume.costToFake)
+      && /free to post/.test(L.venue.costToFake) && /zero/.test(L.venue.costToFake)
+      && /can actually be filled/.test(L.book.evidence) && /risk of being hit/.test(L.book.costToFake)
+      && /divergence/i.test(L.venue.asymmetry) && /AGREEMENT is not counted/.test(L.venue.asymmetry)
+      && /no longer counts as corroboration/.test(evBase.rules.revisionNote)
+      && /No fixing computation, canonical form or hash changed/.test(evBase.rules.revisionNote),
+      "INTEG-1 lanes publish an evidence STRENGTH with its cost-to-fake rationale (realized sales strong / standing bids medium / asks weak, liveness n/a) and the record says plainly what the revision changed — while the version id stays INTEG-1 because no fixing computation moved");
+
+    // 2. every FLAG carries its lane's strength, so a reader ranks alerts by
+    //    evidence quality rather than treating all flags as one currency
+    const evMixed = evLane(evClean().concat([
+      evMove("P Case", 13, 20),                                     // volume: strong
+      { name: "Grail", cat: "knife", tier: "art", steamPrice: null, quoteT: EV_NOW,
+        salesT: null, sales30: 1, ratioDays: [], book: null, volDays: null, venues: null }]));
+    const evByLane = {};
+    for (const f of evMixed.flags) evByLane[f.lane] = f.strength;
+    ok(evMixed.flags.length === 2 && evByLane.volume === "strong" && evByLane["art-evidence"] === "strong"
+      && evMixed.flags.every((f) => typeof f.strength === "string"),
+      "every flag carries the evidence strength of its lane — flags are no longer one undifferentiated currency");
+
+    // ── ask AGREEMENT buys nothing; ask DIVERGENCE still flags ──────────────
+    // Same six marks, three venue conditions. The venue fixture is the one the
+    // venue-lane block already pins: clean quotes at 0.65 × steam.
+    const evSix = () => ["A", "B", "C", "D", "E", "F"].map((n) => evFlat(n + " Case", 10, 100));
+    const evWithQuotes = (items, priceFor) => items.map((it) => Object.assign({}, it,
+      { venues: { vx: { price: priceFor(it.name), t: EV_NOW } } }));
+    const evRoster = [{ id: "vx", label: "VX Market", kind: "ask", ccy: "USD", ok: true }];
+    const evNoVenue = evLane(evSix());
+    const evAgree = evLane(evWithQuotes(evSix(), () => 6.5), { venues: evRoster });
+    // one name quoted 4.81532 against a steam mark of 10 → ln(0.481532/0.65)
+    // = −0.300000 exactly → WATCH on a case (venueDevWatch 0.25)
+    const evDiverge = evLane(evWithQuotes(evSix(), (n) => (n === "F Case" ? 4.81532 : 6.5)),
+      { venues: evRoster });
+
+    // 3. THE ASYMMETRY, stated as a pin: six ask venues AGREEING move the
+    //    strong-tier coverage by exactly nothing (the number that used to read
+    //    as "corroborated"), and the agreement is published rather than
+    //    dropped — checked 6/6, agreed 6/6, countedItems 0.
+    ok(JSON.stringify(evAgree.summary.corroboration.strong) === JSON.stringify(evNoVenue.summary.corroboration.strong)
+      && evAgree.summary.corroboration.strong.items === "6/6"
+      && evAgree.summary.corroboration.weak.counted === false
+      && evAgree.summary.corroboration.weak.countedItems === 0
+      && evAgree.summary.corroboration.weak.checked === "6/6"
+      && evAgree.summary.corroboration.weak.agreed === "6/6"
+      && evNoVenue.summary.corroboration.weak.checked === "0/6"
+      && evAgree.summary.venueChecked === "6/6" && !("venueCorroborated" in evAgree.summary)
+      && evAgree.venues[0].counts === false && evAgree.venues[0].strength === "weak"
+      && evVolFlags(evAgree).length === 0,
+      "ASK AGREEMENT IS NOT CORROBORATION: an agreeing ask venue leaves the strong tier byte-identical (6/6 either way) and publishes its own coverage as checked 6/6 / agreed 6/6 with counts:false — the old summary key that called it corroboration is gone");
+
+    // 4. …and the other half of the asymmetry: DIVERGENCE keeps every bit of
+    //    its flagging power, at the same threshold, with the same detail — the
+    //    lane was not weakened, only its agreement was re-priced.
+    const evDF = evDiverge.flags.filter((f) => f.lane === "venue");
+    ok(evDF.length === 1 && evDF[0].name === "F Case" && evDF[0].severity === "watch"
+      && evDF[0].dev === -0.3 && evDF[0].ratio === 0.482 && evDF[0].strength === "weak"
+      && evDiverge.venues[0].watch === 1 && evDiverge.venues[0].agreed === "5/6"
+      && evDiverge.summary.corroboration.strong.items === "6/6"
+      && evDiverge.summary.corroboration.weak.agreed === "5/6",
+      "ASK DIVERGENCE STILL FLAGS: dev −0.300 raises the same WATCH it always did (now tagged weak), the venue row reports agreed 5/6 — and a diverging ask venue changes no tier's corroboration either way");
+
+    // ── the volume lane ────────────────────────────────────────────────────
+    // 5. a significant idiosyncratic move whose volume response collapsed
+    //    relative to the market. Four flat names hold the cross-sectional
+    //    medians at 0, so the suspect's deviations ARE its raw numbers:
+    //    +20% move (ln 0.182322) on 20 units vs a 100/day baseline
+    //    (ln(21/101) = −1.570595). Severity needs BOTH steps: the move is
+    //    under volMoveAlert 0.20, so this is a WATCH however deep the volume
+    //    hole is.
+    const evWatch = evLane(evClean().concat([evMove("P Case", 12, 20)]));
+    const evWF = evVolFlags(evWatch);
+    ok(evWF.length === 1 && evWF[0].name === "P Case" && evWF[0].severity === "watch"
+      && evWF[0].move === 0.182 && evWF[0].dev === -1.571 && evWF[0].vol === 20
+      && evWF[0].volBaseline === 100 && evWF[0].day === "2026-07-08"
+      && /the tape did not confirm/.test(evWF[0].detail)
+      && evWatch.volume.status === "ok" && evWatch.volume.checked === "5/5"
+      && evWatch.volume.medianMove === 0 && evWatch.volume.medianResponse === 0
+      && evWatch.volume.watch === 1 && evWatch.volume.alert === 0,
+      "volume lane: +20% idiosyncratic move on 20 units against a 100/day baseline (response −1.571 vs the market) → WATCH, and the record publishes the panel (day, 5/5 checked, both medians)");
+    // 6. …and a +30% move (0.262364 ≥ volMoveAlert 0.20) with the same volume
+    //    hole (≤ volRespAlert −1.0) is an ALERT
+    const evAl = evVolFlags(evLane(evClean().concat([evMove("Q Case", 13, 20)])));
+    ok(evAl.length === 1 && evAl[0].severity === "alert" && evAl[0].move === 0.262
+      && evAl[0].dev === -1.571,
+      "volume lane: the SAME volume hole under a +30% move clears both alert steps → ALERT (severity needs the move AND the response, not either alone)");
+
+    // 7. the no-flag case that matters most: a real move that the tape
+    //    CONFIRMS. +30% on 300 units against a 100/day baseline is a +1.092
+    //    response — the lane is silent, as it must be, or every genuine
+    //    breakout would be an integrity flag.
+    const evReal = evLane(evClean().concat([evMove("R Case", 13, 300)]));
+    ok(evVolFlags(evReal).length === 0 && evReal.volume.status === "ok"
+      && evReal.volume.checked === "5/5" && evReal.summary.corroboration.strong.byLane.volume === "5/5",
+      "volume lane: a +30% move that ARRIVES WITH VOLUME (300 units vs a 100/day baseline) flags nothing — and all five names count as strong-tier corroborated");
+
+    // 8. MARKET-WIDE, both directions — the median-relative gate. Every name
+    //    up 30% on a 5× volume surge, and every name up 30% into a market-wide
+    //    volume drought: each item's deviation from the day's median is 0, so
+    //    neither event flags anybody. (Same logic as the ratio lane and the
+    //    index clamp: a market-wide move is not manipulation.)
+    const evSurge = evLane(["A", "B", "C", "D", "E"].map((n) => evMove(n + " Case", 13, 500)));
+    const evDrought = evLane(["A", "B", "C", "D", "E"].map((n) => evMove(n + " Case", 13, 20)));
+    ok(evVolFlags(evSurge).length === 0 && evVolFlags(evDrought).length === 0
+      && evSurge.volume.status === "ok" && evSurge.volume.medianMove === 0.262
+      && evSurge.volume.medianResponse === 1.601 && evDrought.volume.medianResponse === -1.571
+      && evSurge.volume.checked === "5/5" && evDrought.volume.checked === "5/5",
+      "volume lane: a MARKET-WIDE volume surge (every name 5×) and a market-wide drought (every name to 20 units) each flag NOBODY — the gate is the day's cross-sectional median, published as medianMove/medianResponse");
+    // 8b. and the one name that LAGS a market-wide surge is still caught — the
+    //     gate is relative, not an excuse. Four names trade flat on a 5× volume
+    //     surge (+1.601406); the fifth is up 30% (+0.262364 against a median
+    //     move of 0) on its own unchanged baseline (ln(101/101) = 0), so its
+    //     response deviation is −1.601406 → ALERT.
+    const evVol = (name, vol) => evItem(name, Array(8).fill(10), Array(7).fill(100).concat([vol]));
+    const evLag = evLane(["A", "B", "C", "D"].map((n) => evVol(n + " Case", 500))
+      .concat([evMove("L Case", 13, 100)]));
+    const evLagF = evVolFlags(evLag);
+    ok(evLagF.length === 1 && evLagF[0].name === "L Case" && evLagF[0].severity === "alert"
+      && evLagF[0].dev === -1.601 && evLagF[0].move === 0.262,
+      "volume lane: during a market-wide surge the one name whose volume did NOT follow is still caught (response −1.601 vs the market) — median-relative cuts both ways");
+
+    // 9. thin tape is noise, not evidence: a name whose baseline is under
+    //    volMinUnits 10 never enters the panel, however violent its day —
+    //    the measured knee (flag rate 1.06% below 10/day vs 0.15% above).
+    const evThin = evLane(evClean().concat([evItem("T Case",
+      Array(7).fill(10).concat([20]), Array(7).fill(4).concat([0]))]));
+    ok(evVolFlags(evThin).length === 0 && evThin.volume.checked === "4/5"
+      && evThin.summary.corroboration.strong.byLane.volume === "4/5",
+      "volume lane: a 4-units/day name doubling on ZERO volume raises nothing — under volMinUnits 10 integer granularity dominates, so it is published as uncovered (4/5) instead of flagged");
+    // 10. fewer than volMinNames gated names ⇒ no cross-sectional median to
+    //     gate on ⇒ coverage published, nothing raised (the ratioMinDays
+    //     discipline), and a multi-day GAP is never read as a daily return
+    const evFew = evLane([evFlat("A Case", 10, 100), evMove("P Case", 13, 20)]);
+    const evGap = evLane(evClean().concat([{ name: "G Case", cat: "case", tier: null,
+      steamPrice: 13, quoteT: EV_NOW, salesT: null, sales30: null, ratioDays: [], book: null,
+      venues: null, volDays: Array.from({ length: 7 }, (_, i) => ({ day: evDay(i + 1), price: 10, vol: 100 }))
+        .concat([{ day: evDay(10), price: 13, vol: 20 }]) }]));
+    ok(evVolFlags(evFew).length === 0 && evFew.volume.status === "insufficient"
+      && /below volMinNames 3/.test(evFew.volume.reason) && evFew.volume.checked === "2/2"
+      && evVolFlags(evGap).length === 0 && evGap.volume.checked === "4/5",
+      "volume lane gates: 2 names is below volMinNames 3 → coverage published, no flags; and a name whose last mark skips days is dropped (a multi-day move is not a daily return)");
+
+    // 11. FLAG-ONLY, thresholds published — same contract as every other lane
+    ok(evWatch.rules.volWindow === 30 && evWatch.rules.volMinDays === 5
+      && evWatch.rules.volMinUnits === 10 && evWatch.rules.volMinNames === 3
+      && evWatch.rules.volMoveWatch === 0.10 && evWatch.rules.volMoveAlert === 0.20
+      && evWatch.rules.volRespWatch === -0.5 && evWatch.rules.volRespAlert === -1.0
+      && evWF.every((f) => !("reject" in f) && !("drop" in f) && !("price" in f)),
+      "volume lane thresholds are published in every record and its flags carry no rejection/override field — surveillance, never a settlement input");
+
+    // 12. coverage by TIER: strong and weak are never summed into one number
+    const evCov = evLane(evWithQuotes(evSix(), () => 6.5), { venues: evRoster });
+    ok(evCov.summary.corroboration.strong.items === "6/6"
+      && evCov.summary.corroboration.strong.lanes.join(",") === "ratio,volume,art-evidence"
+      && evCov.summary.corroboration.strong.byLane.ratio === "0/6"
+      && evCov.summary.corroboration.strong.byLane.volume === "6/6"
+      && evCov.summary.corroboration.medium.items === "0/6"
+      && evCov.summary.corroboration.medium.lanes.join(",") === "book"
+      && evCov.summary.corroboration.weak.lanes.join(",") === "venue"
+      && evCov.summary.ratioCorroborated === "0/6" && evCov.summary.volumeCorroborated === "6/6"
+      && evCov.summary.bookCorroborated === "0/6"
+      && /never summed/.test(evCov.summary.corroboration.note),
+      "coverage is reported BY TIER: strong 6/6 (volume only — the ratio lane has no cash comparable here), medium 0/6, weak published separately and uncounted — no single undifferentiated corroboration count exists any more");
+
+    // 13. the manipulation budget reflects the tiering HONESTLY: the one
+    //     number it can state without inventing anything is the ask-venue
+    //     surcharge, which is exactly zero — and it says why the floors are
+    //     unchanged (no lane's move threshold binds a clamp-limited push).
+    const evBud = S.manipulationBudget([{ cat: "case", tier: null, latest: 2, vol24h: 100000, skinport: null }]);
+    ok(evBud.detection.weakTierSurcharge === 0 && /free to post/.test(evBud.detection.weakTierWhy)
+      && /UNPRICED/.test(evBud.detection.strongTierWhy) && /Left unpriced/.test(evBud.detection.mediumTierWhy)
+      && /clampLog/.test(evBud.detection.boundedAttack)
+      && evBud.caseIndex.costMove1pctDay === 15000 && evBud.caseIndex.dailyDollarVolume === 200000,
+      "manipulationBudget: the tiering is reflected only where it can be stated without inventing precision — ask corroboration adds exactly 0, the strong/medium tiers are left explicitly UNPRICED, and every published floor is byte-unchanged");
+
+    // ── 14. THE FIREWALL ───────────────────────────────────────────────────
+    // Two roots seeded IDENTICALLY, each with 11 days of daily marks. Root L
+    // runs the real integrity layer — the volume lane fires a real ALERT; root
+    // D runs with assessIntegrity stubbed out entirely (the whole surveillance
+    // layer dead). Their published index and fixings must be byte-identical.
+    //
+    // Fixture arithmetic (the collector's steam fixture quotes every name at
+    // $23.00 on 57 units today):
+    //   five clean names, seeded at $20 on 100 units/day
+    //     move = ln(23/20) = 0.139762   response = ln(58/101) = −0.554653
+    //   one suspect, seeded at $15 on 400 units/day
+    //     move = ln(23/15) = 0.427444   response = ln(58/401) = −1.933841
+    //   medians of six: move 0.139762, response −0.554653 (the clean cohort)
+    //   suspect deviations: move ln(20/15) = +0.287682 (≥ volMoveAlert 0.20)
+    //                       response ln(101/401) = −1.379188 (≤ volRespAlert −1)
+    //   ⇒ exactly one ALERT, hand-computed, on a lane that must still move
+    //     nothing downstream.
+    const fwNames = ["A Case", "B Case", "C Case", "D Case", "E Case", "F Case"];
+    const FW_D = 86400000;
+    const fwMakeRoot = (tag) => {
+      const r = path.join(os.tmpdir(), "hh-skin-evtier-" + tag + "-" + Date.now());
+      fs.mkdirSync(path.join(r, "data", "history"), { recursive: true });
+      fs.writeFileSync(path.join(r, "watchlist.json"), JSON.stringify({ items: fwNames, art: [] }));
+      for (const n of fwNames) {
+        const suspect = n === "F Case";
+        const hf = path.join(r, "data", "history", slug(n) + ".jsonl");
+        // 11 consecutive daily marks ending YESTERDAY (relative to the run, so
+        // no wall-clock date can destabilise the fixture); today's collector
+        // snapshot supplies the 12th
+        for (let k = 11; k >= 1; k--)
+          fs.appendFileSync(hf, JSON.stringify({ t: Date.now() - k * FW_D, src: "steam",
+            price: suspect ? 15 : 20, lowest: suspect ? 14.5 : 19.5, vol: suspect ? 400 : 100 }) + "\n");
+      }
+      return r;
+    };
+    const L_ROOT = fwMakeRoot("live"), D_ROOT = fwMakeRoot("dead");
+    const lRun = await collect({ root: L_ROOT, env: {} });
+    const lInteg = lRun.manifest.market.integrity;
+    const lVol = lInteg.flags.filter((f) => f.lane === "volume");
+    ok(lInteg.volume.status === "ok" && lInteg.volume.checked === "6/6"
+      && lVol.length === 1 && lVol[0].name === "F Case" && lVol[0].severity === "alert"
+      && lVol[0].move === 0.288 && lVol[0].dev === -1.379
+      && lVol[0].vol === 57 && lVol[0].volBaseline === 400
+      && lInteg.summary.volumeCorroborated === "6/6"
+      && lInteg.summary.corroboration.strong.byLane.volume === "6/6"
+      && lRun.manifest.market.settlement.integrity.summary.corroboration.weak.counted === false,
+      "collector runs the volume lane end to end on the marks it already publishes: 6/6 checked, one hand-computed ALERT (move +0.288, response −1.379 vs the market) — and the tiered coverage rides into the settlement record");
+    // the whole surveillance layer is now switched OFF for an identical run
+    const realAssess = S.assessIntegrity;
+    S.assessIntegrity = () => ({ version: "INTEG-1", flags: [], venues: [], volume: null, summary: {} });
+    let dRun;
+    try { dRun = await collect({ root: D_ROOT, env: {} }); } finally { S.assessIntegrity = realAssess; }
+    const fwSeries = (m) => JSON.stringify(m.market.series.map((d) => Object.assign({}, d, { t: undefined })));
+    const lSet = JSON.parse(fs.readFileSync(path.join(L_ROOT, "data", "settlement.json"), "utf8"));
+    const dSet = JSON.parse(fs.readFileSync(path.join(D_ROOT, "data", "settlement.json"), "utf8"));
+    const lCanon = Object.keys(lSet.detail).map((k) => S.canonical(lSet.detail[k])).join("|");
+    const dCanon = Object.keys(dSet.detail).map((k) => S.canonical(dSet.detail[k])).join("|");
+    const lHashes = Object.keys(lSet.latest.fixings).map((k) => lSet.latest.fixings[k].hash).join("|");
+    const dHashes = Object.keys(dSet.latest.fixings).map((k) => dSet.latest.fixings[k].hash).join("|");
+    const lReHash = Object.keys(lSet.detail).map((k) =>
+      crypto.createHash("sha256").update(S.canonical(lSet.detail[k])).digest("hex")).join("|");
+    ok(S.assessIntegrity === realAssess
+      && fwSeries(lRun.manifest) === fwSeries(dRun.manifest)
+      && JSON.stringify(lRun.manifest.market.today) === JSON.stringify(dRun.manifest.market.today)
+      && JSON.stringify(lRun.manifest.market.weights) === JSON.stringify(dRun.manifest.market.weights)
+      && JSON.stringify(lRun.manifest.market.settlement.budget) === JSON.stringify(dRun.manifest.market.settlement.budget)
+      && lCanon === dCanon && lHashes === dHashes && lHashes === lReHash && lHashes.length > 0,
+      "FIREWALL: the integrity layer LIVE (volume lane firing an alert) and DEAD (assessIntegrity stubbed out) publish a byte-identical series, today block, index weights, manipulation budget, fixing canonical preimages and fixing hashes — the new lane, like every other, is surveillance that can never move a settlement number");
+    fs.rmSync(L_ROOT, { recursive: true, force: true });
+    fs.rmSync(D_ROOT, { recursive: true, force: true });
+  }
+  // ═══ END EVIDENCE-TIER + VOLUME-LANE PINS ════════════════════════════════
 
   M.setTransport(null);
   fs.rmSync(DATA, { recursive: true, force: true });

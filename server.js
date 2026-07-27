@@ -378,8 +378,10 @@ function startServer(opts) {
     const items = marketItems();
     const mkt = A.marketOverview(items);
     // INTEG-1 parity (assessIntegrity — one function, all surfaces): the live
-    // tracker feeds the lanes it has — ratio + staleness; the book and sales-
-    // evidence lanes are collector-fed, so coverage strings honestly read 0/n
+    // tracker feeds the lanes it has — ratio + volume + staleness; the book and
+    // sales-evidence lanes are collector-fed, so coverage strings honestly read
+    // 0/n. Venue quotes are collector-fed too, so the WEAK tier reports 0/0
+    // here rather than implying agreement.
     mkt.integrity = S.assessIntegrity(items.map((it) => {
       const spBy = new Map(it.skinportDaily.map((d) => [d.day, d.price]));
       const last = latestSteam(it.name);
@@ -389,6 +391,9 @@ function startServer(opts) {
         salesT: null, sales30: null, book: null,
         ratioDays: it.daily.filter((d) => d.price > 0 && spBy.get(d.day) > 0)
           .map((d) => ({ day: d.day, r: spBy.get(d.day) / d.price })),
+        // volume lane (strong tier): the tracker already assembles this exact
+        // daily series for the index, so the lane runs on the live surface too
+        volDays: it.daily.map((d) => ({ day: d.day, price: d.price, vol: d.vol })),
       };
     }), { now: Date.now() });
     const pf = path.join(DATA, "cache", "macro.json");

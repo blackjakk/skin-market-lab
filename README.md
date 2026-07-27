@@ -216,15 +216,24 @@ clearly labeled, non-canonical, no hash, not a settlement fixing
 
 **Mark integrity (INTEG-1)** — because every mark is single-venue at its
 source, each collector run also publishes a tamper report: every Steam
-price is corroborated against the item's own realized-cash ratio history
-*and* against Steam's standing order book (a second read path wash trades
-can't cheaply fake), art marks publish their sale-count evidence, and
-venue loss raises a loud staleness alert. Divergences are **flagged, never
-auto-rejected** (auto-rejection would let an attacker knock honest marks
-out of the index by manipulating the thinner corroborating venue).
-Scheduled collector runs add random sampling jitter so reading instants
-can't be pinned. The home page shows the current state as a MARK INTEGRITY
-tile; the full flag table is on the methodology page.
+price is corroborated against the item's own realized-cash ratio history,
+against its own realized **sold-per-day** (did the trade follow the
+price?), and against Steam's standing order book (a second read path wash
+trades can't cheaply fake); art marks publish their sale-count evidence,
+and venue loss raises a loud staleness alert. **Evidence is ranked, not
+counted**: each lane publishes a strength set by what it would cost to
+fake — *strong* for realized sales (faking one burns the venue fee),
+*medium* for standing bids, *weak* for third-venue asks, which are free to
+post. So divergence from an ask venue still flags at full strength while
+its agreement is published but **not** counted as corroboration, and
+coverage is reported per tier instead of one number. (That makes these
+figures smaller than they read before — deliberately.) Divergences are
+**flagged, never auto-rejected** (auto-rejection would let an attacker
+knock honest marks out of the index by manipulating the thinner
+corroborating venue). Scheduled collector runs add random sampling jitter
+so reading instants can't be pinned. The home page shows the current state
+as a MARK INTEGRITY tile; the full tier and flag tables are on the
+methodology page.
 
 **Backtested.** The methodology's behavior through real history is
 measured, not asserted:
@@ -313,7 +322,7 @@ residual-risk record is in [A11Y.md](A11Y.md).
 
 ## Gates
 
-- `npm run probe` — 133 checks, hermetic (fixture transport):
+- `npm run probe` — 273 checks, hermetic (fixture transport):
   analytics math pinned to hand-computed values, full API flow, snapshot
   dedupe, import/bootstrap, portfolio P/L, restart persistence.
 - `npm run probe:a11y` — 34 real-Chromium accessibility checks: responsive

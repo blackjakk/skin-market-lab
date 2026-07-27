@@ -255,6 +255,29 @@
       model: { washFraction: washFraction, feeSteam: feeSteam, feeCash: feeCash,
         clampLog: clampLog, targetMove: targetMove,
         note: "fee-burn floor estimate; inventory and price risk excluded" },
+      // ── what INTEG-1's evidence tiers are worth in attack-cost terms ─────
+      // Stated ONLY where it can be stated without inventing a number. The
+      // costs above are unchanged: detection flags, it never rejects a mark,
+      // and no lane threshold binds the cheapest 1% attack (see boundedAttack).
+      detection: {
+        note: "informational — no number above depends on this block. INTEG-1 lanes are flag-only surveillance; "
+          + "this records what each evidence tier does, and does NOT do, to the price of an attack.",
+        boundedAttack: "the concentrated floor already assumes each attacked name is pushed by at most clampLog ("
+          + clampLog + " log ≈ " + Math.round((Math.exp(clampLog) - 1) * 1000) / 10 + "%), and every corroboration "
+          + "lane's MOVE threshold is wider than that (ratio/venue watch 0.25 log, volume watch 0.10 log). So no "
+          + "corroboration lane raises the cost of the cheapest 1% index push. The book lane is a LEVEL test, so it "
+          + "can still catch a push that carries a quote outside the standing bid/ask bracket.",
+        weakTierSurcharge: 0,
+        weakTierWhy: "third-venue corroboration is ASKS, and a listing is free to post: an attacker moving a steam "
+          + "mark can post matching asks on every third venue at zero cost. Ask agreement therefore adds exactly "
+          + "nothing to attack cost — the reason it is no longer counted as corroboration (INTEG_RULES.lanes.venue).",
+        strongTierWhy: "realized-sale corroboration (skinport medians/volumes, steam sold-per-day) can only be faked "
+          + "by transacting, i.e. by burning feeSteam/feeCash on the washed units — the same burn priced above. For a "
+          + "LARGE-Δ attack that would cross those lanes' thresholds the surcharge is real, but it depends on a Δ this "
+          + "model does not assume, so it is left UNPRICED rather than invented.",
+        mediumTierWhy: "standing bids cost no fee to post or pull — their cost is capital at risk of being filled, "
+          + "which a fee-burn model cannot price. Left unpriced.",
+      },
       caseIndex: {
         dailyDollarVolume: r2(caseDollarVol),
         costMove1pctDay: r2(perDayCase),
@@ -322,8 +345,42 @@
   }
 
   // ── mark integrity (INTEG-1) — surveillance, NOT settlement rules ────────
-  // A published tamper DETECTOR over the marks feeding the index. Three
-  // corroboration lanes + a staleness lane, every threshold published:
+  // A published tamper DETECTOR over the marks feeding the index. Several
+  // corroboration lanes + a staleness lane, every threshold published.
+  //
+  // EVIDENCE IS NOT ALL EQUAL (2026-07-27 revision). Every lane now carries an
+  // explicit evidence STRENGTH, ranked by what it costs an attacker to FAKE
+  // the corroboration — and coverage is reported per tier instead of as one
+  // undifferentiated count:
+  //
+  //   strong — REALIZED SALES (skinport realized medians/volumes, steam's own
+  //     sold-per-day). Faking one burns the venue fee on the washed units
+  //     (steam 15%, skinport 12%) — the SAME fee-burn manipulationBudget is
+  //     built on. This is evidence an attacker has to pay for.
+  //   medium — STANDING BIDS (the book lane). Committed capital that can
+  //     actually get filled. Posting and pulling a bid costs no fee, so it is
+  //     cheaper to fake than a sale, but while it stands it is real money at
+  //     risk of being hit.
+  //   weak — ASKS / LISTINGS (the venue lane: TM Market, Waxpeer, BUFF
+  //     sell_min_price). FREE to post. Anyone pumping a steam mark can list
+  //     matching asks on every third venue at zero cost.
+  //
+  // THE ASYMMETRY THAT FOLLOWS — and the point of the revision:
+  //   *** Divergence from an ask venue is evidence. Agreement is not. ***
+  // A disagreeing ask venue keeps FULL flagging power (an attacker who did not
+  // bother to move it is caught, and the venues' own cross-section is a real
+  // independent read). An AGREEING ask venue no longer counts toward "this
+  // mark is corroborated" — it used to inflate coverage as though three venues
+  // had confirmed the mark, which overstated the evidence. The venue lane's
+  // coverage is still published in full (checked / agreed, per venue); it is
+  // published in the WEAK tier with counted:false rather than silently dropped.
+  //
+  // The version id stays INTEG-1: no fixing computation, canonical form or
+  // hash changes (this layer never touched them and still does not). What
+  // changed is what the record SAYS about its own evidence — published in
+  // INTEG_RULES.revision / .revisionNote / .lanes.
+  //
+  // Lanes:
   //
   //   ratio — each item's daily (skinport realized ÷ steam) ratio vs its OWN
   //     trailing median, then vs the day's CROSS-SECTIONAL median deviation
@@ -333,6 +390,19 @@
   //     steam price high vs realized cash (pump suspect); "steam-lean" =
   //     low (or the skinport leg was pumped — that matters too: art marks
   //     to skinport).
+  //   volume — REALIZED-SALE COUNTS (steam's own sold-per-day) against the
+  //     item's OWN trailing baseline, then median-gated cross-sectionally.
+  //     The strong-evidence detector we already had the data for: a mark set
+  //     on a thin tape — a big idiosyncratic price move on a day this name's
+  //     traded volume collapsed relative to both its own baseline and the
+  //     market's — is exactly what a price printed without trade looks like,
+  //     and volume is the one input that costs ~15% of every unit to fake.
+  //     MEASURED, not guessed (see the threshold comment in INTEG_RULES): the
+  //     naive premise "a genuine move arrives with a volume SURGE" is NOT what
+  //     the committed history shows (median volume response on a big-move day
+  //     is only +4%), so the lane does not flag "volume failed to rise" — it
+  //     flags the LEFT TAIL, where the volume response is far below what the
+  //     rest of the market did that day.
   //   book — last-sale median vs the STANDING order book (second read path;
   //     wash trades fake prints, not committed capital): flagged when the
   //     quote escapes its own bid/ask bracket by the published margin.
@@ -356,7 +426,11 @@
   //     float/pattern/phase variant while the Steam mark is a bucketed
   //     median — the same asymmetry that made the book lane commodity-only
   //     (live false alarms, 2026-07-26). An unavailable venue is REPORTED
-  //     unavailable; it is never counted as agreement.
+  //     unavailable; it is never counted as agreement — and since 2026-07-27
+  //     neither is an AVAILABLE one: these venues publish ASKS, which are free
+  //     to post, so agreement here is weak-tier evidence that is published
+  //     (checked / agreed, per venue) but never counted as corroboration.
+  //     Divergence keeps every bit of its flagging power.
   //
   // FLAG-ONLY BY DESIGN — flags NEVER remove a mark or reroute the index.
   // Auto-rejection would hand an attacker a cheaper lever: manipulate the
@@ -366,11 +440,87 @@
   // change no fixing computation, this layer does NOT bump SMLX — bumping
   // the id without a computation change would falsely signal a rules change
   // to every hash verifier. INTEG versions independently.
+  // Per-lane EVIDENCE STRENGTH, published in every record inside
+  // INTEG_RULES.lanes so a consumer can rank a flag (and a coverage number) by
+  // what it would cost to fake. `counts` says whether the lane's AGREEMENT is
+  // counted as corroboration — false for asks (free to post) and for the
+  // liveness lane (it corroborates no mark at all).
+  const INTEG_LANES = {
+    ratio: { strength: "strong", counts: true,
+      evidence: "realized sales on both legs (skinport realized median ÷ steam last-sale median)",
+      costToFake: "venue fee on the washed units — steam 15% / skinport 12% — on BOTH venues at once" },
+    volume: { strength: "strong", counts: true,
+      evidence: "realized sale COUNTS (steam's own sold-per-day) vs the item's own trailing baseline",
+      costToFake: "~15% of every unit: volume can only be manufactured by transacting through steam's fee" },
+    book: { strength: "medium", counts: true,
+      evidence: "standing bids/asks on steam — committed capital that can actually be filled",
+      costToFake: "no fee to post or pull, but a standing bid is real money at risk of being hit" },
+    venue: { strength: "weak", counts: false,
+      evidence: "third-venue ASKS (TM Market / Waxpeer / BUFF sell_min_price) — quoted level, not executed trade",
+      costToFake: "zero — a listing is free to post, so an attacker pumping steam can post matching asks at no cost",
+      asymmetry: "divergence from an ask venue is evidence and still flags at full strength; AGREEMENT is not counted as corroboration" },
+    "art-evidence": { strength: "strong", counts: true,
+      evidence: "the count of REALIZED sales behind an appraisal mark (skinport 30d sale count)",
+      costToFake: "skinport's 12% fee per fabricated sale, on an item priced in the thousands" },
+    staleness: { strength: "n/a", counts: false, kind: "liveness",
+      evidence: "how many marks arrived fresh at all — it corroborates no price, so it carries no evidence strength",
+      costToFake: "n/a" },
+    center: { strength: "strong", counts: false, kind: "observation",
+      evidence: "SMLX-7 preview: the index clamp centre vs the skinport cash-implied centre (realized sales both legs)",
+      costToFake: "same as the ratio lane — moving realized cash prints",
+      note: "computed by analytics.js in its observation phase and merged into this record by the collector; not gated on, so its agreement is not counted" },
+  };
   const INTEG_RULES = {
     version: "INTEG-1",
+    revision: "2026-07-27-evidence-tiers",
+    revisionNote: "Lanes now publish an explicit evidence STRENGTH (strong = realized sales, medium = standing bids, "
+      + "weak = asks) and coverage is reported per tier instead of one undifferentiated count. Ask-venue AGREEMENT no "
+      + "longer counts as corroboration (asks are free to post); ask-venue DIVERGENCE still flags at full strength. "
+      + "New strong-tier `volume` lane (steam sold-per-day vs the item's own baseline, median-gated cross-sectionally). "
+      + "No fixing computation, canonical form or hash changed — the version id stays INTEG-1 for that reason.",
+    lanes: INTEG_LANES,
     ratioWindow: 30, ratioMinDays: 5, ratioDevWatch: 0.25, ratioDevAlert: 0.5,
     bookBracketWatch: 0.15, bookBracketAlert: 0.30, bookMaxAgeH: 48,
     artMinSales30: 3, quoteFreshH: 12, staleAlertFrac: 0.5,
+    // volume lane. Thresholds MEASURED over the committed backtest history
+    // (backtest/history/*.json — steam's own daily [t, price, sold] aggregates,
+    // 49 items), running this exact rule: 103,518 eligible item-days across
+    // 2,764 days since 2019 (137,951 / 4,590 days since 2014).
+    //   volMoveWatch 0.10 — |return − the day's cross-sectional median return|.
+    //     Sits at the 97.1st percentile of measured idiosyncratic daily moves
+    //     (p90 0.051, p95 0.074, p99 0.176). volMoveAlert 0.20 = 99.2nd pct.
+    //   volRespWatch −0.5 — the item's log volume response (today vs its own
+    //     trailing median) MINUS the day's cross-sectional median response.
+    //     Sits at the 1.4th percentile of the measured response distribution
+    //     (p1 −0.552, p5 −0.318); volRespAlert −1.0 at the 0.16th.
+    //     NEGATIVE by measurement, not by taste: the median volume response on
+    //     a big-move day is only +0.04 log, so "volume did not rise" describes
+    //     ~45% of honest big-move days and would be useless. What IS rare is a
+    //     big move whose volume response collapses relative to the market.
+    //   Joint flag rate: watch 0.111% of item-days (one every ~24 market-days
+    //     across ~37 eligible names), alert 0.040% (one every ~67). The
+    //     conjunction is also INFORMATIVE, not just rare: P(response ≤ −0.5 |
+    //     move ≥ 0.10) = 3.9% vs 1.1% on calm days (3.7×); at the alert step
+    //     5.1% vs 0.06% (80×). Worst measured day flagged 3 of ~37 names — the
+    //     cross-sectional gate does keep a market-wide event from flagging all.
+    //   volMinUnits 10 — the measured knee. Flag rate by baseline volume:
+    //     2-5 units/day 1.20%, 5-10 1.06%, 10-25 0.15%, 25-100 0.11%, 100+
+    //     0.07%. Below ~10 units/day integer granularity dominates and the
+    //     lane cries wolf; above it, cases and liquid skins behave alike
+    //     (0.109% vs 0.219%) — which is why this lane needs NO unique-item
+    //     multiplier, unlike the venue and book lanes.
+    //   volMinDays 5 — matches ratioMinDays; measured to be immaterial once
+    //     volMinUnits is in force (0.089% at minDays 5 vs 0.087% at 10).
+    //   volMinNames 3 — no cross-sectional median from fewer than 3 gated
+    //     names, borrowed from INDEX_RULES.minContributors rather than
+    //     measured separately.
+    // HONEST LIMIT: the measurement basis is steam's calendar-day sold counts,
+    // while the live lane reads trailing-24h priceoverview snapshots bucketed
+    // per day (volMode "max") — a smoother series, so these rates are an upper
+    // bound on live false positives. Re-measure once the live series is deep.
+    volWindow: 30, volMinDays: 5, volMinUnits: 10, volMinNames: 3,
+    volMoveWatch: 0.10, volMoveAlert: 0.20,
+    volRespWatch: -0.5, volRespAlert: -1.0,
     // venue lane (third-venue corroboration). Thresholds MIRROR the ratio
     // lane — same median-relative log deviation, same watch/alert steps —
     // because it is the same kind of measurement against a different second
@@ -389,6 +539,7 @@
   }
   // items: [{ name, cat, tier, steamPrice, quoteT, salesT, sales30,
   //           ratioDays: [{day, r}], book: {t,bid,ask,mid,...}|null,
+  //           volDays: [{day, price, vol}] | null,
   //           venues: { <venueId>: { price, t } } | null }]
   // opts: { now,
   //         venues: [{ id, label, kind, ccy, ok, reason, mode, t }] — the
@@ -403,26 +554,107 @@
     const R = INTEG_RULES;
     const flags = [];
     const r3 = (v) => Math.round(v * 1000) / 1000;
+    // Per-lane coverage as NAME SETS, so the tiered summary can answer "how
+    // many distinct marks does STRONG evidence actually cover" without adding
+    // weak agreement to strong agreement.
+    const cover = {};
+    const laneOf = (lane) => (cover[lane] || (cover[lane] = { eligible: new Set(), corroborated: new Set() }));
+    const raise = (f) => {
+      const L = R.lanes[f.lane];
+      f.strength = L ? L.strength : null;   // every flag says how hard its evidence is to fake
+      flags.push(f);
+      return f;
+    };
     // ratio lane: per-item deviation from OWN baseline, then market-gated
     const devs = [];
-    let ratioCorroborated = 0, ratioEligible = 0;
     for (const it of items || []) {
       if (it.tier === "art") continue;
-      ratioEligible++;
+      laneOf("ratio").eligible.add(it.name);
       const rd = (it.ratioDays || []).filter((d) => d && d.r > 0).slice(-(R.ratioWindow + 1));
       if (rd.length < R.ratioMinDays + 1) continue;
       const base = medianOf(rd.slice(0, -1).map((d) => d.r));
       const last = rd[rd.length - 1].r;
       if (!(base > 0) || !(last > 0)) continue;
       devs.push({ it: it, d: Math.log(last / base) });
-      ratioCorroborated++;
+      laneOf("ratio").corroborated.add(it.name);
     }
     const xMed = medianOf(devs.map((x) => x.d)) || 0; // market-move gate
     for (const x of devs) {
       const e = x.d - xMed;
       if (Math.abs(e) >= R.ratioDevWatch) {
-        flags.push({ name: x.it.name, lane: "ratio", severity: Math.abs(e) >= R.ratioDevAlert ? "alert" : "watch",
+        raise({ name: x.it.name, lane: "ratio", severity: Math.abs(e) >= R.ratioDevAlert ? "alert" : "watch",
           dev: r3(e), detail: e < 0 ? "steam-rich vs its own cash-ratio baseline" : "steam-lean vs its own cash-ratio baseline (or skinport leg moved)" });
+      }
+    }
+    // ── volume lane: did the trade follow the price? ───────────────────────
+    // STRONG evidence (see INTEG_LANES): steam's sold-per-day is realized
+    // trade, and the only way to manufacture it is to pay ~15% per unit.
+    // Construction mirrors the ratio lane exactly — each item against its OWN
+    // trailing baseline, then gated on the day's CROSS-SECTIONAL median so a
+    // market-wide volume surge (or drought) flags nobody.
+    //   move  = ln(price_t / price_{t−1}) − the day's median of the same
+    //   resp  = ln((vol_t + 1) / (baseline + 1)) − the day's median of the same
+    //           (+1 smoothing so a zero-volume day is defined, not dropped:
+    //            "absent volume" is precisely the case worth flagging)
+    // FLAG = a significant idiosyncratic move whose volume response collapsed
+    // relative to the market. Thresholds and their measured basis live in
+    // INTEG_RULES above. FLAG-ONLY, like every other lane.
+    const volPanel = [];
+    let volPanelDay = null, volSkippedStale = 0;
+    for (const it of items || []) {
+      if (it.tier === "art") continue;
+      laneOf("volume").eligible.add(it.name);
+      const vd = (it.volDays || []).filter((d) => d && d.price > 0);
+      if (vd.length < 2) continue;
+      const cur = vd[vd.length - 1], prev = vd[vd.length - 2];
+      if (cur.vol == null || !isFinite(cur.vol)) continue;
+      // a true DAILY return only: a gap means the move is multi-day and the
+      // volume comparison would be against the wrong denominator
+      if (Math.round((Date.parse(cur.day) - Date.parse(prev.day)) / 86400000) !== 1) continue;
+      const win = vd.slice(Math.max(0, vd.length - 1 - R.volWindow), vd.length - 1)
+        .filter((d) => d.vol != null && isFinite(d.vol));
+      if (win.length < R.volMinDays) continue;
+      const base = medianOf(win.map((d) => d.vol));
+      if (!(base >= R.volMinUnits)) continue;   // thin tape is noise, not evidence
+      volPanel.push({ it: it, day: cur.day, vol: cur.vol, base: base,
+        move: Math.log(cur.price / prev.price),
+        resp: Math.log((cur.vol + 1) / (base + 1)) });
+      if (volPanelDay == null || cur.day > volPanelDay) volPanelDay = cur.day;
+    }
+    // one panel day only — an item whose last marked day is older is published
+    // as skipped, never compared against a fresher cross-section
+    const volDayPanel = volPanel.filter((p) => {
+      if (p.day === volPanelDay) return true;
+      volSkippedStale++;
+      return false;
+    });
+    const volReport = { day: volPanelDay, checked: volDayPanel.length + "/" + laneOf("volume").eligible.size,
+      status: "insufficient", reason: null, medianMove: null, medianResponse: null,
+      staleSkipped: volSkippedStale, watch: 0, alert: 0 };
+    if (volDayPanel.length < R.volMinNames) {
+      volReport.reason = volDayPanel.length + " names with a gated volume baseline"
+        + (volDayPanel.length ? ", below volMinNames " + R.volMinNames
+          : " (a name needs " + R.volMinDays + " prior daily marks and a ≥" + R.volMinUnits
+            + " units/day baseline)")
+        + " — coverage published, no flags raised";
+      if (!volDayPanel.length) volReport.status = "no-data";
+    } else {
+      volReport.status = "ok";
+      const mMove = medianOf(volDayPanel.map((p) => p.move));
+      const mResp = medianOf(volDayPanel.map((p) => p.resp));
+      volReport.medianMove = r3(mMove);
+      volReport.medianResponse = r3(mResp);
+      for (const p of volDayPanel) {
+        laneOf("volume").corroborated.add(p.it.name);
+        const move = p.move - mMove, resp = p.resp - mResp;
+        if (Math.abs(move) < R.volMoveWatch || resp > R.volRespWatch) continue;
+        const sev = Math.abs(move) >= R.volMoveAlert && resp <= R.volRespAlert ? "alert" : "watch";
+        if (sev === "alert") volReport.alert++; else volReport.watch++;
+        raise({ name: p.it.name, lane: "volume", severity: sev, dev: r3(resp), move: r3(move),
+          vol: p.vol, volBaseline: p.base, day: p.day,
+          detail: (move > 0 ? "+" : "") + Math.round(move * 1000) / 10 + "% idiosyncratic price move on "
+            + p.vol + " units vs a " + p.base + "/day baseline — volume response " + r3(Math.abs(resp))
+            + " log BELOW the market's (a price move the tape did not confirm)" });
       }
     }
     // book lane: quote vs standing order book (second read path).
@@ -433,29 +665,27 @@
     // generic sale median — bracket-checking them cries wolf (found live
     // 2026-07-26: six false "below the bid wall" alerts, Redline quote $42
     // vs a $197 variant bid). Their books are still recorded as evidence.
-    let bookCorroborated = 0, bookEligible = 0;
     for (const it of items || []) {
       const b = it.book;
       if (it.tier === "art" || it.cat !== "case" || it.steamPrice == null) continue;
-      bookEligible++;
+      laneOf("book").eligible.add(it.name);
       if (!b || b.bid == null || b.ask == null || (now && now - b.t > R.bookMaxAgeH * 3600000)) continue;
-      bookCorroborated++;
+      laneOf("book").corroborated.add(it.name);
       const hi = b.ask * (1 + R.bookBracketWatch), lo = b.bid * (1 - R.bookBracketWatch);
       if (it.steamPrice > hi || it.steamPrice < lo) {
         const over = it.steamPrice > hi;
         const margin = over ? it.steamPrice / b.ask - 1 : 1 - it.steamPrice / b.bid;
-        flags.push({ name: it.name, lane: "book", severity: margin >= R.bookBracketAlert ? "alert" : "watch",
+        raise({ name: it.name, lane: "book", severity: margin >= R.bookBracketAlert ? "alert" : "watch",
           dev: r3(margin), detail: over ? "last-sale median above the standing ask wall" : "last-sale median below the standing bid wall" });
       }
     }
     // art evidence lane: appraisal marks need visible sales
-    let artEvidenced = 0, artTotal = 0;
     for (const it of items || []) {
       if (it.tier !== "art") continue;
-      artTotal++;
+      laneOf("art-evidence").eligible.add(it.name);
       if (it.sales30 == null) continue; // unknown ≠ thin — never fabricate
-      if (it.sales30 >= R.artMinSales30) artEvidenced++;
-      else flags.push({ name: it.name, lane: "art-evidence", severity: "watch",
+      if (it.sales30 >= R.artMinSales30) laneOf("art-evidence").corroborated.add(it.name);
+      else raise({ name: it.name, lane: "art-evidence", severity: "watch",
         dev: it.sales30, detail: it.sales30 + " realized sales in the 30d marking window" });
     }
     // staleness lane: venue loss must surface loudly
@@ -471,7 +701,7 @@
       }
     }
     if (steamExpected && steamFresh / steamExpected < R.staleAlertFrac) {
-      flags.push({ name: "(market)", lane: "staleness", severity: "alert", dev: r3(steamFresh / steamExpected),
+      raise({ name: "(market)", lane: "staleness", severity: "alert", dev: r3(steamFresh / steamExpected),
         detail: "only " + steamFresh + "/" + steamExpected + " items have a fresh steam quote — possible venue loss" });
     }
     // venue lane: third-venue corroboration (see the header note). FLAG-ONLY
@@ -480,15 +710,27 @@
     // third venues are THINNER than Steam, so auto-rejection would let an
     // attacker knock honest marks out of the index by moving the cheaper
     // market. Detection is published; consumers decide their own halt rules.
+    //
+    // WEAK-TIER SINCE 2026-07-27: these venues publish ASKS, which cost
+    // nothing to post, so an attacker pumping steam can list matching asks on
+    // every one of them for free. Agreement here is therefore NOT counted as
+    // corroboration anywhere in the summary — the row publishes `checked` (how
+    // many marks the venue was actually gated against) and `agreed` (how many
+    // of those did not diverge) so the evidence is visible, not silently
+    // dropped, and `counts:false` says plainly that it buys no coverage.
+    // Divergence is unaffected: the watch/alert thresholds and every flag
+    // below are exactly as they were.
     const vRoster = opts.venues || [];
     const vEligible = (items || []).filter((it) => it.tier !== "art" && it.steamPrice > 0);
-    const vCorroboratedItems = new Set();
+    const vCheckedItems = new Set(), vDivergedItems = new Set();
     let venuesAnswered = 0;
     const venueReport = [];
+    for (const it of vEligible) laneOf("venue").eligible.add(it.name);
     for (const v of vRoster) {
       const row = { id: v.id, label: v.label || v.id, kind: v.kind || null, ccy: v.ccy || null,
         mode: v.mode || null, status: "unavailable", reason: v.reason || null,
-        corroborated: "0/" + vEligible.length, medianRatio: null, watch: 0, alert: 0,
+        strength: R.lanes.venue.strength, counts: R.lanes.venue.counts,
+        checked: "0/" + vEligible.length, agreed: "0/0", medianRatio: null, watch: 0, alert: 0,
         t: v.t != null ? v.t : null };
       if (!v.ok) { venueReport.push(row); continue; } // unavailable ≠ agreement
       venuesAnswered++;
@@ -501,7 +743,7 @@
         if (now && q.t != null && now - q.t > R.venueMaxAgeH * 3600000) continue;
         pairs.push({ it: it, q: q, lr: Math.log(q.price / it.steamPrice) });
       }
-      row.corroborated = pairs.length + "/" + vEligible.length;
+      row.checked = pairs.length + "/" + vEligible.length;
       if (pairs.length < R.venueMinQuotes) {
         // too few names to trust a cross-sectional median — publish the
         // coverage, raise nothing (the ratioMinDays discipline)
@@ -512,40 +754,84 @@
         continue;
       }
       row.status = "ok";
-      // only a venue that actually got EVALUATED counts toward the summary's
-      // item coverage — quotes a venue held but could not be gated on are
-      // published in its own row, never folded into "corroborated"
-      for (const p of pairs) vCorroboratedItems.add(p.it.name);
+      // only a venue that actually got EVALUATED enters the checked set —
+      // quotes a venue held but could not be gated on stay in its own row.
+      // (Checked is NOT corroborated: see the weak-tier note above.)
+      for (const p of pairs) vCheckedItems.add(p.it.name);
       const vMed = medianOf(pairs.map((p) => p.lr));
       row.medianRatio = r3(Math.exp(vMed));
+      let diverged = 0;
       for (const p of pairs) {
         const e = p.lr - vMed;
         const mult = p.it.cat === "case" ? 1 : R.venueUniqueMult;
         if (Math.abs(e) < R.venueDevWatch * mult) continue;
         const sev = Math.abs(e) >= R.venueDevAlert * mult ? "alert" : "watch";
         if (sev === "alert") row.alert++; else row.watch++;
-        flags.push({ name: p.it.name, lane: "venue", venue: v.id, severity: sev,
+        diverged++;
+        vDivergedItems.add(p.it.name);
+        raise({ name: p.it.name, lane: "venue", venue: v.id, severity: sev,
           dev: r3(e), ratio: r3(Math.exp(p.lr)), venueMedianRatio: row.medianRatio,
           steamPrice: p.it.steamPrice, venuePrice: p.q.price,
           detail: (e < 0 ? "steam-rich" : "steam-lean") + " vs " + (v.label || v.id)
             + " (" + (v.kind || "quote") + " " + p.q.price + " vs steam " + p.it.steamPrice
             + " = " + r3(Math.exp(p.lr)) + "×, venue median " + row.medianRatio + "×)" });
       }
+      row.agreed = (pairs.length - diverged) + "/" + pairs.length;
       venueReport.push(row);
     }
 
+    // ── coverage BY EVIDENCE TIER ──────────────────────────────────────────
+    // The whole point of the 2026-07-27 revision: never add weak agreement to
+    // strong agreement as one number. Each tier reports the DISTINCT marks its
+    // lanes actually covered, over the union of names those lanes were
+    // eligible for. The weak tier reports its coverage too — as `checked` /
+    // `agreed`, with counted:false and countedItems:0, so it is visible and
+    // unmistakably not corroboration.
+    const cnt = (lane) => (cover[lane]
+      ? cover[lane].corroborated.size + "/" + cover[lane].eligible.size : "0/0");
+    const tier = (strength) => {
+      const lanes = Object.keys(R.lanes).filter((k) => R.lanes[k].strength === strength && R.lanes[k].counts);
+      const el = new Set(), co = new Set(), byLane = {};
+      for (const k of lanes) {
+        byLane[k] = cnt(k);
+        if (!cover[k]) continue;
+        cover[k].eligible.forEach((n) => el.add(n));
+        cover[k].corroborated.forEach((n) => co.add(n));
+      }
+      return { counted: true, lanes: lanes, items: co.size + "/" + el.size, byLane: byLane };
+    };
+    const corroboration = {
+      note: "grouped by how hard the evidence is to FAKE (INTEG_RULES.lanes). Tiers are never summed: "
+        + "one strong-corroborated mark is not interchangeable with one weak-corroborated mark.",
+      strong: tier("strong"),
+      medium: tier("medium"),
+      weak: {
+        counted: false, countedItems: 0, lanes: ["venue"],
+        checked: vCheckedItems.size + "/" + vEligible.length,
+        agreed: (vCheckedItems.size - vDivergedItems.size) + "/" + vCheckedItems.size,
+        venuesAnswered: venuesAnswered + "/" + vRoster.length,
+        why: R.lanes.venue.asymmetry,
+      },
+    };
     return {
-      version: R.version, t: now, rules: R, flags: flags, venues: venueReport,
+      version: R.version, revision: R.revision, t: now, rules: R,
+      flags: flags, venues: venueReport, volume: volReport,
       summary: {
         itemsAssessed: (items || []).length,
-        ratioCorroborated: ratioCorroborated + "/" + ratioEligible,
-        bookCorroborated: bookCorroborated + "/" + bookEligible,
+        // per-lane strings (unchanged keys — the home rail and older readers
+        // consume these); the tiered block below is the honest aggregate
+        ratioCorroborated: cnt("ratio"),
+        volumeCorroborated: cnt("volume"),
+        bookCorroborated: cnt("book"),
         steamFresh: steamFresh + "/" + steamExpected,
-        artEvidenced: artEvidenced + "/" + artTotal,
-        // honest per-run coverage: how many tracked items ANY third venue
-        // actually corroborated, and how many venues answered at all
-        venueCorroborated: vCorroboratedItems.size + "/" + vEligible.length,
+        artEvidenced: cnt("art-evidence"),
+        // WEAK tier: how many marks a third venue was gated against, and how
+        // many venues answered at all. `venueChecked` replaced the old
+        // `venueCorroborated` key deliberately — ask agreement is not
+        // corroboration and the key name said otherwise.
+        venueChecked: vCheckedItems.size + "/" + vEligible.length,
         venuesAnswered: venuesAnswered + "/" + vRoster.length,
+        corroboration: corroboration,
         oldestSalesAgeDays: oldestSalesAgeDays,
         watch: flags.filter((f) => f.severity === "watch").length,
         alert: flags.filter((f) => f.severity === "alert").length,

@@ -260,6 +260,11 @@ async function collect(opts) {
       salesT: salesStore[s] ? salesStore[s].t : null,
       sales30: sales && sales.last30d ? sales.last30d.volume : null,
       ratioDays, book: bookStore[s] || null,
+      // INTEG-1 volume lane (strong evidence: realized sold-per-day). Reads
+      // the SAME assembled daily series the index reads — no extra fetch, no
+      // new store, nothing persisted: the lane is a pure read of published
+      // marks, so it cannot introduce a new input to anything.
+      volDays: mi.daily.map((d) => ({ day: d.day, price: d.price, vol: d.vol })),
       venues: venueQuotes.get(name) || null,
     });
     // DISPLAY-ONLY spark backfill (the item-view deepHistoryBase discipline):

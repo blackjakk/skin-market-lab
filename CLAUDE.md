@@ -53,7 +53,50 @@ SETTLEMENT SCALE-UP (2026-07-27) — OI capacity + contracts:
   collect.yml). Known one-shot: first 3-hourly run after a new fixing ships
   may show one self-healing witness MISMATCH cycle (≤3h window).
 
-THIRD-VENUE LANE (INTEG-1 `venue`, 2026-07-27) — corroborate the marks:
+EVIDENCE TIERS (INTEG-1 revision `2026-07-27-evidence-tiers`) — corroboration
+is RANKED, never counted:
+- Every lane publishes a `strength` + cost-to-fake in `INTEG_RULES.lanes`
+  (published in every record): **strong** = realized sales (`ratio`,
+  `volume`, `art-evidence` — faking them burns the 15%/12% venue fee, the
+  same burn manipulationBudget prices), **medium** = standing bids (`book` —
+  no fee to post/pull, real capital at risk), **weak** = asks (`venue` — a
+  listing is FREE to post), **n/a** = `staleness` (liveness, corroborates no
+  price).
+- THE RULE: **divergence from an ask venue is evidence; agreement is not.**
+  The venue lane keeps every watch/alert it had, at the same thresholds; its
+  AGREEMENT no longer counts as corroboration. Coverage is published, not
+  dropped: per venue `checked`/`agreed`/`counts:false`, and
+  `summary.corroboration.{strong,medium,weak}` reports per tier —
+  NEVER one summed number. Summary key `venueCorroborated` was RENAMED
+  `venueChecked` on purpose (the old name asserted something false).
+  Be honest in any UI/doc copy: this made the published corroboration
+  numbers SMALLER than they read before. That is the fix, not a regression.
+- `volume` LANE (new, strong): steam sold-per-day vs the item's OWN trailing
+  30d baseline, then median-gated cross-sectionally (market-wide surge or
+  drought flags nobody — same logic as the ratio lane and the index clamp).
+  Flags a significant idiosyncratic move whose volume response collapsed vs
+  the market. Fed from `mi.daily` (collector) / `it.daily` (server) — no new
+  fetch, no new store. THRESHOLDS ARE MEASURED over backtest/history (49
+  items, 103,518 item-days since 2019), documented inline in INTEG_RULES:
+  move watch 0.10 = 97.1st pct, alert 0.20 = 99.2nd; response watch −0.5 =
+  1.4th pct, alert −1.0 = 0.16th; volMinUnits 10 = the measured knee (flag
+  rate 1.06% below 10 units/day vs 0.15% above); joint rate 0.111% of
+  item-days. THE MEASUREMENT CORRECTED THE PREMISE: genuine big moves do NOT
+  come with a volume surge (median response +0.04 log), so "volume didn't
+  rise" is useless as a rule — the discriminator is the LEFT TAIL. Re-measure
+  if you change a threshold; never guess one.
+- BUDGET: `manipulationBudget().detection` states the tiering only where it
+  can be stated without inventing a number — ask surcharge exactly 0, strong
+  and medium tiers explicitly UNPRICED, and the note that no lane's move
+  threshold binds a clamp-limited (0.05 log) push, so no published floor
+  changed.
+- Gate: the contiguous "EVIDENCE-TIER + VOLUME-LANE PINS" block in probe.js
+  (hand-computed; ends with the firewall pin — collector run with
+  assessIntegrity LIVE vs STUBBED → byte-identical series/weights/budget/
+  fixing preimages/hashes).
+
+THIRD-VENUE LANE (INTEG-1 `venue`, 2026-07-27, WEAK tier — see above)
+— corroborate the marks:
 - Pluggable ADAPTER interface (`M.venueAdapters`), never one hardcoded
   scraper: TM Market + Waxpeer (public dumps) and Buff163. THE BUFF
   FINDING: `/api/market/goods/info?goods_id=<id>` answers logged OUT —
@@ -78,9 +121,10 @@ THIRD-VENUE LANE (INTEG-1 `venue`, 2026-07-27) — corroborate the marks:
   weights, budget, fixing preimages and fixing HASHES.
 - Coverage is honest: per-venue `ok | insufficient | no-quotes |
   unavailable` with a reason; an unavailable venue is never counted as
-  agreement and a stale quote never counts as corroborated.
-- Known limits: all three publish ASKS not realized sales; TM Market and
-  Waxpeer correlate strongly (~1.3 independent reads, not 3).
+  agreement, a stale quote is not even checked — and since the evidence
+  tiering an AVAILABLE venue's agreement buys no corroboration either.
+- Known limits: all three publish ASKS not realized sales (hence weak tier);
+  TM Market and Waxpeer correlate strongly (~1.3 independent reads, not 3).
 
 STEAM INVENTORY (2026-07-27) — "value my inventory, chart it, beat the index":
 - NO SIGN-IN BY DESIGN. CS2 inventories are PUBLIC JSON
@@ -257,8 +301,9 @@ dashboard from the collector's committed files), or the setup panel
   This is a published MEASUREMENT — never present it as operating an
   instrument.
 - MARK INTEGRITY (INTEG-1, assessIntegrity in settlement.js — pure,
-  probe-pinned): the tamper DETECTOR over the single-venue marks. Four
-  lanes: ratio (item's daily skinport÷steam ratio vs its OWN trailing 30d
+  probe-pinned): the tamper DETECTOR over the single-venue marks. Lanes are
+  TIERED by cost-to-fake (see "EVIDENCE TIERS" above — read that before
+  touching a lane or a coverage string): ratio (item's daily skinport÷steam ratio vs its OWN trailing 30d
   median, then vs the day's cross-sectional median deviation — same
   median-relative gate as the index clamp, so market-wide ratio shifts
   never flag; "steam-rich" = pump suspect), book (steam last-sale median
@@ -481,10 +526,11 @@ Traps learned (do not re-learn):
 
 ## Gates (all in CI, run before every push)
 
-- `node probe.js` — 133 checks: analytics units (incl. SMLX-3
+- `node probe.js` — 273 checks: analytics units (incl. SMLX-3
   winsorization, SMLX-4 volume weights/cap, SMLX-5 weighted-median
   clamp, concentrated/center-capture budget arithmetic, INTEG-1 lane
-  pins, order-book fetcher parsing), full API flow, snapshot dedupe,
+  pins incl. the evidence-tier + volume-lane block, order-book fetcher
+  parsing), full API flow, snapshot dedupe,
   import/bootstrap, portfolio P/L, restart persistence, watchlist
   seeding, the collector (manifest, import merge, dedupe, book store,
   integrity attestation).

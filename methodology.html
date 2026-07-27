@@ -197,16 +197,60 @@
   <h2>5a · Mark integrity (INTEG-1) — the tamper detector</h2>
   <p>The fixings above prove the <i>computation</i>; this layer surveils the <i>inputs</i>. Every mark
   feeding the index is single-venue at its source, so INTEG-1 corroborates each one against
-  independent evidence and publishes divergence flags with every collector run. Lanes:</p>
+  independent evidence and publishes divergence flags with every collector run.</p>
+  <p><b>Evidence is not all equal, and since 2026-07-27 this page stops presenting it as if it were.</b>
+  Every lane carries an explicit <b>strength</b>, ranked by what it would cost an attacker to fake the
+  corroboration:</p>
+  <ul>
+    <li><b>Strong — realized sales.</b> Skinport's realized medians and volumes; Steam's own
+    sold-per-day. Faking one means transacting, which burns the venue fee on every unit (Steam 15%,
+    Skinport 12%) — the same fee-burn the manipulation budget in §5 is built on. Evidence an attacker
+    has to <i>pay</i> for.</li>
+    <li><b>Medium — standing bids.</b> The order-book lane. Posting and pulling a bid costs no fee, so
+    it is cheaper to fake than a sale; but while it stands it is real capital that can get hit.</li>
+    <li><b>Weak — asks / listings.</b> The third-venue lane. A listing is <i>free to post</i>: anyone
+    pumping a Steam mark can list matching asks on every third venue at no cost.</li>
+  </ul>
+  <p>From which follows the rule that now governs the ask lane, in plain English:
+  <b>divergence from an ask venue is evidence; agreement is not.</b> A third venue that
+  <i>disagrees</i> with a mark raises exactly the flags it always did — an attacker who did not bother
+  to move it is caught, at the same thresholds. A third venue that <i>agrees</i> no longer counts
+  toward “this mark is corroborated”, because that agreement could have been bought for nothing. Its
+  coverage is still published in full — per venue, how many marks it was <i>checked</i> against and how
+  many of those <i>agreed</i>, with <code>counts:false</code> beside it — demoted in the open rather
+  than quietly dropped. <b>This makes the corroboration figures on this site smaller than they read
+  before</b>, and that is the point: the old single count added free-to-post agreement to fee-burning
+  evidence. Coverage is now reported per tier, and the tiers are never summed.</p>
+  <p>Lanes (strength = cost to fake the corroboration):</p>
   <div class="ds-scroll-x"><table class="ds-spec-table">
-    <tr><th scope="col">Lane</th><th scope="col">Corroborates</th><th scope="col">Flags when</th></tr>
-    <tr><td><b>ratio</b></td><td>Steam price vs the item's own realized-cash comparable (its daily
+    <tr><th scope="col">Lane</th><th scope="col">Strength</th><th scope="col">Corroborates</th><th scope="col">Flags when</th></tr>
+    <tr><td><b>ratio</b></td><td><b>strong</b><br>realized sales on both legs — faking it burns the
+      15%/12% venue fees</td><td>Steam price vs the item's own realized-cash comparable (its daily
       Skinport÷Steam ratio vs its trailing 30-day median)</td><td>the deviation, measured relative to
       the day's <b>cross-sectional median deviation</b> (same median-relative logic as the index
       clamp — a market-wide move shifts every ratio together and is never flagged), exceeds ±0.25 log
       (watch) / ±0.5 (alert). “steam-rich” = pump suspect on Steam; “steam-lean” = Steam low, or the
       Skinport leg moved — which matters too, since art marks to Skinport.</td></tr>
-    <tr><td><b>book</b></td><td>Steam's last-sale median vs Steam's <b>standing order book</b> (a
+    <tr><td><b>volume</b></td><td><b>strong</b><br>realized sale counts — volume can only be
+      manufactured by transacting at ~15%/unit</td><td>the item's own <b>sold-per-day</b> against its
+      own trailing 30-day baseline: did the trade follow the price?</td><td>a significant idiosyncratic
+      price move arrives with a volume response far below the market's. Both legs are median-relative,
+      like the ratio lane: the move is measured against the day's cross-sectional median return and the
+      volume response against the day's cross-sectional median response, so a market-wide surge — or a
+      market-wide drought — flags nobody. Watch at a move ≥0.10 log with a response ≤−0.5; alert at
+      ≥0.20 with ≤−1.0. Names selling under 10 units/day are excluded (integer granularity dominates
+      there) and fewer than 3 gated names publishes coverage without flags.
+      <b>Thresholds were measured, not chosen:</b> over the committed backtest history (49 items,
+      103,518 eligible item-days since 2019) the watch step sits at the 97.1st percentile of
+      idiosyncratic daily moves and the response step at the 1.4th percentile of volume responses,
+      firing on 0.111% of item-days (~one every 24 market-days) — and the conjunction is informative,
+      not merely rare: a −0.5 response is 3.7× more likely under a big move than on a calm day, and the
+      alert pair 80×. One honest correction the measurement forced: the median volume response on a
+      genuine big-move day is only +0.04 log, so “volume failed to rise” describes ~45% of honest
+      moves and is useless as a rule — what is rare, and what this lane flags, is a big move whose
+      volume <i>collapsed</i> relative to the market.</td></tr>
+    <tr><td><b>book</b></td><td><b>medium</b><br>standing bids: no fee to post or pull, but real
+      capital at risk of being filled</td><td>Steam's last-sale median vs Steam's <b>standing order book</b> (a
       second, structurally different read path: wash trades can fake prints, but the book is committed
       capital that can get filled)</td><td>the quote escapes its own bid/ask bracket by &gt;15%
       (watch) / &gt;30% (alert). <b>Commodity (case) items only</b>: unique items' buy orders sit on
@@ -215,7 +259,9 @@
       Book readings (best bid/ask, ±5% depth, total resting units) rotate ~10 items/run into
       <code>data/book.json</code>, extracted from the listing page's embedded order-book
       payload.</td></tr>
-    <tr><td><b>venue</b></td><td>the Steam mark against <b>independent third venues</b> — TM Market
+    <tr><td><b>venue</b></td><td><b>weak</b><br>asks are free to post, so <i>agreement</i> here costs
+      an attacker nothing and buys no corroboration; <i>divergence</i> still flags in
+      full</td><td>the Steam mark against <b>independent third venues</b> — TM Market
       (market.csgo.com) and Waxpeer, both public price dumps, plus Buff163 (NetEase, the deepest
       real-money leg). A wash trader can fake prints on one venue; faking the same level across
       unrelated markets simultaneously is materially harder.</td><td>an item's Steam÷venue ratio
@@ -224,14 +270,17 @@
       venues trade at roughly 0.66× Steam and that discount moves with FX, so a <i>level</i> test
       would flag the entire market every day. Quotes older than 48h, or a venue answering for fewer
       than 5 tracked names, are published as <i>insufficient</i> — never counted as agreement. Two
-      limits stated plainly: all three publish <b>asks, not realized sales</b>, and TM Market and
-      Waxpeer correlate strongly with each other, so three venues is nearer ~1.3 independent reads
-      than three. A venue whose price is <i>derived</i> from Steam is disqualified — BitSkins measured
-      a 1.000 median ratio to our own mark and was rejected, since it would have agreed by
-      construction and inflated coverage with a tautology.</td></tr>
-    <tr><td><b>art-evidence</b></td><td>the sale count behind each appraisal mark</td><td>fewer than 3
+      limits stated plainly: all three publish <b>asks, not realized sales</b> — which is why this
+      lane is weak-tier and its agreement is uncounted — and TM Market and Waxpeer correlate strongly
+      with each other, so three venues is nearer ~1.3 independent reads than three. A venue whose price
+      is <i>derived</i> from Steam is disqualified — BitSkins measured a 1.000 median ratio to our own
+      mark and was rejected, since it would have agreed by construction and inflated coverage with a
+      tautology.</td></tr>
+    <tr><td><b>art-evidence</b></td><td><b>strong</b><br>counts of realized sales, each one a paid
+      12% fee</td><td>the sale count behind each appraisal mark</td><td>fewer than 3
       realized sales in the 30-day marking window — thin evidence is published, not hidden.</td></tr>
-    <tr><td><b>staleness</b></td><td>data-source liveness</td><td>fewer than half the steam-marked
+    <tr><td><b>staleness</b></td><td><b>n/a</b><br>a liveness monitor: it corroborates no price, so it
+      carries no evidence strength</td><td>data-source liveness</td><td>fewer than half the steam-marked
       items have a fresh quote — venue loss surfaces as an alert instead of the site silently serving
       carried-forward prices.</td></tr>
   </table></div>
@@ -241,7 +290,14 @@
   consumers of the fixings define their own halt rules (§4). And because flags change no fixing
   computation, this layer does <b>not</b> bump the SMLX version — bumping the id without a computation
   change would falsely signal a rules change to every hash verifier. The integrity layer versions
-  independently (INTEG-1), and its thresholds are published in every integrity record. Sampling is
+  independently (INTEG-1), and its thresholds are published in every integrity record. The 2026-07-27
+  evidence-tier revision keeps the same id for exactly that reason — it changed no computation, only
+  what the record says about its own evidence; the record carries a <code>revision</code> stamp and a
+  <code>revisionNote</code> saying so. One limit worth stating: none of these lanes is what makes an
+  attack expensive. Every corroboration lane's move threshold is wider than the per-name push the
+  winsorization clamp already permits (0.05 log), so the §5 floors are unchanged by detection — the
+  lanes catch <i>large</i> single-name distortions and thin-tape marks, not the cheapest 1% index push.
+  Sampling is
   also jittered: scheduled collector runs add 0–10 min of random delay on top of GitHub's own
   scheduling noise, so the reading instants are not predictable enough to pin a fake price against.</p>
   <div id="integOut"><p class="muted">Loading live integrity state…</p></div>
@@ -455,18 +511,48 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
   function integHtml(g) {
     if (!g) return "<p class='muted'>No integrity record published yet (older collector run).</p>";
     var sm = g.summary || {};
-    var head = "<p><b>" + esc(g.version) + "</b> · " + esc(sm.itemsAssessed) + " items · ratio " +
-      esc(sm.ratioCorroborated) + " · book " + esc(sm.bookCorroborated) + " · steam fresh " +
-      esc(sm.steamFresh) + " · art evidenced " + esc(sm.artEvidenced) + "</p>";
+    var head = "<p><b>" + esc(g.version) + "</b>" + (g.revision ? " <span class='muted'>· " + esc(g.revision) + "</span>" : "") +
+      " · " + esc(sm.itemsAssessed) + " items · steam fresh " + esc(sm.steamFresh) + "</p>";
+    // coverage BY EVIDENCE TIER — never one summed count. Weak-tier (ask)
+    // agreement is shown as checked/agreed and explicitly not counted.
+    var c = sm.corroboration;
+    if (c) {
+      // specTable escapes plain cells itself — only the {html:} slot is trusted
+      // and needs its own esc() on interpolated values.
+      var lanesOf = function (t) {
+        return (t && t.byLane) ? Object.keys(t.byLane).map(function (k) { return k + " " + t.byLane[k]; }).join(" · ") : "";
+      };
+      head += DS.specTable({
+        head: ["Evidence tier", "Marks corroborated", "By lane"],
+        rows: [
+          ["strong — realized sales (fee-burning)", (c.strong && c.strong.items) || "—", lanesOf(c.strong)],
+          ["medium — standing bids (capital at risk)", (c.medium && c.medium.items) || "—", lanesOf(c.medium)],
+          ["weak — asks (free to post)", { html: "<b>not counted</b> — checked " + esc(c.weak && c.weak.checked) +
+            ", agreed " + esc(c.weak && c.weak.agreed) }, "venue · venues answered " + ((c.weak && c.weak.venuesAnswered) || "—")],
+        ],
+      }) + "<p class='muted'>Tiers are never summed: agreement from a venue where listings are free to post " +
+        "does not make a mark as well-evidenced as agreement from realized sales. Divergence from an ask venue " +
+        "still flags at full strength.</p>";
+    } else {
+      head += "<p class='muted'>ratio " + esc(sm.ratioCorroborated) + " · book " + esc(sm.bookCorroborated) +
+        " · art evidenced " + esc(sm.artEvidenced) + " <i>(pre-tiering record)</i></p>";
+    }
+    if (g.volume) {
+      head += "<p class='muted'>volume lane: " + esc(g.volume.status) + " · checked " + esc(g.volume.checked) +
+        (g.volume.day ? " on " + esc(g.volume.day) : "") +
+        (g.volume.medianMove != null ? " · market median move " + esc(g.volume.medianMove) +
+          " / volume response " + esc(g.volume.medianResponse) : "") +
+        (g.volume.reason ? " · " + esc(g.volume.reason) : "") + "</p>";
+    }
     var fl = g.flags || [];
     if (!fl.length) return head + "<p>" + DS.badge({ label: "✓ NO FLAGS", tone: "good" }) +
-      " — every corroborated mark agreed with its independent evidence this run.</p>";
+      " — every mark that had corroborating evidence this run agreed with it.</p>";
     return head + DS.specTable({
-      head: ["Severity", "Lane", "Item", "Detail"],
+      head: ["Severity", "Lane", "Evidence", "Item", "Detail"],
       rows: fl.map(function (f) {
         return [
           f.severity === "alert" ? { html: DS.badge({ label: "ALERT", tone: "bad" }) } : "watch",
-          f.lane, f.name,
+          f.lane, f.strength || "—", f.name,
           f.detail + (f.dev != null ? " (" + f.dev + ")" : ""),
         ];
       }),
