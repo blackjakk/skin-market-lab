@@ -44,3 +44,20 @@ jobs:
         run: node tools/ds-guard.js
       - name: Design System component test (real Chromium)
         run: node tools/ds-component-test.js
+
+  # On-chain settlement layer (contracts/ + test/ — SkindexSettlement +
+  # WitnessOracle). Toolchain is devDependencies only; the runtime app stays
+  # zero-dependency, so this job is the only place npm ci runs.
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install contract toolchain (devDependencies only)
+        run: npm ci
+      - name: Hardhat suite (SkindexSettlement + WitnessOracle, 58 tests)
+        run: npx hardhat test
