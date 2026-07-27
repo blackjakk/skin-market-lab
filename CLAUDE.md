@@ -53,6 +53,35 @@ SETTLEMENT SCALE-UP (2026-07-27) — OI capacity + contracts:
   collect.yml). Known one-shot: first 3-hourly run after a new fixing ships
   may show one self-healing witness MISMATCH cycle (≤3h window).
 
+THIRD-VENUE LANE (INTEG-1 `venue`, 2026-07-27) — corroborate the marks:
+- Pluggable ADAPTER interface (`M.venueAdapters`), never one hardcoded
+  scraper: TM Market + Waxpeer (public dumps) and Buff163. THE BUFF
+  FINDING: `/api/market/goods/info?goods_id=<id>` answers logged OUT —
+  only name→id DISCOVERY needs a session, so `BUFF_COOKIE` gates that one
+  call and `data/buff-ids.json` (an UNTRUSTED hint map, re-verified every
+  read) keeps the lane credential-free. No cookie + no id → "not
+  configured", published unavailable, collector run untouched.
+- NEVER add a venue whose price is DERIVED from Steam. BitSkins was
+  rejected for exactly this: its suggested_price measured a 1.000 median
+  ratio to our own Steam mark, so it would agree by construction and
+  inflate coverage with a tautology. Verify independence before adding.
+- Comparison is MEDIAN-RELATIVE, not level — these venues sit ~0.66×
+  Steam and the discount moves with FX, so a level test flags the whole
+  market daily. Tolerances published in every record (venueDevWatch .25 /
+  venueDevAlert .5 / venueUniqueMult 1.6 / venueMinQuotes 5 /
+  venueMaxAgeH 48).
+- Readings live in `data/venues.json`, NEVER in the history jsonl — a
+  stray `src` line would fold a third venue's ask into assembleSeries and
+  silently change the published index.
+- FLAG-ONLY + FIREWALLED, proven by a probe pin that runs the collector
+  twice (all venues live vs all dead) and asserts byte-identical series,
+  weights, budget, fixing preimages and fixing HASHES.
+- Coverage is honest: per-venue `ok | insufficient | no-quotes |
+  unavailable` with a reason; an unavailable venue is never counted as
+  agreement and a stale quote never counts as corroborated.
+- Known limits: all three publish ASKS not realized sales; TM Market and
+  Waxpeer correlate strongly (~1.3 independent reads, not 3).
+
 STEAM INVENTORY (2026-07-27) — "value my inventory, chart it, beat the index":
 - NO SIGN-IN BY DESIGN. CS2 inventories are PUBLIC JSON
   (`steamcommunity.com/inventory/<id>/730/2`); Steam OpenID would only prove

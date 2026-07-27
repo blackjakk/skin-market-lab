@@ -215,6 +215,20 @@
       Book readings (best bid/ask, ±5% depth, total resting units) rotate ~10 items/run into
       <code>data/book.json</code>, extracted from the listing page's embedded order-book
       payload.</td></tr>
+    <tr><td><b>venue</b></td><td>the Steam mark against <b>independent third venues</b> — TM Market
+      (market.csgo.com) and Waxpeer, both public price dumps, plus Buff163 (NetEase, the deepest
+      real-money leg). A wash trader can fake prints on one venue; faking the same level across
+      unrelated markets simultaneously is materially harder.</td><td>an item's Steam÷venue ratio
+      departs the day's <b>cross-sectional median</b> ratio by &gt;0.25 log (watch) / &gt;0.5 (alert),
+      or one venue disagrees with the others by more than 1.6×. Median-relative on purpose: these
+      venues trade at roughly 0.66× Steam and that discount moves with FX, so a <i>level</i> test
+      would flag the entire market every day. Quotes older than 48h, or a venue answering for fewer
+      than 5 tracked names, are published as <i>insufficient</i> — never counted as agreement. Two
+      limits stated plainly: all three publish <b>asks, not realized sales</b>, and TM Market and
+      Waxpeer correlate strongly with each other, so three venues is nearer ~1.3 independent reads
+      than three. A venue whose price is <i>derived</i> from Steam is disqualified — BitSkins measured
+      a 1.000 median ratio to our own mark and was rejected, since it would have agreed by
+      construction and inflated coverage with a tautology.</td></tr>
     <tr><td><b>art-evidence</b></td><td>the sale count behind each appraisal mark</td><td>fewer than 3
       realized sales in the 30-day marking window — thin evidence is published, not hidden.</td></tr>
     <tr><td><b>staleness</b></td><td>data-source liveness</td><td>fewer than half the steam-marked

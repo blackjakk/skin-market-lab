@@ -87,35 +87,59 @@ consistent set.
   the witness archiving full data snapshots — is a cheap future flag:
   `WITNESS_ARCHIVE=1` copying the fetched files into the witness repo.)
 
-## 4 · Buff163 — the third venue (designed, key-gated, NOT dark-built)
+## 4 · The third-venue lane — SHIPPED 2026-07-27 (three venues, live)
 
-Buff163 is the Chinese venue and the single most informative third leg:
-it is the deepest real-money skin market and directly prices the
-CN-side demand this market swings on.
+Every mark is single-venue at source (Steam). The `venue` lane adds
+independent read paths so faking a mark means moving unrelated markets
+at once. Built as a pluggable ADAPTER interface, not one scraper, so a
+venue that rots costs coverage and nothing else.
 
-- **Access**: steamwebapi.com's free tier proxies Buff163 prices; needs
-  a user-registered key stored as the `BUFF_API_KEY` Actions secret.
-  No key → lane off, integrity coverage reads `0/n (no key)`.
-- **Fetcher**: goes through `market.js`'s injectable transport like
-  every source. The exact route/shape gets pinned ON FIRST LIVE CONTACT,
-  in the same session the key lands — the book-lane incident (nameid
-  flow shipped against a Steam page that no longer existed) is the
-  standing lesson: **never dark-ship a fetcher you cannot live-verify.**
-- **Budget**: rotating subset per run sized to the key's quota once
-  known (mirror the Skinport 8-per-run pattern; persist a cursor).
-- **Storage**: `data/buff.json` `{slug: {t, priceUsd, sellNum, buyNum}}`
-  — NEVER lines in the history jsonl (assembleSeries pollution rule).
-- **Integrity lane `buff`**: each item's steam/buff ratio vs its own
-  trailing baseline, median-relative cross-sectional gate, thresholds
-  mirroring the `ratio` lane. Three independent legs (Skinport realized,
-  Steam book, Buff asks) makes a coordinated fake ~3× harder again.
-- **New metric — CN PREMIUM**: median over liquid cases of
-  (buff price ÷ steam price), published in `market.today.cnPremium`.
-  Complements the players-based CN/US gauge with an actual PRICE spread;
-  divergence between the two is itself a signal (demand vs. capital
-  controls).
-- **Marks stay Steam.** Buff corroborates and gauges; it does not
-  become a mark source without its own methodology version bump.
+- **Live adapters** (all live-verified from this environment, never
+  dark-shipped — the book-lane lesson holds):
+  - **TM Market** (`market.csgo.com/api/v2/prices/USD.json`) — public,
+    27,341 items, 56/56 tracked names matched.
+  - **Waxpeer** (`api.waxpeer.com/v1/prices?minified=1`) — public,
+    21,889 items, prices in 1/1000 USD, 56/56 matched.
+  - **Buff163** — the §4-as-designed premise was that Buff needs a key.
+    That is only half true: `/api/market/goods/info?goods_id=<id>`
+    answers `{"code":"OK"}` LOGGED OUT. Only name→goods_id *discovery*
+    needs a session, so `BUFF_COOKIE` gates that one call; with the
+    committed `data/buff-ids.json` hint map (re-verified name-for-name on
+    every read, never trusted blind) the lane reads Buff credential-free
+    today. No cookie and no id → `not configured`, published as
+    unavailable.
+- **Rejected on purpose — BitSkins.** Public and trivial to add, but its
+  `suggested_price` is Steam-DERIVED: the median ratio to our own Steam
+  mark measured 1.000. It would have agreed by construction and inflated
+  coverage with a tautology. A corroborating venue that echoes the thing
+  it corroborates is worse than no venue.
+- **Comparison is median-relative, not level.** These venues sit ~0.66×
+  Steam and that discount moves with FX, so a level test would flag the
+  whole market daily. Published tolerances live in every integrity
+  record: `venueDevWatch .25 · venueDevAlert .5 · venueUniqueMult 1.6 ·
+  venueMinQuotes 5 · venueMaxAgeH 48`.
+- **Storage**: `data/venues.json` — NEVER lines in the history jsonl
+  (a stray `src` line would fold a third venue's ask into assembleSeries
+  and quietly change the published index).
+- **Coverage is published honestly** per venue as
+  `ok | insufficient | no-quotes | unavailable` with a reason. An
+  unavailable venue is never folded in as agreement, and a stale quote
+  (past `venueMaxAgeH`) does not count as corroborated.
+- **Flag-only, and firewalled.** The lane never rejects a mark, never
+  alters a price. Proven, not asserted: a probe pin runs the collector
+  twice from identical seeds — every venue live vs every venue dead —
+  and asserts byte-identical series, today block, weights, budget,
+  fixing canonical preimages and fixing hashes.
+- **Marks stay Steam.** These venues corroborate; none becomes a mark
+  source without its own methodology version bump.
+
+**Honest limits.** All three publish ASKS, not realized sales — they
+corroborate quoted level, not executed trade. TM Market and Waxpeer are
+strongly correlated with each other, so three venues is closer to ~1.3
+independent reads than 3. Buff coverage stays below `venueMinQuotes`
+until more ids accrue or a cookie lands. The CN PREMIUM metric designed
+here is not built: with Buff coverage thin it would be a headline number
+resting on a handful of items.
 
 ## 5 · The ceiling — what nothing in this file fixes
 
@@ -139,4 +163,7 @@ CN-side demand this market swings on.
 - [x] Fork-and-enable path documented (README + methodology §6).
 - [ ] L2: at least one third party enables a witness fork.
 - [ ] `WITNESS_ARCHIVE` snapshot mode (cheap, when wanted).
-- [ ] Buff lane: wire + live-verify the day `BUFF_API_KEY` exists.
+- [x] Third-venue lane SHIPPED: TM Market + Waxpeer public, Buff163
+      credential-free per goods_id (`BUFF_COOKIE` gates discovery only).
+- [ ] CN PREMIUM metric — blocked on Buff coverage, not on code.
+- [ ] A venue that publishes REALIZED sales (all three are asks).
