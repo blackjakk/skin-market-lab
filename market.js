@@ -67,7 +67,13 @@ function setTransport(fn) { transport = fn || httpGet; }
 
 // ── politeness gap per host (Steam bans hot loops) ─────────────────────────
 const lastHit = new Map();
-const GAPS = { "steamcommunity.com": 3500, "api.skinport.com": 2000 };
+const GAPS = { "steamcommunity.com": 3500, "api.skinport.com": 2000,
+  // third-venue corroboration hosts. The two dump venues are read ONCE per
+  // collector run (one request covers every tracked name), so a long gap
+  // costs nothing and guarantees we never hammer them; buff.163.com is a
+  // PER-ITEM read and was measured 429-ing at a ~0.9s cadence (2026-07-27),
+  // so it gets Steam's own 3.5s gap plus a small per-run budget.
+  "api.waxpeer.com": 15000, "market.csgo.com": 15000, "buff.163.com": 3500 };
 async function polite(url, headers) {
   const host = new URL(url).host;
   const gap = GAPS[host] || 0;
@@ -371,6 +377,267 @@ async function skinportSalesHistory(name) {
 
 function numOrNull(v) { const n = Number(v); return isFinite(n) ? n : null; }
 
+// ── THIRD-VENUE CORROBORATION (INTEG-1 `venue` lane) ───────────────────────
+// Every mark in this project is single-venue at source (Steam). INTEG-1
+// already corroborates it against Skinport realized sales and Steam's own
+// standing order book; this layer adds INDEPENDENT venues, so faking a mark
+// means moving several unrelated markets in the same direction at the same
+// time instead of one.
+//
+// PLUGGABLE BY DESIGN — the lane takes any number of venues. An adapter is:
+//
+//   id         stable short id; published in every flag and coverage row
+//   label      human label for the report/UI
+//   ccy        currency of `price` AFTER the adapter's own normalization
+//   kind       what the number MEANS — "ask" = cheapest standing offer
+//   needsAuth  true when the venue cannot be read at all without a credential
+//   available()          → { ok, mode, reason }   pure, NO network
+//   quotes(names, opts)  → { t, quotes: { name: { price, t, source, … } } }
+//   quote(name, opts)    → { price, t, source } | null   (sugar over quotes)
+//
+// `quotes` (batch) is the contract, not `quote`: the venues that answer
+// without a key answer with ONE full dump, and looping 60 names through a
+// per-item endpoint is exactly the rate-limit hazard the Skinport lane
+// already taught us. `quote` exists for callers that want one name.
+//
+// WHAT WAS VERIFIED LIVE FROM THIS ENVIRONMENT, 2026-07-27 (the standing
+// "never dark-ship a fetcher you cannot live-verify" rule):
+//   market.csgo.com /api/v2/prices/USD.json  200, 27,341 items, prices are
+//     decimal STRINGS in USD, `volume` = listing count. 56/56 tracked names
+//     matched. Three rapid repeats: no 429.
+//   api.waxpeer.com /v1/prices?game=csgo&minified=1  200, 21,889 items,
+//     `min` is an INTEGER in 1/1000 USD (Fracture Case 503 = $0.503, which
+//     market.csgo priced $0.500 independently), `count` = listing count.
+//     56/56 matched. Three rapid repeats: no 429.
+//   buff.163.com — the goods LIST/search endpoint answers
+//     {"code":"Login Required"} logged out, but /api/market/goods/info
+//     ?game=csgo&goods_id=<id> answers {"code":"OK"} PUBLICLY with
+//     market_hash_name, sell_min_price/buy_max_price (CNY) and the
+//     steam_price/steam_price_cny pair. So BUFF is readable without a
+//     cookie ONCE the goods_id is known; only name→id discovery needs one.
+//     Measured 429s at a ~0.9s request cadence — hence the 3.5s gap.
+// The dump venues' published rate limits are NOT documented anywhere we
+// could reach, so the politeness above is deliberately conservative.
+//
+// PRICE SEMANTICS: all three publish a LOWEST ASK, not a realized sale.
+// That is fine for corroboration and is published as `kind:"ask"` — but it
+// is why the lane is median-relative (see settlement.js): asks sit at a
+// structural discount to Steam (measured ~0.66× on 2026-07-27, because
+// Steam proceeds are wallet-locked), and a level comparison would flag the
+// entire market every single day.
+
+// Waxpeer public price dump → { name: { price(USD), qty } }. `min` is an
+// integer in 1/1000 USD; 0/absent means nothing is listed (never a $0 mark).
+async function waxpeerPrices() {
+  const url = "https://api.waxpeer.com/v1/prices?game=csgo&minified=1";
+  const res = await polite(url);
+  if (res.status !== 200) throw new Error("waxpeer prices HTTP " + res.status);
+  const j = JSON.parse(res.body);
+  if (!j || j.success !== true || !Array.isArray(j.items)) throw new Error("waxpeer prices: bad payload");
+  const out = {};
+  for (const it of j.items) {
+    if (!it || typeof it.name !== "string" || !it.name) continue;
+    const m = numOrNull(it.min);
+    if (m == null || m <= 0) continue;
+    out[it.name] = { price: Math.round(m) / 1000, qty: numOrNull(it.count) };
+  }
+  return out;
+}
+
+// market.csgo.com (TM Market) public price dump → { name: { price(USD), qty } }
+// `price` is a decimal STRING, `volume` a count STRING — both parsed here.
+async function marketCsgoPrices() {
+  const url = "https://market.csgo.com/api/v2/prices/USD.json";
+  const res = await polite(url);
+  if (res.status !== 200) throw new Error("market.csgo prices HTTP " + res.status);
+  const j = JSON.parse(res.body);
+  if (!j || j.success !== true || !Array.isArray(j.items)) throw new Error("market.csgo prices: bad payload");
+  if (j.currency != null && String(j.currency).toUpperCase() !== "USD")
+    throw new Error("market.csgo prices: currency is " + j.currency + ", not USD"); // never silently mis-scale
+  const out = {};
+  for (const it of j.items) {
+    if (!it || typeof it.market_hash_name !== "string" || !it.market_hash_name) continue;
+    const p = numOrNull(it.price);
+    if (p == null || p <= 0) continue;
+    out[it.market_hash_name] = { price: p, qty: numOrNull(it.volume) };
+  }
+  return out;
+}
+
+// BUFF163 single-item read — PUBLIC, no cookie (verified live 2026-07-27).
+// → { ok, code, goodsId, name, ask, bid, sellNum, buyNum, fxCnyPerUsd } — all
+// prices in CNY. `name` is BUFF's own market_hash_name and the CALLER MUST
+// check it against the name it asked for: goods ids come from an untrusted
+// map, and a wrong id must fail to corroborate rather than corroborate the
+// wrong item.
+//
+// fxCnyPerUsd is derived from goods_info.steam_price_cny ÷ steam_price. Those
+// are the SAME number in two currencies, so their ratio is a pure exchange
+// rate and carries no price signal from BUFF's cached copy of Steam — the
+// corroboration can never become circular. (It is also only used for the
+// PUBLISHED usd value: the lane's math is scale-free, so FX cancels.)
+async function buffGoodsInfo(goodsId) {
+  const url = "https://buff.163.com/api/market/goods/info?game=csgo&goods_id=" + enc(String(goodsId));
+  const res = await polite(url);
+  if (res.status === 429) return { ok: false, code: "rate-limited", retry: false };
+  if (res.status !== 200) throw new Error("buff goods info HTTP " + res.status);
+  let j;
+  try { j = JSON.parse(res.body); } catch (e) { throw new Error("buff goods info: unreadable payload"); }
+  if (!j || j.code !== "OK" || !j.data) return { ok: false, code: (j && j.code) || "bad payload" };
+  const d = j.data, gi = d.goods_info || {};
+  const ask = numOrNull(d.sell_min_price), bid = numOrNull(d.buy_max_price);
+  const su = numOrNull(gi.steam_price), sc = numOrNull(gi.steam_price_cny);
+  return {
+    ok: true, code: "OK", goodsId: numOrNull(d.id),
+    name: typeof d.market_hash_name === "string" ? d.market_hash_name : null,
+    ask: ask != null && ask > 0 ? ask : null,
+    bid: bid != null && bid > 0 ? bid : null,
+    sellNum: numOrNull(d.sell_num), buyNum: numOrNull(d.buy_num),
+    fxCnyPerUsd: su != null && su > 0 && sc != null && sc > 0 ? sc / su : null,
+  };
+}
+
+// BUFF163 name → goods_id. THE ONE COOKIE-GATED CALL (BUFF_COOKIE), gating
+// the discovery step exactly the way STEAM_COOKIE gates the history
+// bootstrap: no cookie → returns null and the caller simply has one fewer
+// id. NOT live-verifiable from here (we hold no BUFF session), so it is
+// deliberately fail-closed: an exact market_hash_name match or nothing, and
+// every id it returns is re-verified against the PUBLIC goods/info read
+// before a single quote is used. If BUFF changes this payload the lane loses
+// coverage — it can never gain a wrong number.
+async function buffResolveGoodsId(name, cookie) {
+  if (!cookie) return null;
+  const url = "https://buff.163.com/api/market/goods?game=csgo&page_num=1&search=" + enc(name);
+  const res = await polite(url, { Cookie: cookie, Referer: "https://buff.163.com/market/csgo" });
+  if (res.status !== 200) throw new Error("buff goods search HTTP " + res.status);
+  let j;
+  try { j = JSON.parse(res.body); } catch (e) { throw new Error("buff goods search: unreadable payload"); }
+  if (!j || j.code !== "OK" || !j.data || !Array.isArray(j.data.items)) return null;
+  for (const it of j.data.items) {
+    if (it && it.market_hash_name === name) { const id = numOrNull(it.id); if (id) return id; }
+  }
+  return null;
+}
+
+// Wraps a spec into the full adapter contract (adds the quote() sugar).
+function makeVenueAdapter(spec) {
+  return Object.assign({
+    async quote(name, opts) {
+      const got = await this.quotes([name], opts);
+      const q = got && got.quotes ? got.quotes[name] : null;
+      return q ? { price: q.price, t: q.t, source: q.source } : null;
+    },
+  }, spec);
+}
+
+// One dump-venue adapter (market.csgo / waxpeer): credential-free, one
+// request per run, every tracked name in the answer.
+function dumpVenueAdapter(id, label, source, fetchAll) {
+  return makeVenueAdapter({
+    id: id, label: label, ccy: "USD", kind: "ask", needsAuth: false,
+    available() { return { ok: true, mode: "public", reason: null }; },
+    async quotes(names, opts) {
+      const all = await fetchAll();
+      const t = Date.now();
+      const quotes = {};
+      for (const n of names || []) {
+        const row = all[n];
+        if (!row || !(row.price > 0)) continue;
+        quotes[n] = { price: row.price, t: t, source: source, qty: row.qty != null ? row.qty : null };
+      }
+      return { t: t, quotes: quotes, meta: { universe: Object.keys(all).length } };
+    },
+  });
+}
+
+// BUFF163 adapter. TWO MODES, both fail-safe:
+//   "auth"   BUFF_COOKIE present → missing goods_ids are resolved through
+//            the cookie-gated search, then read on the PUBLIC endpoint.
+//   "public" no cookie but a goods_id map was supplied → reads the public
+//            endpoint for the ids it already knows; discovers nothing new.
+// Neither → { ok:false, reason:"not configured" }: the lane reports the
+// venue unavailable and the collector run is completely unaffected.
+//
+// THE COOKIE IS NEVER stored, never logged, never returned in any structure
+// that reaches published data — it is read from the environment here and
+// only ever leaves as a request header.
+function buff163Adapter(cookie, defaults) {
+  defaults = defaults || {};
+  const hasCookie = !!cookie;
+  return makeVenueAdapter({
+    id: "buff163", label: "BUFF163 (NetEase)", ccy: "USD", kind: "ask", needsAuth: false,
+    available() {
+      const ids = defaults.ids || {};
+      if (hasCookie) return { ok: true, mode: "auth", reason: null };
+      // `_`-prefixed keys are the map file's own documentation, not ids — a
+      // map holding only a note is NOT a configured venue
+      if (Object.keys(ids).some((k) => k[0] !== "_" && ids[k])) return { ok: true, mode: "public", reason: null };
+      return { ok: false, mode: null,
+        reason: "not configured — set BUFF_COOKIE, or supply a verified goods_id map" };
+    },
+    async quotes(names, opts) {
+      opts = opts || {};
+      const ids = opts.ids || defaults.ids || {};
+      const budget = opts.budget != null ? opts.budget : (defaults.budget != null ? defaults.budget : 8);
+      const onResolve = typeof opts.onResolve === "function" ? opts.onResolve : null;
+      const quotes = {};
+      const meta = { mode: hasCookie ? "auth" : "public", read: 0, resolved: 0, rateLimited: false, fx: null };
+      const fxs = [];
+      // `budget` bounds EVERY request this adapter makes — discovery included.
+      // Discovery is per-item too, so counting only the reads would let a run
+      // with an empty id map fire one search per tracked name (55 requests at
+      // a 3.5s gap) with no cap at all. Resolved ids persist, so a run that
+      // spends its whole budget discovering simply reads them the next time.
+      let spent = 0;
+      for (const n of names || []) {
+        if (spent >= budget || meta.rateLimited) break;
+        if (typeof n !== "string" || !n || n[0] === "_") continue;
+        let id = numOrNull(ids[n]);
+        if (!id && hasCookie) {
+          spent++;
+          try {
+            id = await buffResolveGoodsId(n, cookie);
+            if (id) { meta.resolved++; if (onResolve) onResolve(n, id); }
+          } catch (e) { /* discovery is best-effort — never fails the lane */ }
+        }
+        if (!id) continue;
+        if (spent >= budget) break;
+        spent++;
+        let info = null;
+        try { info = await buffGoodsInfo(id); }
+        catch (e) { continue; }                       // one bad item, not a dead lane
+        if (!info || !info.ok) { if (info && info.code === "rate-limited") meta.rateLimited = true; continue; }
+        meta.read++;
+        // the id map is UNTRUSTED: a quote is used only when BUFF's own
+        // market_hash_name is the name we asked about
+        if (info.name !== n) continue;
+        if (!(info.ask > 0) || !(info.fxCnyPerUsd > 0)) continue;
+        fxs.push(info.fxCnyPerUsd);
+        quotes[n] = { price: Math.round((info.ask / info.fxCnyPerUsd) * 1e4) / 1e4, t: Date.now(),
+          source: "buff163:goods/info", ccyNative: "CNY", priceNative: info.ask,
+          bidNative: info.bid, qty: info.sellNum, bidQty: info.buyNum,
+          fxCnyPerUsd: Math.round(info.fxCnyPerUsd * 1e4) / 1e4 };
+      }
+      if (fxs.length) { fxs.sort((a, b) => a - b); meta.fx = Math.round(fxs[fxs.length >> 1] * 1e4) / 1e4; }
+      return { t: Date.now(), quotes: quotes, meta: meta };
+    },
+  });
+}
+
+// The registry — the whole pluggable point. Add a venue here and the lane,
+// the coverage report and the flags pick it up with no other change.
+//   opts.env   environment bag (BUFF_COOKIE lives here)
+//   opts.buff  { ids, budget } for the BUFF adapter
+function venueAdapters(opts) {
+  opts = opts || {};
+  const env = opts.env || {};
+  return [
+    dumpVenueAdapter("market.csgo", "TM Market (market.csgo.com)", "market.csgo:prices/USD", marketCsgoPrices),
+    dumpVenueAdapter("waxpeer", "Waxpeer", "waxpeer:v1/prices", waxpeerPrices),
+    buff163Adapter(env.BUFF_COOKIE || "", opts.buff || {}),
+  ];
+}
+
 // ── Historical macro backfills (one-shot, backtest/macro.json) ─────────────
 // CS players monthly averages back to July 2012 — steamcharts.com HTML
 // (verified live 2026-07-26: 168 monthly rows). One fetch, committed once;
@@ -433,4 +700,5 @@ module.exports = {
   steamOrderBook, steamPriceHistoryPublic, steamchartsMonthly, btcHistoryAll,
   resolveSteamProfile, steamInventory, parseSteamInventory,
   skinportItems, skinportSalesHistory, steamPlayers, cryptoPrices,
+  waxpeerPrices, marketCsgoPrices, buffGoodsInfo, buffResolveGoodsId, venueAdapters,
 };

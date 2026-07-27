@@ -1,0 +1,9 @@
+{
+  "_note": "BUFF163 goods_id map for the INTEG-1 venue lane. Keys are exact Steam market_hash_names. These ids are HINTS, not evidence: every read re-checks BUFF's own market_hash_name against the key before the quote is used, so a wrong or rotated id costs coverage and can never corroborate the wrong item. Entries below were verified live against https://buff.163.com/api/market/goods/info?game=csgo&goods_id=<id> (public, no cookie) on 2026-07-27. The collector appends new entries automatically when BUFF_COOKIE is set (the cookie-gated search is the only way to DISCOVER an id; reading one needs no credential).",
+  "CS:GO Weapon Case": 34273,
+  "CS:GO Weapon Case 2": 34274,
+  "CS:GO Weapon Case 3": 34275,
+  "Operation Breakout Weapon Case": 35883,
+  "Fracture Case": 781534,
+  "Kilowatt Case": 956398
+}

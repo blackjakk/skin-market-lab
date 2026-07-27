@@ -60,6 +60,87 @@ function assembleMarketItem(name, tier, lines, imported) {
   return { name, cat: catOf(name), tier, daily: series.daily, skinportDaily: series.skinportDaily, artDaily };
 }
 
+// ── third-venue corroboration lane (INTEG-1 `venue`) ───────────────────────
+// GARNISH, exactly like the players/crypto readings: every venue is wrapped
+// so a failure costs coverage and nothing else — it can never fail a
+// collector run, never blocks a snapshot, and never touches the index.
+//
+// Storage mirrors the book lane's discipline: readings live in
+// data/venues.json and NEVER in the history jsonl (a stray src line would
+// fold a third venue's ask into assembleSeries' daily marks and quietly
+// change the published index). data/buff-ids.json is the goods_id map — an
+// UNTRUSTED hint list, re-verified name-for-name on every read.
+//
+// → { roster: [...], quotes: Map(name → {venueId: {price,t}}) }
+const VENUE_BUFF_BUDGET = 8; // per-item reads/run (buff.163.com 429s in bursts)
+async function gatherVenueQuotes(opts) {
+  const dataDir = opts.dataDir, names = opts.names || [];
+  const storeFile = path.join(dataDir, "venues.json");
+  const idsFile = path.join(dataDir, "buff-ids.json");
+  const cursorFile = path.join(dataDir, "venue-cursor.json");
+  const store = readJson(storeFile, {});
+  const ids = readJson(idsFile, {});
+  const cursor = readJson(cursorFile, { i: 0 }).i % Math.max(1, names.length || 1);
+  // BUFF is read per item, so it rotates a small window like the book lane;
+  // the dump venues answer for every name in one request.
+  const buffWindow = Array.from({ length: Math.min(VENUE_BUFF_BUDGET, names.length) },
+    (_, k) => names[(cursor + k) % names.length]);
+  const roster = [], quotes = new Map();
+  let idsDirty = false;
+  const adapters = M.venueAdapters({
+    env: opts.env || process.env,
+    buff: { ids: ids, budget: VENUE_BUFF_BUDGET },
+  });
+  for (const ad of adapters) {
+    const av = ad.available();
+    const row = { id: ad.id, label: ad.label, kind: ad.kind, ccy: ad.ccy,
+      ok: false, mode: av.mode || null, reason: av.reason || null, t: null };
+    if (!av.ok) { roster.push(row); continue; } // not configured → unavailable, never agreement
+    let got = null;
+    try {
+      got = await ad.quotes(ad.id === "buff163" ? buffWindow : names,
+        { ids: ids, budget: VENUE_BUFF_BUDGET,
+          onResolve: (n, id) => { ids[n] = id; idsDirty = true; } });
+    } catch (e) { console.log("[collect] venue " + ad.id + ": " + String(e.message || e)); }
+    const fresh = got && got.quotes ? Object.keys(got.quotes) : [];
+    const prev = (store[ad.id] && store[ad.id].quotes) || {};
+    if (fresh.length) {
+      // MERGE, never replace: a rotating venue only refreshes part of the
+      // map per run, and every quote carries its own `t` so the lane ages
+      // each reading out individually (venueMaxAgeH).
+      const merged = Object.assign({}, prev);
+      for (const n of fresh) merged[slug(n)] = got.quotes[n];
+      store[ad.id] = { t: got.t, ccy: ad.ccy, kind: ad.kind, mode: av.mode || null,
+        meta: got.meta || null, quotes: merged };
+      row.ok = true; row.t = got.t;
+    } else if (Object.keys(prev).length) {
+      // the venue did not answer this run: serve the STORED readings and say
+      // so. They are not treated as fresh agreement — each one ages out on
+      // its own timestamp inside the lane.
+      row.ok = true; row.t = (store[ad.id] && store[ad.id].t) || null;
+      row.reason = "no fresh answer this run — serving stored readings (each aged out by venueMaxAgeH)";
+    } else {
+      row.reason = row.reason || "venue did not answer and no stored reading exists";
+    }
+    roster.push(row);
+  }
+  for (const v of roster) {
+    const st = store[v.id];
+    if (!v.ok || !st || !st.quotes) continue;
+    for (const name of names) {
+      const q = st.quotes[slug(name)];
+      if (!q || !(q.price > 0)) continue;
+      let bag = quotes.get(name);
+      if (!bag) { bag = {}; quotes.set(name, bag); }
+      bag[v.id] = q;
+    }
+  }
+  writeJson(storeFile, store);
+  if (idsDirty) writeJson(idsFile, ids);
+  if (names.length) writeJson(cursorFile, { i: (cursor + buffWindow.length) % names.length });
+  return { roster: roster, quotes: quotes };
+}
+
 async function collect(opts) {
   opts = opts || {};
   const root = opts.root || __dirname;
@@ -99,6 +180,16 @@ async function collect(opts) {
   const bookSet = new Set(Array.from({ length: Math.min(BOOK_BUDGET, steamNames.length) },
     (_, k) => steamNames[(bCursor + k) % steamNames.length]));
   const integItems = [];
+
+  // third-venue corroboration readings (INTEG-1 venue lane). Gathered before
+  // the snapshot loop so every item can carry its venue evidence; wrapped so
+  // the whole layer degrades to "no venues answered" without touching a
+  // single published number.
+  let venueRoster = [], venueQuotes = new Map();
+  try {
+    const vg = await gatherVenueQuotes({ dataDir, names: steamNames, env: opts.env || process.env });
+    venueRoster = vg.roster; venueQuotes = vg.quotes;
+  } catch (e) { console.log("[collect] venue lane: " + String(e.message || e)); }
 
   for (const name of names) {
     const s = slug(name);
@@ -169,6 +260,7 @@ async function collect(opts) {
       salesT: salesStore[s] ? salesStore[s].t : null,
       sales30: sales && sales.last30d ? sales.last30d.volume : null,
       ratioDays, book: bookStore[s] || null,
+      venues: venueQuotes.get(name) || null,
     });
     // DISPLAY-ONLY spark backfill (the item-view deepHistoryBase discipline):
     // when collected history is under 14 days, committed deep closes extend
@@ -195,6 +287,10 @@ async function collect(opts) {
       spark: sparkDaily.slice(-14).map((d) => d.price),
       verdict: an.signal.verdict, score: an.signal.score,
       book: bookStore[s] || null,
+      // third-venue evidence rides alongside the book reading. Display/
+      // surveillance only — manipulationBudget reads cat/tier/latest/vol24h/
+      // weight/skinport and never this field.
+      venues: venueQuotes.get(name) || null,
     });
   }
   writeJson(bookFile, bookStore);
@@ -215,7 +311,7 @@ async function collect(opts) {
   // INTEG-1 mark integrity: cross-venue ratio + order-book + art-evidence +
   // staleness surveillance. FLAG-ONLY — never removes a mark (see the
   // assessIntegrity comment for why auto-rejection would be a new attack lever)
-  manifest.market.integrity = S.assessIntegrity(integItems, { now: Date.now() });
+  manifest.market.integrity = S.assessIntegrity(integItems, { now: Date.now(), venues: venueRoster });
   // SMLX-7 center-corroboration lane (observation phase, flag-only):
   // computed by marketOverview (analytics owns the weighted-median
   // construction) and merged here as an ADDITIVE lane in the INTEG report —
@@ -295,7 +391,8 @@ async function collect(opts) {
     budget: S.manipulationBudget(manifest.items,
       { marketWeights: manifest.market.marketPreview && manifest.market.marketPreview.weights }),
     perpmark: S.perpMark(manifest.market.series),
-    integrity: integ ? { version: integ.version, summary: integ.summary, flags: integ.flags } : null };
+    integrity: integ ? { version: integ.version, summary: integ.summary, flags: integ.flags,
+      venues: integ.venues || [] } : null };
   for (const name of Object.keys(detail)) {
     const f = detail[name];
     fix.fixings[name] = { value: f.value, accruing: f.accruing || null,
@@ -354,4 +451,4 @@ if (require.main === module) {
   }).catch((e) => { console.error("[collect] fatal:", e); process.exit(1); });
 }
 
-module.exports = { collect, assembleMarketItem, catOf };
+module.exports = { collect, assembleMarketItem, catOf, gatherVenueQuotes };
