@@ -73,7 +73,10 @@ const GAPS = { "steamcommunity.com": 3500, "api.skinport.com": 2000,
   // costs nothing and guarantees we never hammer them; buff.163.com is a
   // PER-ITEM read and was measured 429-ing at a ~0.9s cadence (2026-07-27),
   // so it gets Steam's own 3.5s gap plus a small per-run budget.
-  "api.waxpeer.com": 15000, "market.csgo.com": 15000, "buff.163.com": 3500 };
+  // csfloat.com is a PER-ITEM realized-sales read (venue mix) on a small
+  // rotating budget — same treatment as buff.163.com.
+  "api.waxpeer.com": 15000, "market.csgo.com": 15000, "buff.163.com": 3500,
+  "csfloat.com": 3500 };
 async function polite(url, headers) {
   const host = new URL(url).host;
   const gap = GAPS[host] || 0;
@@ -373,6 +376,59 @@ async function skinportSalesHistory(name) {
     last24h: pick(it.last_24_hours), last7d: pick(it.last_7_days),
     last30d: pick(it.last_30_days), last90d: pick(it.last_90_days),
   };
+}
+
+// ── CSFloat realized sales (VENUE MIX, second off-Steam leg) ───────────────
+// Public, no credential — the one thing BUFF cannot give us (bill_order is
+// login-gated, probed 2026-07-28). Returns the venue's most recent SOLD
+// records with timestamps.
+//
+// THE FEED IS TRUNCATED AND THE CALLER MUST KNOW IT. The endpoint returns a
+// FIXED 40 records; `limit` and `page` are accepted and ignored (verified
+// 2026-07-28). So for a fast mover those 40 sales can span 30 hours, and for
+// a slow one 60 days.
+//
+// This function reports `pageFull` — the raw fact that the page came back at
+// its cap. It does NOT decide whether a reading is censored, because that
+// depends on a window this layer does not know: a full page whose OLDEST
+// record predates the window covers that window completely, while a full
+// page sitting entirely inside it means there were more sales we cannot see.
+// analytics.venueMix owns that call (`censored = pageFull && oldest >= from`)
+// and it matters, because a censored count is a LOWER BOUND. Survivable here
+// for one reason only: venue mix is published as a floor, and a lower bound
+// added to a lower bound is still a lower bound. Nothing may present a
+// censored count as exact.
+//
+// Prices are integer CENTS.
+const CSFLOAT_PAGE = 40;
+async function csfloatSales(name) {
+  const url = "https://csfloat.com/api/v1/history/" + enc(name) + "/sales";
+  const res = await polite(url);
+  if (res.status === 429) return { ok: false, code: "rate-limited" };
+  // 404 = this venue does not know the name. That is NO READING, not "zero
+  // sales" — recording it as zero would let an unreadable venue masquerade as
+  // a venue that looked and found nothing, and inflate the coverage count.
+  if (res.status === 404) return { ok: false, code: "no-history" };
+  if (res.status !== 200) throw new Error("csfloat sales HTTP " + res.status);
+  let arr;
+  try { arr = JSON.parse(res.body); } catch (e) { throw new Error("csfloat sales: unreadable payload"); }
+  if (!Array.isArray(arr)) return { ok: false, code: "bad payload" };
+  const records = [];
+  for (const r of arr) {
+    if (!r || r.state !== "sold") continue;          // only executed trades
+    const t = Date.parse(r.created_at);
+    const cents = numOrNull(r.price);
+    if (!isFinite(t) || cents == null || cents <= 0) continue;
+    records.push({ t: t, price: Math.round(cents) / 100 });
+  }
+  records.sort((a, b) => a.t - b.t);
+  return { ok: true, code: "OK", records: records,
+    // raw fact only: the page came back at its cap, so the venue had at
+    // least this many. Whether that TRUNCATES a given window is venueMix's
+    // call, not ours.
+    pageFull: arr.length >= CSFLOAT_PAGE, pageSize: CSFLOAT_PAGE,
+    oldestT: records.length ? records[0].t : null,
+    newestT: records.length ? records[records.length - 1].t : null };
 }
 
 function numOrNull(v) { const n = Number(v); return isFinite(n) ? n : null; }
@@ -705,6 +761,6 @@ module.exports = {
   steamPriceOverview, steamPriceHistory, parseSteamDate, normalizeHistoryRows,
   steamOrderBook, steamPriceHistoryPublic, steamchartsMonthly, btcHistoryAll,
   resolveSteamProfile, steamInventory, parseSteamInventory,
-  skinportItems, skinportSalesHistory, steamPlayers, cryptoPrices,
+  skinportItems, skinportSalesHistory, csfloatSales, steamPlayers, cryptoPrices,
   waxpeerPrices, marketCsgoPrices, buffGoodsInfo, buffResolveGoodsId, venueAdapters,
 };

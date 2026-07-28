@@ -829,7 +829,6 @@
     const windowDays = opts.windowDays || 30;
     const minDays = opts.minDays || 25;        // distinct days inside the window
     const maxStaleDays = opts.maxStaleDays || 3;
-    const venue = opts.venue || "skinport";
     const DAY = 86400000, W = windowDays * DAY;
     const tierDefs = opts.tiers || [
       { label: "under $2", lo: 0, hi: 2 }, { label: "$2–10", lo: 2, hi: 10 },
@@ -837,12 +836,32 @@
     ];
     const skipped = { noDeep: 0, staleDeep: 0, thinWindow: 0, noSales: 0, staleSales: 0 };
     const items = [];
+    const venueIds = [];
     let maxOffsetDays = 0;
+    // Each off-Steam venue arrives already normalized to the SAME shape —
+    // units and dollars of REALIZED sales in the window, plus whether that
+    // count is truncated. Venues are SUMMED: a sale on Skinport and a sale on
+    // CSFloat are different sales, so there is nothing to de-duplicate.
+    //   e.offVenues[] { id, units, dollars, censored, asOf }
+    const normVenues = (e) => {
+      const out = [];
+      for (const v of e.offVenues || []) {
+        if (!v || !v.id || !isFinite(v.units)) continue;
+        out.push({ id: v.id, units: Number(v.units) || 0,
+          dollars: Math.round(Number(v.dollars) || 0),
+          censored: !!v.censored, asOf: v.asOf != null ? v.asOf : null });
+      }
+      return out;
+    };
     for (const e of entries || []) {
       if (!e || !e.name) continue;
-      const sp30 = e.sp && e.sp.last30d;
-      if (!sp30 || !isFinite(sp30.volume)) { skipped.noSales++; continue; }
-      if (e.spAsOf && now && (now - e.spAsOf) / DAY > maxStaleDays) { skipped.staleSales++; continue; }
+      const vs = normVenues(e);
+      // no venue reported realized sales at all — unpaired, never "zero"
+      if (!vs.length) { skipped.noSales++; continue; }
+      // a venue reading older than the limit is dropped individually; if that
+      // leaves nothing, the ITEM is unpaired for staleness
+      const fresh = vs.filter((v) => !(v.asOf && now && (now - v.asOf) / DAY > maxStaleDays));
+      if (!fresh.length) { skipped.staleSales++; continue; }
       const rows = (e.steamRows || []).filter((r) => r && isFinite(r[0]) && isFinite(r[2]));
       if (!rows.length) { skipped.noDeep++; continue; }
       const end = rows[rows.length - 1][0];
@@ -859,12 +878,16 @@
         const v = Number(r[2]) || 0, p = Number(r[1]) || 0;
         steamUnits += v; steamDollars += v * p;
       }
-      const venueUnits = Number(sp30.volume) || 0;
-      // dollars use the window MEAN, not the median: this is a total traded
-      // value, and a median times a count is not a sum.
-      const venueDollars = venueUnits * (Number(sp30.avg) || 0);
+      let venueUnits = 0, venueDollars = 0, censored = false;
+      const byVenue = {};
+      for (const v of fresh) {
+        venueUnits += v.units; venueDollars += v.dollars;
+        if (v.censored) censored = true;
+        byVenue[v.id] = { units: v.units, dollars: v.dollars, censored: v.censored };
+        if (venueIds.indexOf(v.id) < 0) venueIds.push(v.id);
+      }
       const tot = steamUnits + venueUnits, dtot = steamDollars + venueDollars;
-      // the two windows can be offset when the Steam import lags: Skinport's
+      // the two windows can be offset when the Steam import lags: a venue's
       // 30d aggregate always ends NOW, the Steam window ends at `end`.
       if (now) maxOffsetDays = Math.max(maxOffsetDays, Math.round((now - end) / DAY * 10) / 10);
       items.push({
@@ -874,32 +897,55 @@
         steamDollars: Math.round(steamDollars), venueDollars: Math.round(venueDollars),
         unitSharePct: tot > 0 ? Math.round(1000 * venueUnits / tot) / 10 : null,
         dollarSharePct: dtot > 0 ? Math.round(1000 * venueDollars / dtot) / 10 : null,
+        // TRUE means at least one venue's count is a LOWER BOUND for this
+        // item — its feed was truncated inside the window. Never present a
+        // censored row as an exact measurement.
+        censored: censored, byVenue: byVenue, venues: fresh.length,
         days: days.size,
       });
     }
     const fold = (rowsIn) => {
-      let su = 0, vu = 0, sd = 0, vd = 0;
-      for (const r of rowsIn) { su += r.steamUnits; vu += r.venueUnits; sd += r.steamDollars; vd += r.venueDollars; }
+      let su = 0, vu = 0, sd = 0, vd = 0, cens = 0;
+      for (const r of rowsIn) {
+        su += r.steamUnits; vu += r.venueUnits; sd += r.steamDollars; vd += r.venueDollars;
+        if (r.censored) cens++;
+      }
       return { items: rowsIn.length, steamUnits: su, venueUnits: vu,
-        steamDollars: sd, venueDollars: vd,
+        steamDollars: sd, venueDollars: vd, censoredItems: cens,
         unitSharePct: su + vu > 0 ? Math.round(1000 * vu / (su + vu)) / 10 : null,
         dollarSharePct: sd + vd > 0 ? Math.round(1000 * vd / (sd + vd)) / 10 : null };
     };
+    // per-venue folds, so nobody has to take the combined number on trust
+    const perVenue = venueIds.map((id) => {
+      let u = 0, d = 0, n = 0, c = 0;
+      for (const r of items) {
+        const b = r.byVenue[id];
+        if (!b) continue;
+        n++; u += b.units; d += b.dollars; if (b.censored) c++;
+      }
+      const su = items.reduce((a, r) => a + (r.byVenue[id] ? r.steamUnits : 0), 0);
+      return { id: id, items: n, units: u, dollars: d, censoredItems: c,
+        unitSharePct: su + u > 0 ? Math.round(1000 * u / (su + u)) / 10 : null };
+    });
     const tiers = tierDefs.map((t) => Object.assign({ label: t.label },
       fold(items.filter((r) => r.price != null && r.price >= t.lo && r.price < t.hi))));
     items.sort((a, b) => (b.unitSharePct || 0) - (a.unitSharePct || 0));
     const eligible = (entries || []).length;
     return {
-      venue: venue, windowDays: windowDays, floor: true,
-      basket: fold(items), tiers: tiers, items: items,
+      venues: venueIds, windowDays: windowDays, floor: true,
+      basket: fold(items), perVenue: perVenue, tiers: tiers, items: items,
       coverage: { paired: items.length, eligible: eligible, skipped: skipped,
-        maxWindowOffsetDays: maxOffsetDays },
+        maxWindowOffsetDays: maxOffsetDays,
+        censoredItems: items.filter((r) => r.censored).length },
       rules: { minDays: minDays, maxStaleDays: maxStaleDays,
         windowedBy: "timestamp",
         why: "steam pricehistory is HOURLY near the present — a row-count window reads ~30 hours, "
-          + "not 30 days, and inflates the off-steam share most on the thinnest items" },
-      note: "a FLOOR on off-steam trade share: skinport is one venue among many and every unseen "
-        + "venue would only add to it. both sides are realized sales; listing counts are not accepted.",
+          + "not 30 days, and inflates the off-steam share most on the thinnest items",
+        censoring: "a venue whose sale feed is truncated inside the window reports a LOWER BOUND; "
+          + "those items are counted and flagged, never presented as exact" },
+      note: "a FLOOR on off-steam trade share: these are the venues we can SEE, every unseen one "
+        + "would only add to it, and truncated feeds make some rows lower bounds too. both sides "
+        + "are realized sales; listing counts are not accepted.",
     };
   }
 

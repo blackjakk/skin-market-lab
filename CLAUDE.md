@@ -157,18 +157,38 @@ VENUE-BOOK LANE (INTEG-1 `venue-book`, 2026-07-28, MEDIUM tier — it COUNTS):
   can never corroborate the wrong item) or set BUFF_COOKIE and let the
   collector discover them.
 
-VENUE MIX (`analytics.venueMix`, 2026-07-27) — how much trade is OFF Steam:
-- Steam sold-per-day (deep committed pricehistory) vs an off-Steam venue's
-  REALIZED-sale counts over the same trailing 30 days, per item + folded to
-  the basket, with a dollar-weighted twin. Published at
-  `market.venueMix`; rendered on the home VENUE MIX panel and methodology
-  §5d. Measured 2026-07-27: 1.1% of units / 1.6% of dollars over 43 paired
+VENUE MIX (`analytics.venueMix`, 2026-07-27; second venue 2026-07-28) —
+how much trade is OFF Steam:
+- Steam sold-per-day (deep committed pricehistory) vs EVERY off-Steam venue
+  that publishes REALIZED sales, same trailing 30 days, per item + folded to
+  the basket, with a dollar-weighted twin. Published at `market.venueMix`;
+  rendered on the home VENUE MIX panel and methodology §5d. Measured
+  2026-07-27 (skinport only): 1.1% of units / 1.6% of dollars over 43 paired
   items, rising monotonically with price (0.7% under $2 → 13.4% over $50 —
   the shape Steam's own wallet-lock + 15% fee + price cap predict).
+- VENUES ARE SUMMED, NOT MERGED — a sale on one is not a sale on the other.
+  Each publishes its own fold in `perVenue` so the combined figure never has
+  to be taken on trust. Entries arrive pre-normalized as
+  `offVenues: [{id, units, dollars, censored, asOf}]`; each leg ages out on
+  its OWN timestamp, and one stale leg does not unpair the item.
+- CSFLOAT is the second leg (`M.csfloatSales`, public, no credential):
+  `csfloat.com/api/v1/history/<name>/sales`, prices in CENTS, state "sold".
+  THE FEED IS CAPPED AT 40 RECORDS and `limit`/`page` are ignored. So a
+  window count is EXACT only when the oldest record predates the window;
+  otherwise it is a LOWER BOUND (`censored`). That test needs the window, so
+  it lives in the CALLER, not the fetcher — the fetcher reports `pageFull`
+  only. Censoring is survivable ONLY because this metric is a floor. Measured
+  2026-07-28: on fast-moving cases 40 records span ~1 day so CSFloat adds
+  little and the row is censored; on slow expensive items 40 records reach
+  past 30 days, the count is exact, and CSFloat contributes 32–39 sales
+  against Skinport's 26–178 — it helps most exactly where off-Steam share is
+  highest.
+- A 404 from a venue is NO READING, not "zero sales" — never store it, or an
+  unreadable venue masquerades as one that looked and found nothing.
 - IT IS A FLOOR, NOT A MARKET SHARE, and the copy must say so wherever the
-  number appears (a client-probe check enforces this on the home panel).
-  We see two venues; BUFF163/CSFloat/DMarket/P2P are invisible and would
-  only ADD. `floor:true` rides in the payload.
+  number appears (client-probe checks enforce the caveat, the venue names,
+  and the lower-bound disclosure on the home panel). BUFF163/DMarket/P2P are
+  invisible and would only ADD. `floor:true` rides in the payload.
 - Both sides must be REALIZED SALES. Listing counts are not sale counts.
   A trade is not a sale either — Steam publishes no trade data at all, and
   bot/alt/gambling-deposit/trade-up/gift transfers are not purchases.

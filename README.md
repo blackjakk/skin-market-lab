@@ -239,18 +239,21 @@ methodology page.
 
 **Venue mix — how much trade happens off Steam.** Steam is where the index
 is marked, but it isn't the whole market, so each run also measures Steam's
-own sold-per-day counts against an off-Steam venue's realized-sale counts
-over the same trailing 30 days. Latest reading: **at least 1.1% of units and
-1.6% of dollars** trade off Steam, and the share climbs steadily with price —
-0.7% under $2 against 13.4% over $50, the shape Steam's own rules predict
-(wallet-locked proceeds, a 15% fee, a price cap). It is a **floor, not a
-market share**: only two venues are visible here, and BUFF163, CSFloat,
-DMarket and the P2P layer would all add to it. Both sides count realized
-sales — listing counts aren't sale counts, and a trade isn't a sale either
-(Steam publishes no trade data at all, and bot, alt-account,
-gambling-deposit and trade-up transfers aren't purchases). Observation only:
-like every integrity lane, it can never move a level, a weight or a fixing.
-Methodology §5d.
+own sold-per-day counts against the realized-sale counts of every off-Steam
+venue that publishes them — **Skinport and CSFloat** — over the same trailing
+30 days. Latest reading: **at least 1.1% of units and 1.6% of dollars** trade
+off Steam, and the share climbs steadily with price — 0.7% under $2 against
+13.4% over $50, the shape Steam's own rules predict (wallet-locked proceeds,
+a 15% fee, a price cap). It is a **floor, not a market share**: BUFF163,
+DMarket and the P2P layer are invisible here and would all add to it, and
+some rows are lower bounds in their own right because CSFloat's public feed
+caps at 40 records — those are marked and counted, never presented as exact.
+The venues are summed, not merged (a sale on one isn't a sale on the other),
+and each publishes its own fold. Both sides count realized sales — listing
+counts aren't sale counts, and a trade isn't a sale either (Steam publishes
+no trade data at all, and bot, alt-account, gambling-deposit and trade-up
+transfers aren't purchases). Observation only: like every integrity lane, it
+can never move a level, a weight or a fixing. Methodology §5d.
 
 **Backtested.** The methodology's behavior through real history is
 measured, not asserted:

@@ -367,11 +367,27 @@
   <p>Steam is where this index is marked, but it is not the whole market. This section measures
   <b>observable</b> off-Steam trade: Steam's own sold-per-day counts against an off-Steam venue's
   realized-sale counts over the same trailing 30 days, per item and folded to the basket.</p>
-  <p><b>It is a floor, not a market share.</b> We can see exactly two venues. The off-Steam side is
-  Skinport alone — BUFF163, CSFloat, DMarket, Bitskins and the entire P2P/bot layer are invisible
-  here, and every one of them would only <i>add</i> to the off-Steam count. A reading of 1% means
-  &ldquo;at least 1% of observable trade is off Steam&rdquo;; the true share is higher by an unknown
-  amount. The payload carries <code>floor:true</code> so no consumer can mistake it for an estimate.</p>
+  <p><b>It is a floor, not a market share.</b> The off-Steam side is <b>Skinport and CSFloat</b> —
+  the two venues that publish realized sales without a credential. BUFF163, DMarket, Bitskins and the
+  entire P2P/bot layer are invisible here, and every one of them would only <i>add</i> to the
+  off-Steam count. A reading of 1% means &ldquo;at least 1% of observable trade is off Steam&rdquo;;
+  the true share is higher by an unknown amount. The payload carries <code>floor:true</code> so no
+  consumer can mistake it for an estimate.</p>
+  <p>The two venues are <b>summed, not merged</b> — a sale on one is not a sale on the other, so
+  there is nothing to de-duplicate — and each publishes its own fold below, so the combined number
+  never has to be taken on trust. They contribute very differently: Skinport reports an exact 30-day
+  count, while CSFloat's public feed returns a fixed 40 records with no pagination. On a fast-moving
+  case those 40 sales can span barely a day, so CSFloat adds little there and the row is marked a
+  lower bound; on a slow, expensive item the same 40 records reach back past the window, the count is
+  exact, and CSFloat contributes on the same scale as Skinport. It therefore adds most precisely
+  where the off-Steam share is highest — which is also where our sample is thinnest.</p>
+  <p><b>Buff163 cannot join this measurement</b>, and it is worth saying why rather than leaving a
+  gap. Its realized-transaction endpoint (<code>bill_order</code>), its price history and even its
+  bare market listing all answer <i>&ldquo;Login Required&rdquo;</i> when read logged out (probed
+  2026-07-28). Buff's public read gives asks and standing bids, which feed the §5a integrity lanes —
+  but not sales, so it cannot raise this floor. Putting a session credential in the collector would
+  buy that number at the cost of the property this whole site rests on: that a third party can
+  re-derive what it publishes without asking anyone's permission.</p>
   <p>Both sides count <b>realized sales</b> — the strong evidence tier from §5a. Listing counts are
   not sale counts and are not accepted here. Steam trade counts come from the committed deep
   pricehistory, the same display-only source the sparklines use; the index input never sees it, so
@@ -561,7 +577,26 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
       esc(pc(b.dollarSharePct)) + " of observable dollars traded off Steam over the last " +
       esc(String(vm.windowDays)) + " days — " + esc(fmtInt(b.venueUnits)) + " off-Steam sales against " +
       esc(fmtInt(b.steamUnits)) + " on Steam, across " + esc(String(c.paired)) + " of " +
-      esc(String(c.eligible)) + " tracked items.</p>";
+      esc(String(c.eligible)) + " tracked items, on " + esc((vm.venues || []).join(" + ")) + ".</p>";
+    if ((vm.perVenue || []).length > 1) {
+      head += DS.specTable({
+        head: ["Off-Steam venue", "Items", "Sales counted", "Dollars", "Share of that pair", "Truncated rows"],
+        rows: vm.perVenue.map(function (p) {
+          return [p.id, String(p.items), fmtInt(p.units), "$" + fmtInt(p.dollars),
+            pc(p.unitSharePct), String(p.censoredItems || 0)];
+        }),
+      }) + "<p class='muted'>Venues are <b>summed, not merged</b>: a sale on one is not a sale on the " +
+        "other, so there is nothing to de-duplicate. Each venue's own fold is published so the combined " +
+        "figure never has to be taken on trust.</p>";
+    }
+    if (b.censoredItems) {
+      head += "<p class='muted'><b>" + esc(String(b.censoredItems)) + " of " + esc(String(c.paired)) +
+        " rows are lower bounds.</b> CSFloat's public sale feed returns a fixed 40 records with no " +
+        "pagination, so for a fast-moving item those 40 sales can sit entirely inside the window — more " +
+        "sales happened than we can count. Those rows are marked <code>censored</code> and counted here " +
+        "rather than presented as exact. It costs nothing to the honesty of the headline, because an " +
+        "undercount can only make a floor lower.</p>";
+    }
     var tiers = (vm.tiers || []).filter(function (t) { return t.items; });
     var body = tiers.length ? DS.specTable({
       head: ["Price band", "Items", "Steam units", "Off-Steam units", "Off-Steam units %", "Off-Steam dollars %"],

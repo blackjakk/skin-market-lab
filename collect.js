@@ -165,6 +165,21 @@ async function collect(opts) {
   const fetchSet = new Set(Array.from({ length: Math.min(SALES_BUDGET, names.length) },
     (_, k) => names[(cursor + k) % names.length]));
 
+  // CSFloat realized sales — the SECOND off-Steam leg of the venue-mix floor,
+  // and the reason that floor is not Skinport-only. Public, no credential
+  // (BUFF's equivalent is login-gated). Per-item read on its own rotating
+  // window, stored with each reading's own timestamp so venueMix ages them
+  // out individually. Kept OUT of the history jsonl for the venue-lane
+  // reason: a stray `src` line there would fold a third venue's prints into
+  // assembleSeries and silently move the published index.
+  const CSFLOAT_BUDGET = 10;
+  const csfFile = path.join(dataDir, "csfloat-sales.json");
+  const csfStore = readJson(csfFile, {});
+  const csfCursorFile = path.join(dataDir, "csfloat-cursor.json");
+  const csfCursor = readJson(csfCursorFile, { i: 0 }).i % Math.max(1, names.length);
+  const csfSet = new Set(Array.from({ length: Math.min(CSFLOAT_BUDGET, names.length) },
+    (_, k) => names[(csfCursor + k) % names.length]));
+
   // Order-book lane (INTEG-1 second read path): a rotating window of steam-
   // marked items gets a fresh book reading per run, extracted from the SSR
   // listing page's embedded react-query cache (one public request per item —
@@ -225,6 +240,15 @@ async function collect(opts) {
               vol: fresh.last24h ? fresh.last24h.volume : null, sp30: m30 });
         }
       } catch (e) { console.log("[collect] skinport " + name + ": " + e.message); }
+    }
+    if (csfSet.has(name)) {
+      try {
+        const cs = await M.csfloatSales(name);
+        // `pageFull` is stored raw; whether it CENSORS a given window is
+        // venueMix's call, not this layer's (market.js explains why).
+        if (cs && cs.ok)
+          csfStore[s] = { t: Date.now(), records: cs.records, pageFull: !!cs.pageFull };
+      } catch (e) { console.log("[collect] csfloat " + name + ": " + e.message); }
     }
     if (bookSet.has(name)) {
       try {
@@ -340,27 +364,59 @@ async function collect(opts) {
       .map((f) => f.severity + " " + f.lane + " " + f.name).join("; "));
 
   // VENUE MIX (observation only): Steam's own sold-per-day counts against
-  // Skinport's realized-sale counts over the same trailing 30 days, per item
-  // and folded to the basket. Reads the DEEP committed pricehistory for the
-  // Steam side — the same display-only source the sparkline backfill uses,
-  // and for the same reason: mi.daily (the analytics/index input) never sees
-  // deep data, so this cannot reach a published level, weight or hash. It is
-  // a FLOOR, not a market-share estimate (analytics.venueMix explains why).
+  // every off-Steam venue that publishes REALIZED sales, over the same
+  // trailing 30 days, per item and folded to the basket. Reads the DEEP
+  // committed pricehistory for the Steam side — the same display-only source
+  // the sparkline backfill uses, and for the same reason: mi.daily (the
+  // analytics/index input) never sees deep data, so this cannot reach a
+  // published level, weight or hash. It is a FLOOR, not a market-share
+  // estimate (analytics.venueMix explains why).
+  //
+  // TWO off-Steam legs, normalized to one shape here so venueMix stays a pure
+  // fold. They are SUMMED, not merged: a Skinport sale and a CSFloat sale are
+  // different sales.
+  //   skinport — an EXACT 30d count from the venue's own aggregate
+  //   csfloat  — counted from a truncated 40-record feed, so the count is a
+  //              LOWER BOUND whenever the oldest record we hold still sits
+  //              inside the window (that test needs the window, so it lives
+  //              here rather than in the fetcher)
   try {
+    const VM_WINDOW_MS = 30 * 86400000, vmNow = Date.now();
     const vmEntries = manifest.items.map((it) => {
       const deep = readJson(path.join(root, "backtest", "history", it.slug + ".json"), null);
+      const offVenues = [];
       const st = salesStore[it.slug];
+      const sp30 = st && st.data && st.data.last30d;
+      if (sp30 && isFinite(sp30.volume)) {
+        const u = Number(sp30.volume) || 0;
+        // dollars use the window MEAN, not the median: a median times a count
+        // is not a sum.
+        offVenues.push({ id: "skinport", units: u, dollars: u * (Number(sp30.avg) || 0),
+          censored: false, asOf: st.t });
+      }
+      const cs = csfStore[it.slug];
+      if (cs && Array.isArray(cs.records)) {
+        const from = vmNow - VM_WINDOW_MS;
+        const win = cs.records.filter((r) => r && isFinite(r.t) && r.t >= from);
+        let dollars = 0;
+        for (const r of win) dollars += Number(r.price) || 0;
+        // truncated INSIDE the window ⇒ there were more sales we cannot see
+        const oldest = cs.records.length ? cs.records[0].t : null;
+        offVenues.push({ id: "csfloat", units: win.length, dollars: dollars,
+          censored: !!cs.pageFull && oldest != null && oldest >= from, asOf: cs.t });
+      }
       return {
         name: it.name, slug: it.slug, cat: it.cat, tier: it.tier, price: it.latest,
         steamRows: deep && Array.isArray(deep.rows) ? deep.rows : [],
-        sp: st ? st.data : null, spAsOf: st ? st.t : null,
+        offVenues: offVenues,
       };
     });
-    manifest.market.venueMix = A.venueMix(vmEntries, { now: Date.now() });
-    const vb = manifest.market.venueMix.basket;
+    manifest.market.venueMix = A.venueMix(vmEntries, { now: vmNow });
+    const vm = manifest.market.venueMix, vb = vm.basket;
     console.log("[collect] venue mix: off-steam floor " + vb.unitSharePct + "% of units / "
-      + vb.dollarSharePct + "% of dollars over " + manifest.market.venueMix.coverage.paired
-      + " paired items");
+      + vb.dollarSharePct + "% of dollars over " + vm.coverage.paired + " paired items ("
+      + vm.perVenue.map((p) => p.id + " " + p.unitSharePct + "%").join(", ")
+      + "; " + vb.censoredItems + " rows are lower bounds)");
   } catch (e) { console.log("[collect] venue mix: " + String(e.message || e)); }
 
   const macroFile = path.join(dataDir, "market.jsonl");
@@ -434,6 +490,8 @@ async function collect(opts) {
 
   writeJson(cursorFile, { i: names.length ? (cursor + SALES_BUDGET) % names.length : 0 });
   writeJson(salesStoreFile, salesStore);
+  writeJson(csfFile, csfStore);
+  writeJson(csfCursorFile, { i: names.length ? (csfCursor + CSFLOAT_BUDGET) % names.length : 0 });
   fs.writeFileSync(path.join(dataDir, "index.json"), JSON.stringify(manifest));
 
   // ── the Skindex public embed JSON (STABLE API — README "Embed the Skindex").

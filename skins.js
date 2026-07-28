@@ -627,16 +627,25 @@
       tile2("OFF-STEAM DOLLARS", pct(b.dollarSharePct),
         "$" + fmtCompact(b.venueDollars) + " of $" + fmtCompact(b.steamDollars + b.venueDollars) + ", 30d", "") +
       tile2("PAIRED ITEMS", String(vm.coverage.paired) + " / " + String(vm.coverage.eligible),
-        "both venues report realized sales", "") +
+        "Steam and an off-Steam venue both report realized sales", "") +
       "</div>" +
       (tierRows.length ? DS.specTable({
         cls: "venueMixTiers",
         head: ["Price band", "Items", "Off-Steam units", "Off-Steam dollars"],
         rows: tierRows,
       }) : "") +
-      '<div class="ds-hint hint">A <b>floor</b>, not a market share: the off-Steam side is one venue ' +
-      "(" + esc(vm.venue) + ") and every venue we cannot see — BUFF163, CSFloat, DMarket, the P2P/bot layer — " +
-      "would only add to it. Both sides count realized sales over " + esc(String(vm.windowDays)) + " days; " +
+      // per-venue, so the combined number never has to be taken on trust
+      ((vm.perVenue || []).length ? '<div class="ds-hint hint">By venue: ' +
+        vm.perVenue.map((p) => esc(p.id) + " " + pct(p.unitSharePct) + " (" + fmtCompact(p.units) +
+          " sales over " + p.items + " items" +
+          (p.censoredItems ? ", " + p.censoredItems + " truncated" : "") + ")").join(" · ") +
+        "</div>" : "") +
+      '<div class="ds-hint hint">A <b>floor</b>, not a market share: these are the venues we can see — ' +
+      esc((vm.venues || []).join(", ")) + " — and every one we cannot (BUFF163, DMarket, the P2P/bot layer) " +
+      "would only add to it. " +
+      (b.censoredItems ? "<b>" + esc(String(b.censoredItems)) + " row(s) are lower bounds</b> too: those venues " +
+        "cap how far back their sale feed goes, so more sales happened than we can count. " : "") +
+      "Both sides count realized sales over " + esc(String(vm.windowDays)) + " days; " +
       "listing counts are not comparable and are not accepted. Observation only — it never touches the index " +
       "or a fixing. <a href=\"methodology.html\">How it is measured</a>.</div></div>";
   }

@@ -261,10 +261,14 @@ so read the gradient as a direction, not a measurement.
 
 Three disciplines make it honest rather than a headline:
 
-1. **It is a floor.** Two venues are visible; BUFF163, CSFloat, DMarket,
-   Bitskins and the P2P/bot layer are not, and every one of them would only
-   add. `floor:true` rides in the payload, and the caveat is enforced on the
-   surface by a client-probe check rather than left to editorial discipline.
+1. **It is a floor.** The off-Steam side is Skinport **and CSFloat** — the
+   two venues that publish realized sales without a credential. BUFF163,
+   DMarket, Bitskins and the P2P/bot layer are not visible, and every one of
+   them would only add. `floor:true` rides in the payload, and the caveat is
+   enforced on the surface by a client-probe check rather than left to
+   editorial discipline. The venues are **summed, not merged** — a sale on
+   one is not a sale on the other — and each publishes its own fold so the
+   combined figure never has to be taken on trust.
 2. **Both sides are realized sales** — the strong tier from §4. Listing
    counts are not sale counts and are refused. A *trade* is not a sale
    either: Steam publishes no trade data at all, and bot inventories, alt
@@ -282,6 +286,26 @@ it inflates the off-Steam share worst exactly where the item is illiquid.
 The first cut printed 21%; windowed by timestamp the same data prints 1.1%.
 `rules.windowedBy:"timestamp"` is published and unit-proven (daily rows ≡
 hourly rows for the same trade).
+
+A fourth discipline arrived with the second venue: **a truncated feed is a
+lower bound and must say so.** CSFloat's public sale history returns a fixed
+40 records with no pagination, so on a fast-moving item those 40 sales can
+sit entirely inside the window — more happened than we can count. Those rows
+are marked `censored`, counted in `coverage.censoredItems`, and disclosed on
+both surfaces. This is survivable *only* because the metric is a floor: an
+undercount can lower a lower bound, never inflate it. The same feed on a
+slow, expensive item reaches back past the window, and the count is exact —
+so CSFloat contributes most precisely where the off-Steam share is highest
+and our sample is thinnest.
+
+**Why this is the credential-free answer to a credential question.** Buff163
+would have been the obvious second venue, and it cannot be one: its
+realized-transaction endpoint, its price history and its bare market listing
+all answer *"Login Required"* logged out. Buying that number with a session
+cookie in the collector would trade away the property in §1 that the whole
+document rests on — that a third party can re-derive what we publish without
+asking anyone's permission. CSFloat gives realized sales for free, so the
+trade was never necessary.
 
 Like every lane here it is **observation only** — the firewall pin runs the
 collector with the layer live and with `venueMix` throwing, and asserts

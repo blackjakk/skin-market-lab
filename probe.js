@@ -523,6 +523,15 @@ async function fixtureTransport(url, headers) {
     const agg = (mul) => ({ min: 18 * mul, max: 30 * mul, avg: 21 * mul, median: 20 * mul, volume: 21 });
     return { status: 200, body: JSON.stringify([{ market_hash_name: decodeURIComponent(/market_hash_name=([^&]+)/.exec(url)[1]), last_24_hours: agg(1), last_7_days: agg(1), last_30_days: agg(1), last_90_days: agg(1) }]) };
   }
+  // CSFloat realized sales (venue mix, second leg). SHORT of the 40-record
+  // page cap on purpose: 12 sales at $5, all inside the window and NOT
+  // truncated, so the collector must record an EXACT count. The censored case
+  // is unit-tested separately.
+  if (url.includes("csfloat.com/api/v1/history/")) {
+    const D0 = 86400000;
+    return { status: 200, body: JSON.stringify(Array.from({ length: 12 }, (_, i) => ({
+      state: "sold", price: 500, created_at: new Date(Date.now() - (i + 1) * D0).toISOString() }))) };
+  }
   return { status: 404, body: "" };
 }
 
@@ -1173,18 +1182,27 @@ async function fixtureTransport(url, headers) {
   // ── VENUE MIX (off-Steam trade floor) ──────────────────────────────────
   // HAND-COMPUTED against the fixture: NAME's deep file is 31 daily rows ×
   // 100 units, so the 30d window holds 3100 Steam units at prices 20.1…23.0
-  // (dollars = 100 × Σprices). The fixture's skinport aggregate is volume 21
-  // at avg 21 for every item → 21 units / $441 off-Steam.
+  // (dollars = 100 × Σprices = 66,650). TWO off-Steam legs, SUMMED: skinport
+  // volume 21 at avg 21 = $441, csfloat 12 sales at $5 = $60.
+  // 33/3133 = 1.1% of units; 501/67,151 = 0.7% of dollars.
   {
     const vm = c1.manifest.market.venueMix;
     const nmMix = vm.items.find((i) => i.name === NAME);
-    ok(nmMix && nmMix.steamUnits === 3100 && nmMix.venueUnits === 21
-      && nmMix.unitSharePct === 0.7 && nmMix.days === 31,
-      "venue mix: Steam units windowed by TIME (3100 over 31 days) vs the venue's realized 30d sales (21) → 0.7% off-Steam");
-    // dollars: venue = 21 units × $21 window MEAN = $441 (never median×count,
-    // which is not a sum); steam = 100 units × Σ(20.0…23.0) = 100 × 666.5.
-    ok(nmMix.venueDollars === 441 && nmMix.steamDollars === 66650,
-      "venue mix: dollars are the window MEAN × count on the venue side (21×$21=$441) and unit×price summed on the Steam side");
+    ok(nmMix && nmMix.steamUnits === 3100 && nmMix.venueUnits === 33
+      && nmMix.unitSharePct === 1.1 && nmMix.days === 31
+      && nmMix.byVenue.skinport.units === 21 && nmMix.byVenue.csfloat.units === 12,
+      "venue mix: Steam units windowed by TIME (3100 over 31 days) vs TWO venues' realized 30d sales (21 + 12) → 1.1% off-Steam");
+    // dollars: skinport = 21 units × $21 window MEAN = $441 (never
+    // median×count, which is not a sum); csfloat = 12 × $5 = $60 summed from
+    // its own records; steam = 100 units × Σ(20.0…23.0) = 66,650.
+    ok(nmMix.venueDollars === 501 && nmMix.steamDollars === 66650
+      && nmMix.byVenue.csfloat.dollars === 60,
+      "venue mix: dollars are the window MEAN × count on skinport ($441), the summed record prices on csfloat ($60), and unit×price summed on the Steam side");
+    // the csfloat feed came back SHORT of its 40-record page cap, so this
+    // count covers the window completely and must NOT read as a lower bound
+    ok(nmMix.censored === false && vm.basket.censoredItems === 0
+      && vm.venues.join(",") === "skinport,csfloat" && vm.perVenue.length === 2,
+      "venue mix: a csfloat feed under its page cap is an EXACT window count, not censored — and each venue publishes its own fold beside the combined one");
     ok(vm.floor === true && vm.rules.windowedBy === "timestamp" && vm.windowDays === 30
       && /floor/i.test(vm.note) && /realized sales/i.test(vm.note),
       "venue mix publishes floor:true, the timestamp-window rule and the one-venue caveat — never presented as a market share");
@@ -1204,14 +1222,14 @@ async function fixtureTransport(url, headers) {
   // windowing by timestamp must give the SAME answer for both shapes.
   {
     const T = Date.UTC(2026, 5, 30), DD = 86400000, H = 3600000;
-    const sp = { last30d: { volume: 100, avg: 10, median: 10 } };
+    const sp = [{ id: "skinport", units: 100, dollars: 1000, censored: false }];
     const daily = Array.from({ length: 31 }, (_, i) => [T - (30 - i) * DD, 10, 100]);
     // the SAME 3100 units over the SAME 30-day span, delivered hourly (721
     // rows, T-30d … T) instead of daily. Same trade, different granularity.
     const hourly = [];
     for (let k = 30 * 24; k >= 0; k--) hourly.push([T - k * H, 10, 3100 / 721]);
-    const a = A.venueMix([{ name: "D", price: 10, steamRows: daily, sp: sp }], { now: T });
-    const b = A.venueMix([{ name: "H", price: 10, steamRows: hourly, sp: sp }], { now: T });
+    const a = A.venueMix([{ name: "D", price: 10, steamRows: daily, offVenues: sp }], { now: T });
+    const b = A.venueMix([{ name: "H", price: 10, steamRows: hourly, offVenues: sp }], { now: T });
     ok(Math.abs(a.basket.steamUnits - 3100) < 1e-6 && Math.abs(b.basket.steamUnits - 3100) < 1e-6
       && a.basket.unitSharePct === b.basket.unitSharePct && a.basket.unitSharePct === 3.1,
       "venue mix: the same 30 days of trade reads identically as daily or hourly rows — the window is time, not row count (the trap that first printed 21% instead of 1%)");
@@ -1224,11 +1242,11 @@ async function fixtureTransport(url, headers) {
   {
     const T = Date.UTC(2026, 5, 30), DD = 86400000;
     const rows = Array.from({ length: 31 }, (_, i) => [T - (30 - i) * DD, 10, 100]);
-    const sp = { last30d: { volume: 100, avg: 10 } };
-    const fresh = A.venueMix([{ name: "F", price: 10, steamRows: rows, sp: sp, spAsOf: T }], { now: T });
-    const stale = A.venueMix([{ name: "S", price: 10, steamRows: rows, sp: sp, spAsOf: T - 10 * DD }], { now: T });
+    const vAt = (t) => [{ id: "skinport", units: 100, dollars: 1000, censored: false, asOf: t }];
+    const fresh = A.venueMix([{ name: "F", price: 10, steamRows: rows, offVenues: vAt(T) }], { now: T });
+    const stale = A.venueMix([{ name: "S", price: 10, steamRows: rows, offVenues: vAt(T - 10 * DD) }], { now: T });
     const old = A.venueMix([{ name: "O", price: 10,
-      steamRows: rows.map((r) => [r[0] - 10 * DD, r[1], r[2]]), sp: sp, spAsOf: T }], { now: T });
+      steamRows: rows.map((r) => [r[0] - 10 * DD, r[1], r[2]]), offVenues: vAt(T) }], { now: T });
     ok(fresh.coverage.paired === 1 && stale.coverage.paired === 0 && stale.coverage.skipped.staleSales === 1
       && old.coverage.paired === 0 && old.coverage.skipped.staleDeep === 1,
       "venue mix: a stale venue aggregate or a stale Steam import is dropped and named, never compared across mismatched windows");
@@ -1236,10 +1254,41 @@ async function fixtureTransport(url, headers) {
     // against 30 days of venue sales would print a 3x-inflated off-Steam
     // share. It must be refused, not folded in short.
     const short = A.venueMix([{ name: "P", price: 10,
-      steamRows: rows.slice(-10), sp: sp, spAsOf: T }], { now: T });
+      steamRows: rows.slice(-10), offVenues: vAt(T) }], { now: T });
     ok(short.coverage.paired === 0 && short.coverage.skipped.thinWindow === 1
       && short.basket.unitSharePct === null,
       "venue mix: 10 days of Steam trade never gets compared to 30 days of venue sales — a short window is refused, not folded in (it would print a 3x-inflated share)");
+
+    // ── MULTI-VENUE: the off-Steam side is a SUM, and censoring is tracked ──
+    // A Skinport sale and a CSFloat sale are different sales, so the legs add;
+    // there is nothing to de-duplicate. 100 + 50 = 150 against 3100 steam
+    // units ⇒ 150/3250 = 4.6%.
+    const two = A.venueMix([{ name: "T", price: 10, steamRows: rows, offVenues: [
+      { id: "skinport", units: 100, dollars: 1000, censored: false, asOf: T },
+      { id: "csfloat", units: 50, dollars: 500, censored: true, asOf: T },
+    ] }], { now: T });
+    ok(two.basket.venueUnits === 150 && two.basket.unitSharePct === 4.6
+      && two.venues.join(",") === "skinport,csfloat"
+      && two.perVenue.find((p) => p.id === "csfloat").units === 50
+      && two.perVenue.find((p) => p.id === "skinport").units === 100,
+      "venue mix: two off-Steam venues SUM (100 + 50 = 150 units ⇒ 4.6%) and each publishes its own fold — nobody has to take the combined number on trust");
+    // Censoring must SURVIVE to the surface: one truncated leg makes the row
+    // a lower bound, and the count of such rows is published.
+    ok(two.items[0].censored === true && two.basket.censoredItems === 1
+      && two.coverage.censoredItems === 1
+      && two.perVenue.find((p) => p.id === "csfloat").censoredItems === 1
+      && two.perVenue.find((p) => p.id === "skinport").censoredItems === 0
+      && /LOWER BOUND/.test(two.rules.censoring),
+      "venue mix: a truncated venue feed marks the row censored and is counted as such — a lower bound is never presented as an exact measurement");
+    // one stale leg is dropped WITHOUT unpairing the item — the other leg
+    // still measures something, and the item keeps its (smaller) floor
+    const oneStale = A.venueMix([{ name: "U", price: 10, steamRows: rows, offVenues: [
+      { id: "skinport", units: 100, dollars: 1000, censored: false, asOf: T },
+      { id: "csfloat", units: 50, dollars: 500, censored: false, asOf: T - 10 * DD },
+    ] }], { now: T });
+    ok(oneStale.coverage.paired === 1 && oneStale.basket.venueUnits === 100
+      && oneStale.items[0].venues === 1 && oneStale.venues.join(",") === "skinport",
+      "venue mix: one stale venue leg is dropped on its own timestamp without unpairing the item — the fresh leg still measures a floor");
   }
   // ── embed API + benchmark pins ─────────────────────────────────────────
   const emb = JSON.parse(fs.readFileSync(path.join(CROOT, "data", "skindex.json"), "utf8"));

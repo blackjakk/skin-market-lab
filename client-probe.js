@@ -42,6 +42,13 @@ M.setTransport(async (url) => {
     const agg = { min: 35, max: 48, avg: 40.1, median: 39.5, volume: 34 };
     return { status: 200, body: JSON.stringify([{ market_hash_name: "AK-47 | Redline (Field-Tested)", last_24_hours: agg, last_7_days: agg, last_30_days: agg, last_90_days: agg }]) };
   }
+  // CSFloat realized sales — the venue-mix second leg. A FULL 40-record page
+  // sitting entirely inside the window, so the browser renders the CENSORED
+  // path (a lower-bound row) as well as the two-venue per-venue table.
+  if (url.includes("csfloat.com/api/v1/history/")) {
+    return { status: 200, body: JSON.stringify(Array.from({ length: 40 }, (_, i) => ({
+      state: "sold", price: 4100, created_at: new Date(Date.now() - (i + 1) * 3600000).toISOString() }))) };
+  }
   return { status: 404, body: "" };
 });
 
@@ -386,9 +393,14 @@ M.setTransport(async (url) => {
     const vmTxt = await pageD.textContent("#itemView");
     ok(vmPub && vmPub.basket.paired !== 0
       && vmTxt.indexOf("VENUE MIX · AT LEAST " + vmPub.basket.unitSharePct + "% OFF STEAM") >= 0
-      && /floor/i.test(vmTxt) && /one venue/i.test(vmTxt) && /realized sales/i.test(vmTxt),
+      && /floor, not a market share/i.test(vmTxt) && /we can see/i.test(vmTxt)
+      && /realized sales/i.test(vmTxt)
+      // every venue folded into the headline is NAMED on the same surface,
+      // and a truncated feed is disclosed as a lower bound right beside it
+      && vmPub.venues.length === 2 && vmPub.venues.every((v) => vmTxt.indexOf(v) >= 0)
+      && vmPub.basket.censoredItems > 0 && /lower bounds/i.test(vmTxt),
       "home echoes the collector's venue-mix floor (" + (vmPub && vmPub.basket.unitSharePct) +
-      "%) with its one-venue caveat attached — never framed as a market share");
+      "%), names both venues behind it, and discloses the truncated rows as lower bounds — never framed as a market share");
     // methodology page: budget renders + in-browser hash verification
     await pageD.goto("http://localhost:5394/methodology.html", { waitUntil: "networkidle" });
     await pageD.waitForFunction(() => /\$/.test(document.getElementById("budgetOut").textContent), { timeout: 8000 });
@@ -402,6 +414,12 @@ M.setTransport(async (url) => {
       && vmSec.indexOf(vmPub.coverage.paired + " of " + vmPub.coverage.eligible + " tracked items") >= 0
       && /timestamp/.test(vmSec),
       "methodology §5d renders the venue-mix reading with its coverage and the timestamp-window rule");
+    // With two venues the page must show BOTH folds and explain the truncation
+    // rather than quietly folding a lower bound into an exact-looking total.
+    ok(/summed, not merged/i.test(vmSec) && /rows are lower bounds/i.test(vmSec)
+      && vmPub.perVenue.every((p) => vmSec.indexOf(p.id) >= 0)
+      && vmSec.indexOf(String(vmPub.basket.censoredItems) + " of " + vmPub.coverage.paired) >= 0,
+      "methodology §5d publishes each venue's own fold, says venues are summed not merged, and counts the truncated rows as lower bounds");
     await pageD.click("#verifyBtn");
     await pageD.waitForFunction(() => /VERIFIED|MISMATCH/.test(document.getElementById("verifyOut").textContent), { timeout: 8000 });
     const verTxt = await pageD.textContent("#verifyOut");
