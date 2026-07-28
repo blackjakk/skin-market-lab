@@ -640,9 +640,14 @@
           " sales over " + p.items + " items" +
           (p.censoredItems ? ", " + p.censoredItems + " truncated" : "") + ")").join(" · ") +
         "</div>" : "") +
-      '<div class="ds-hint hint">A <b>floor</b>, not a market share: these are the venues we can see — ' +
-      esc((vm.venues || []).join(", ")) + " — and every one we cannot (BUFF163, DMarket, the P2P/bot layer) " +
-      "would only add to it. " +
+      // `venues` is absent from pre-2026-07-28 records (single-leg era), so the
+      // sentence has to read correctly without it rather than printing an
+      // empty dash gap on the last published run before a redeploy.
+      '<div class="ds-hint hint">A <b>floor</b>, not a market share: ' +
+      ((vm.venues || []).length
+        ? "these are the venues we can see — " + esc(vm.venues.join(", ")) + " — and every one we cannot"
+        : "this counts only the off-Steam venues we can see, and every one we cannot") +
+      " (BUFF163, DMarket, the P2P/bot layer) would only add to it. " +
       (b.censoredItems ? "<b>" + esc(String(b.censoredItems)) + " row(s) are lower bounds</b> too: those venues " +
         "cap how far back their sale feed goes, so more sales happened than we can count. " : "") +
       "Both sides count realized sales over " + esc(String(vm.windowDays)) + " days; " +
