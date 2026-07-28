@@ -613,8 +613,14 @@ function buff163Adapter(cookie, defaults) {
         if (info.name !== n) continue;
         if (!(info.ask > 0) || !(info.fxCnyPerUsd > 0)) continue;
         fxs.push(info.fxCnyPerUsd);
+        // `bid` is the SAME public read, converted — goods/info carries the
+        // best standing BUY order alongside the ask and we were already
+        // fetching it. It feeds the venue-book lane (INTEG-1, medium tier):
+        // a bid is committed capital that can be hit, unlike an ask, which
+        // is free to post. No extra request, no new credential.
         quotes[n] = { price: Math.round((info.ask / info.fxCnyPerUsd) * 1e4) / 1e4, t: Date.now(),
           source: "buff163:goods/info", ccyNative: "CNY", priceNative: info.ask,
+          bid: info.bid > 0 ? Math.round((info.bid / info.fxCnyPerUsd) * 1e4) / 1e4 : null,
           bidNative: info.bid, qty: info.sellNum, bidQty: info.buyNum,
           fxCnyPerUsd: Math.round(info.fxCnyPerUsd * 1e4) / 1e4 };
       }

@@ -459,6 +459,14 @@
       evidence: "third-venue ASKS (TM Market / Waxpeer / BUFF sell_min_price) — quoted level, not executed trade",
       costToFake: "zero — a listing is free to post, so an attacker pumping steam can post matching asks at no cost",
       asymmetry: "divergence from an ask venue is evidence and still flags at full strength; AGREEMENT is not counted as corroboration" },
+    "venue-book": { strength: "medium", counts: true,
+      evidence: "standing BIDS on a third venue (BUFF163 buy_max_price) — independent capital offering to buy near the mark",
+      costToFake: "no fee to post, but the bid is real money exposed to being hit — and it sits on a venue the attacker "
+        + "does not control, in another currency and another jurisdiction from the mark being defended",
+      why: "same tier as the book lane and for the same reason, but the capital is INDEPENDENT: steam's order book and "
+        + "steam's price are one venue, so whoever can wash the mark owns both sides of that test",
+      provisional: "thresholds are NOT yet measured (the venue lane's ask distribution is not a bid distribution and "
+        + "coverage is too thin to fit one) — set wide, so the lane corroborates now and flags only gross divergence" },
     "art-evidence": { strength: "strong", counts: true,
       evidence: "the count of REALIZED sales behind an appraisal mark (skinport 30d sale count)",
       costToFake: "skinport's 12% fee per fabricated sale, on an item priced in the thousands" },
@@ -530,6 +538,22 @@
     // single-name divergence is published the day it appears.
     venueDevWatch: 0.25, venueDevAlert: 0.5, venueUniqueMult: 1.6,
     venueMinQuotes: 5, venueMaxAgeH: 48,
+    // venue-book lane (third-venue standing BIDS). Deliberately NOT copied
+    // from the venue lane's ask thresholds: a bid book thins out for honest
+    // reasons an ask book does not, so the ask distribution is not evidence
+    // about this one, and coverage (6 mapped BUFF ids) is far too thin to fit
+    // a distribution of its own. PROVISIONAL and wide — the lane's job today
+    // is to CORROBORATE (independent capital stands near the mark) and to
+    // catch only gross divergence. Tighten when the readings accrue, and
+    // publish the measurement the way the volume lane did.
+    //   vbookMinOrders 3 — one buy order is a person, not a book.
+    //   CASE-ONLY, exactly like the book lane and for the reason that lane
+    //   learned live on 2026-07-26: buy orders on unique items target
+    //   specific floats/patterns and sit legitimately far from a bucketed
+    //   steam median (a $42 Redline mark vs a $197 variant bid). Six false
+    //   alerts bought that rule; it is not being re-learned here.
+    vbookDevWatch: 0.35, vbookDevAlert: 0.6, vbookProvisional: true,
+    vbookMinQuotes: 5, vbookMinOrders: 3, vbookMaxAgeH: 48,
   };
   function medianOf(vals) {
     if (!vals.length) return null;
@@ -782,6 +806,79 @@
       venueReport.push(row);
     }
 
+    // ── venue-book lane: third-venue standing BIDS (medium tier) ───────────
+    // The venue lane above reads ASKS, which cost nothing to post and so buy
+    // no corroboration. The SAME public read carries the best standing BUY
+    // order, and a bid is a different animal: it is money offered, exposed to
+    // being hit. That earns the medium tier — the same tier as the steam book
+    // lane, with one property the steam book lane cannot have: the capital is
+    // INDEPENDENT of the venue being checked. Steam's order book and steam's
+    // price are one venue, so an attacker who can wash the mark can post the
+    // supporting bids too. A BUFF bid is somebody else's yuan.
+    //
+    // MEDIAN-RELATIVE, like the venue lane and for the same reason: BUFF sits
+    // at a structural discount to steam that moves with FX and sentiment, so
+    // a level test would flag the whole market whenever the discount shifted.
+    // The gate is each item's bid/mark ratio against the DAY'S median ratio.
+    // CASE-ONLY, like the book lane — buy orders on unique items target
+    // specific floats and patterns and sit legitimately far from a bucketed
+    // steam median (the 2026-07-26 lesson: a $42 Redline mark against a $197
+    // variant bid, six false alerts). Thresholds are PROVISIONAL and wide.
+    const vbEligible = (items || []).filter((it) => it.tier !== "art" && it.cat === "case" && it.steamPrice > 0);
+    for (const it of vbEligible) laneOf("venue-book").eligible.add(it.name);
+    const vbReport = [];
+    for (const v of vRoster) {
+      const row = { id: v.id, label: v.label || v.id, status: "unavailable",
+        strength: R.lanes["venue-book"].strength, counts: R.lanes["venue-book"].counts,
+        provisional: !!R.vbookProvisional,
+        checked: "0/" + vbEligible.length, corroborated: null, medianRatio: null,
+        watch: 0, alert: 0, reason: v.ok ? null : (v.reason || "venue unavailable") };
+      if (!v.ok) { vbReport.push(row); continue; }
+      const pairs = [];
+      for (const it of vbEligible) {
+        const q = it.venues ? it.venues[v.id] : null;
+        // a venue that publishes no bid is not a failure of this lane — it
+        // simply is not a bid venue. Absence is coverage, never agreement.
+        if (!q || !(q.bid > 0)) continue;
+        if (now && q.t != null && now - q.t > R.vbookMaxAgeH * 3600000) continue;
+        // one buy order is a person, not a book
+        if (q.bidQty != null && q.bidQty < R.vbookMinOrders) continue;
+        pairs.push({ it: it, q: q, lr: Math.log(q.bid / it.steamPrice) });
+      }
+      row.checked = pairs.length + "/" + vbEligible.length;
+      if (pairs.length < R.vbookMinQuotes) {
+        row.status = pairs.length ? "insufficient" : "no-bids";
+        row.reason = row.reason || (pairs.length + " fresh bid books, below vbookMinQuotes "
+          + R.vbookMinQuotes + " — coverage published, nothing corroborated, no flags raised");
+        vbReport.push(row);
+        continue;
+      }
+      row.status = "ok";
+      const vbMed = medianOf(pairs.map((p) => p.lr));
+      row.medianRatio = r3(Math.exp(vbMed));
+      let diverged = 0;
+      for (const p of pairs) {
+        const e = p.lr - vbMed;
+        if (Math.abs(e) < R.vbookDevWatch) {
+          // corroborated: independent capital stands where the mark says it should
+          laneOf("venue-book").corroborated.add(p.it.name);
+          continue;
+        }
+        const sev = Math.abs(e) >= R.vbookDevAlert ? "alert" : "watch";
+        if (sev === "alert") row.alert++; else row.watch++;
+        diverged++;
+        raise({ name: p.it.name, lane: "venue-book", venue: v.id, severity: sev,
+          dev: r3(e), ratio: r3(Math.exp(p.lr)), venueMedianRatio: row.medianRatio,
+          steamPrice: p.it.steamPrice, venueBid: p.q.bid, bidOrders: p.q.bidQty,
+          detail: (e < 0 ? "bid support fell away under the mark" : "bid support stands unusually high under the mark")
+            + " on " + (v.label || v.id) + " (best bid " + p.q.bid + " vs steam " + p.it.steamPrice
+            + " = " + r3(Math.exp(p.lr)) + "×, venue median " + row.medianRatio + "×, "
+            + (p.q.bidQty != null ? p.q.bidQty + " standing buy orders" : "order count unknown") + ")" });
+      }
+      row.corroborated = (pairs.length - diverged) + "/" + pairs.length;
+      vbReport.push(row);
+    }
+
     // ── coverage BY EVIDENCE TIER ──────────────────────────────────────────
     // The whole point of the 2026-07-27 revision: never add weak agreement to
     // strong agreement as one number. Each tier reports the DISTINCT marks its
@@ -817,7 +914,7 @@
     };
     return {
       version: R.version, revision: R.revision, t: now, rules: R,
-      flags: flags, venues: venueReport, volume: volReport,
+      flags: flags, venues: venueReport, venueBook: vbReport, volume: volReport,
       summary: {
         itemsAssessed: (items || []).length,
         // per-lane strings (unchanged keys — the home rail and older readers
@@ -825,6 +922,7 @@
         ratioCorroborated: cnt("ratio"),
         volumeCorroborated: cnt("volume"),
         bookCorroborated: cnt("book"),
+        venueBookCorroborated: cnt("venue-book"),
         steamFresh: steamFresh + "/" + steamExpected,
         artEvidenced: cnt("art-evidence"),
         // WEAK tier: how many marks a third venue was gated against, and how

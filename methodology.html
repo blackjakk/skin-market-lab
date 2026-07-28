@@ -276,6 +276,23 @@
       is <i>derived</i> from Steam is disqualified — BitSkins measured a 1.000 median ratio to our own
       mark and was rejected, since it would have agreed by construction and inflated coverage with a
       tautology.</td></tr>
+    <tr><td><b>venue-book</b></td><td><b>medium</b><br>standing bids on a venue the attacker does not
+      control — no fee to post, but money exposed to being hit</td><td>the Steam mark against
+      <b>Buff163's standing buy orders</b>. This is the same public read as the venue lane above, using
+      the half of it that is not free: <code>goods/info</code> carries the best standing <i>bid</i>
+      beside the ask. The distinction that earns it a tier: Steam's own order book and Steam's own
+      price are <i>one venue</i>, so whoever can wash the mark can post its supporting bids too — a
+      Buff bid is somebody else's capital, in another currency and another jurisdiction.</td><td>an
+      item's bid÷mark ratio departs the day's <b>cross-sectional median</b> ratio by &gt;0.35 log
+      (watch) / &gt;0.6 (alert) — median-relative for the same reason as the venue lane (Buff bids sit
+      near 0.61× the Steam mark and that gap moves with FX). <b>Commodity (case) items only</b>,
+      inheriting the book lane's hard-won rule rather than re-learning it. Names with fewer than 3
+      standing buy orders are excluded (one order is a person, not a book), and fewer than 5 gated
+      names publishes coverage without flags. <b>Thresholds here are provisional and deliberately
+      wide</b> — the venue lane's <i>ask</i> distribution is not evidence about a <i>bid</i>
+      distribution, and Buff coverage (6 mapped ids) is far too thin to fit one. Unlike the volume
+      lane, these numbers were not measured; the lane's job today is to corroborate, and to catch only
+      gross divergence. Every run publishes <code>provisional:true</code> until that is fixed.</td></tr>
     <tr><td><b>art-evidence</b></td><td><b>strong</b><br>counts of realized sales, each one a paid
       12% fee</td><td>the sale count behind each appraisal mark</td><td>fewer than 3
       realized sales in the 30-day marking window — thin evidence is published, not hidden.</td></tr>
@@ -621,6 +638,16 @@ for(const [n,f] of Object.entries(S.computeAll(m.series)))
           " / volume response " + esc(g.volume.medianResponse) : "") +
         (g.volume.reason ? " · " + esc(g.volume.reason) : "") + "</p>";
     }
+    // venue-book: the one lane whose thresholds are NOT yet measured. Say so
+    // on the surface, every run, rather than letting it read like the others.
+    (g.venueBook || []).forEach(function (r) {
+      head += "<p class='muted'>venue-book lane (" + esc(r.label) + ", medium tier): " + esc(r.status) +
+        " · checked " + esc(r.checked) +
+        (r.corroborated ? " · corroborated " + esc(r.corroborated) : "") +
+        (r.medianRatio != null ? " · median bid/mark " + esc(r.medianRatio) + "×" : "") +
+        (r.reason ? " · " + esc(r.reason) : "") +
+        (r.provisional ? " · <b>provisional thresholds</b> (wide, not yet measured)" : "") + "</p>";
+    });
     var fl = g.flags || [];
     if (!fl.length) return head + "<p>" + DS.badge({ label: "✓ NO FLAGS", tone: "good" }) +
       " — every mark that had corroborating evidence this run agreed with it.</p>";

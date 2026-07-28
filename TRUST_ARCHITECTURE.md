@@ -208,6 +208,42 @@ until more ids accrue or a cookie lands. The CN PREMIUM metric designed
 here is not built: with Buff coverage thin it would be a headline number
 resting on a handful of items.
 
+### 4b-ii · The venue-book lane — independent capital (shipped 2026-07-28)
+
+The third-venue lane above reads asks, which is why its agreement counts for
+nothing. The same public Buff163 payload carries the best standing **bid**,
+and that is a different kind of evidence: money offered, exposed to being
+hit. Medium tier, and it counts.
+
+The reason it is worth having alongside Steam's own book lane is
+independence, not depth. Steam's order book and Steam's price are **one
+venue** — an attacker who can wash a mark can post the bids that appear to
+support it. A Buff bid is somebody else's yuan, on a platform the attacker
+does not control, in another currency and another jurisdiction. That is a
+genuinely separate thing to have to corrupt.
+
+Median-relative (Buff bids measure ~0.61× the Steam mark against ~0.66× for
+asks, and the gap moves with FX), case-only — inheriting the book lane's
+2026-07-26 lesson rather than re-learning it — and gated at three standing
+orders, because one buy order is a person, not a book.
+
+**Its thresholds are provisional and it says so on every run.** The venue
+lane's *ask* distribution is not evidence about a *bid* distribution, and
+six mapped Buff ids is nowhere near enough to fit one. They are set wide so
+the lane corroborates today and catches only gross divergence;
+`provisional:true` rides in every published row until they are measured the
+way the volume lane's were. An unmeasured threshold presented as a measured
+one would be exactly the kind of false precision this document exists to
+prevent.
+
+**What Buff cannot do**, probed live 2026-07-28 — `goods/bill_order`
+(realized transactions), `price_history/buff`, and `market/goods` (both the
+search and the bare listing) all answer *"Login Required"* logged out. So
+Buff can never join the venue-mix floor below, which needs realized sales,
+and there is no credential-free way to enumerate goods ids. Coverage is
+therefore the binding constraint on this lane, not the method: six of
+sixty-four names, widened by hand or by supplying a session cookie.
+
 ### 4c · Venue mix — sizing what we cannot see (shipped 2026-07-27)
 
 Every lane above corroborates a mark. This one sizes the **blind spot**: how

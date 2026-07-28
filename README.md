@@ -223,8 +223,10 @@ trades can't cheaply fake); art marks publish their sale-count evidence,
 and venue loss raises a loud staleness alert. **Evidence is ranked, not
 counted**: each lane publishes a strength set by what it would cost to
 fake — *strong* for realized sales (faking one burns the venue fee),
-*medium* for standing bids, *weak* for third-venue asks, which are free to
-post. So divergence from an ask venue still flags at full strength while
+*medium* for standing bids (Steam's own order book, and Buff163's standing
+buy orders — the latter being capital the attacker doesn't control, in
+another currency and jurisdiction), *weak* for third-venue asks, which are
+free to post. So divergence from an ask venue still flags at full strength while
 its agreement is published but **not** counted as corroboration, and
 coverage is reported per tier instead of one number. (That makes these
 figures smaller than they read before — deliberately.) Divergences are

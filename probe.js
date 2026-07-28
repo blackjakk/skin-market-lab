@@ -919,9 +919,18 @@ async function fixtureTransport(url, headers) {
       "coverage is share of VALUE with usable history (311/400 = 77.8%), 2 of 4 names — no interpolation for the rest");
 
     // (4) alpha vs the Skindex over that same span: inventory +48.1%
-    // (311/210), index 100 → 110 = +10.0% ⇒ alpha +38.1
+    // (311/210), index 100 → 110 = +10.0% ⇒ alpha +38.1.
+    // spanDays is DERIVED from the fixture's own two marked days, never
+    // pinned to a literal: the fixture is built relative to "now", so the
+    // gap between the founding mark and today grows by one every midnight —
+    // a hardcoded 2 goes red on the next date rollover and says nothing
+    // about the benchmark. (Same fixture-derives-its-own-expectation rule
+    // the accrual pins learned on 2026-07-27.)
     const iB = iR1.body.benchmark;
-    ok(iB && iB.invPct === 48.1 && iB.idxPct === 10 && iB.alpha === 38.1 && iB.spanDays === 2,
+    const iSpan = Math.round((Date.parse(iRec.days[iRec.days.length - 1].day + "T00:00:00Z")
+      - Date.parse(iRec.days[0].day + "T00:00:00Z")) / 86400000);
+    ok(iB && iB.invPct === 48.1 && iB.idxPct === 10 && iB.alpha === 38.1
+      && iB.spanDays === iSpan && iB.from === iRec.days[0].day,
       "benchmark: inventory +48.1% vs Skindex +10.0% over the reconstruction span → alpha +38.1");
 
     // (5) snapshot series: appended beside the 20-min-old line, then deduped
@@ -2318,10 +2327,13 @@ async function fixtureTransport(url, headers) {
       && evCov.summary.corroboration.strong.byLane.ratio === "0/6"
       && evCov.summary.corroboration.strong.byLane.volume === "6/6"
       && evCov.summary.corroboration.medium.items === "0/6"
-      && evCov.summary.corroboration.medium.lanes.join(",") === "book"
+      // both MEDIUM lanes are standing bids: steam's own book, and a third
+      // venue's book. Neither corroborates here (no book readings, no bids).
+      && evCov.summary.corroboration.medium.lanes.join(",") === "book,venue-book"
+      && evCov.summary.corroboration.medium.byLane["venue-book"] === "0/6"
       && evCov.summary.corroboration.weak.lanes.join(",") === "venue"
       && evCov.summary.ratioCorroborated === "0/6" && evCov.summary.volumeCorroborated === "6/6"
-      && evCov.summary.bookCorroborated === "0/6"
+      && evCov.summary.bookCorroborated === "0/6" && evCov.summary.venueBookCorroborated === "0/6"
       && /never summed/.test(evCov.summary.corroboration.note),
       "coverage is reported BY TIER: strong 6/6 (volume only — the ratio lane has no cash comparable here), medium 0/6, weak published separately and uncounted — no single undifferentiated corroboration count exists any more");
 
@@ -2412,6 +2424,114 @@ async function fixtureTransport(url, headers) {
     fs.rmSync(D_ROOT, { recursive: true, force: true });
   }
   // ═══ END EVIDENCE-TIER + VOLUME-LANE PINS ════════════════════════════════
+
+  // ── venue-book lane (INTEG-1 third-venue standing BIDS, medium tier) ─────
+  // The venue lane reads asks (weak, agreement uncounted). This lane reads
+  // the BID from the same public payload — money offered, exposed to being
+  // hit, on a venue the attacker does not control. Arithmetic below, log e:
+  //   a clean bid is 0.60 × the steam mark; ln(0.60) = −0.510826
+  //   a bid of 4.0 against a mark of 10 is 0.40; ln(0.40/0.60) = −0.405465
+  //     → watch for a case (≥0.35), under the 0.6 alert step
+  //   a bid of 3.0 against 10 is 0.30; ln(0.30/0.60) = −0.693147 → alert
+  console.log("— venue-book lane (INTEG-1 third-venue standing bids) —");
+  {
+    const BNOW = Date.UTC(2026, 6, 20, 12);
+    const bItem = (name, cat, venues) => ({ name: name, cat: cat, tier: null, steamPrice: 10,
+      quoteT: BNOW, salesT: BNOW, sales30: 20, ratioDays: [], book: null, venues: venues || null });
+    // an ask-only venue quote (no bid) vs one carrying a bid + order count
+    const bq = (bid, over) => ({ vx: Object.assign({ price: 6.5, t: BNOW, bid: bid, bidQty: 40 }, over || {}) });
+    const bRoster = [{ id: "vx", label: "VX Market", kind: "ask", ccy: "USD", ok: true, reason: null }];
+    const bLane = (items) => S.assessIntegrity(items, { now: BNOW, venues: bRoster });
+    const bFlags = (r) => r.flags.filter((f) => f.lane === "venue-book");
+    const bRow = (r) => (r.venueBook || []).find((x) => x.id === "vx");
+    const six = (mk) => ["A", "B", "C", "D", "E", "F"].map((n, i) => mk(n + " Case", i));
+
+    // 1. a venue-wide bid DISCOUNT is not manipulation — BUFF bids sit well
+    //    under the steam mark and that gap moves with FX. All six at 0.60×
+    //    must corroborate and flag nothing.
+    const bWide = bLane(six((n) => bItem(n, "case", bq(6))));
+    ok(bFlags(bWide).length === 0 && bRow(bWide).status === "ok"
+      && bRow(bWide).medianRatio === 0.6 && bRow(bWide).checked === "6/6"
+      && bRow(bWide).corroborated === "6/6"
+      && bWide.summary.venueBookCorroborated === "6/6",
+      "venue-book: a venue-wide bid discount (every mark bid at 0.60×) corroborates all six and flags none — the gate is deviation from the DAY'S median bid ratio, not a level");
+
+    // 2. ONE mark whose bid support fell away is the signal
+    const bOne = bLane(six((n, i) => bItem(n, "case", bq(i === 0 ? 4 : 6))));
+    const bF1 = bFlags(bOne);
+    ok(bF1.length === 1 && bF1[0].name === "A Case" && bF1[0].severity === "watch"
+      && bF1[0].strength === "medium" && near(bF1[0].dev, -0.405, 0.002)
+      && bRow(bOne).corroborated === "5/6"
+      && /bid support fell away/.test(bF1[0].detail),
+      "venue-book: one mark bid at 0.40× against a 0.60× market flags watch (dev −0.405) and is the ONLY name not corroborated");
+    const bAlert = bLane(six((n, i) => bItem(n, "case", bq(i === 0 ? 3 : 6))));
+    ok(bFlags(bAlert).length === 1 && bFlags(bAlert)[0].severity === "alert"
+      && near(bFlags(bAlert)[0].dev, -0.693, 0.002),
+      "venue-book: bid support at 0.30× against a 0.60× market escalates to alert (dev −0.693)");
+
+    // 3. a venue that publishes NO bid costs coverage and nothing else —
+    //    absence is never agreement, and it is not a failure of the lane
+    const bNone = bLane(six((n) => bItem(n, "case", { vx: { price: 6.5, t: BNOW } })));
+    ok(bFlags(bNone).length === 0 && bRow(bNone).status === "no-bids"
+      && bRow(bNone).checked === "0/6" && bRow(bNone).corroborated === null
+      && bNone.summary.venueBookCorroborated === "0/6",
+      "venue-book: an ask-only venue publishes no bids — coverage 0/6, corroborated null (never \"0/0 agreed\"), no flags");
+
+    // 4. thin books and stale reads are dropped, not carried
+    const bThin = bLane(six((n) => bItem(n, "case", bq(6, { bidQty: 2 }))));
+    ok(bRow(bThin).checked === "0/6" && bRow(bThin).status === "no-bids"
+      && /vbookMinQuotes/.test(bRow(bThin).reason || ""),
+      "venue-book: a book of fewer than 3 standing orders is one person, not a book — excluded, and the coverage shortfall is published");
+    const bStale = bLane(six((n) => bItem(n, "case", bq(6, { t: BNOW - 72 * 3600000 }))));
+    ok(bRow(bStale).checked === "0/6" && bFlags(bStale).length === 0,
+      "venue-book: a reading older than vbookMaxAgeH is dropped — a stale bid that happens to agree is not corroboration");
+
+    // 5. CASE-ONLY, inheriting the book lane's rule rather than re-learning
+    //    it: buy orders on unique items target specific floats and sit
+    //    legitimately far from a bucketed steam median.
+    const bUniq = bLane(six((n, i) => bItem(n.replace(" Case", " Skin"), "skin", bq(i === 0 ? 4 : 6))));
+    ok(bFlags(bUniq).length === 0 && bRow(bUniq).checked === "0/0"
+      && bUniq.summary.venueBookCorroborated === "0/0",
+      "venue-book: unique items are outside the lane entirely (the 2026-07-26 book-lane lesson: a $42 mark vs a $197 variant bid), so they are never eligible — the denominator is 0, not 6");
+
+    // 6. under vbookMinQuotes the lane publishes coverage and raises nothing
+    const bFew = bLane([bItem("A Case", "case", bq(6)), bItem("B Case", "case", bq(2))]);
+    ok(bFlags(bFew).length === 0 && bRow(bFew).status === "insufficient"
+      && bRow(bFew).checked === "2/2" && bRow(bFew).corroborated === null,
+      "venue-book: fewer than 5 gated names cannot support a cross-sectional median — coverage published, nothing corroborated, no flags");
+
+    // 7. the tiering contract: this lane COUNTS (unlike the ask lane) and
+    //    lands in the medium tier beside steam's own book, never summed into
+    //    the strong one.
+    const L = S.INTEG_RULES.lanes["venue-book"];
+    ok(L.strength === "medium" && L.counts === true && /independent/i.test(L.why)
+      && S.INTEG_RULES.vbookProvisional === true && bRow(bWide).provisional === true
+      && bWide.summary.corroboration.medium.lanes.indexOf("venue-book") >= 0
+      && bWide.summary.corroboration.medium.byLane["venue-book"] === "6/6"
+      && bWide.summary.corroboration.strong.lanes.indexOf("venue-book") < 0,
+      "venue-book is medium tier and COUNTS — unlike the ask lane — and every row publishes provisional:true while its thresholds are unmeasured");
+
+    // 8. the bid is derived from the SAME public read, not a new request.
+    //    Self-contained transport — this block runs after several others have
+    //    swapped the module transport, so it installs its own rather than
+    //    inheriting whatever was left behind.
+    let bReads = 0;
+    M.setTransport(async (url) => {
+      if (url.indexOf("buff.163.com/api/market/goods/info") < 0) return { status: 404, body: "" };
+      bReads++;
+      return { status: 200, body: JSON.stringify({ code: "OK", data: { id: 4001,
+        market_hash_name: "Fracture Case", sell_min_price: "104.65", buy_max_price: "100",
+        sell_num: 900, buy_num: 300,
+        goods_info: { steam_price: "14.95", steam_price_cny: "104.65" } } }) };
+    });
+    const bAd = M.venueAdapters({ env: {}, buff: { ids: { "Fracture Case": 4001 } } })
+      .find((a) => a.id === "buff163");
+    const bGot = await bAd.quotes(["Fracture Case"], {});
+    const bQ = bGot.quotes["Fracture Case"];
+    ok(bQ && bQ.bid === Math.round((100 / 7) * 1e4) / 1e4 && bQ.bidNative === 100
+      && bQ.price === 14.95 && bQ.bidQty === 300 && bReads === 1,
+      "the BUFF adapter publishes the standing BID converted at the same FX as the ask (¥100 ÷ 7 = $14.2857) — from ONE public read, no extra request and no credential");
+  }
 
   M.setTransport(null);
   fs.rmSync(DATA, { recursive: true, force: true });

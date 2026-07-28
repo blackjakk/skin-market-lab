@@ -126,6 +126,37 @@ THIRD-VENUE LANE (INTEG-1 `venue`, 2026-07-27, WEAK tier — see above)
 - Known limits: all three publish ASKS not realized sales (hence weak tier);
   TM Market and Waxpeer correlate strongly (~1.3 independent reads, not 3).
 
+VENUE-BOOK LANE (INTEG-1 `venue-book`, 2026-07-28, MEDIUM tier — it COUNTS):
+- BUFF's `goods/info` carries `buy_max_price` beside the ask, and we were
+  already fetching it. A bid is money exposed to being hit, so it earns the
+  medium tier — with a property steam's own book lane cannot have: the
+  capital is INDEPENDENT. Steam's order book and steam's price are one
+  venue, so whoever can wash the mark can post its supporting bids.
+- ZERO new requests, zero new credentials — same public read, second half.
+- MEDIAN-RELATIVE (BUFF bids measured ~0.61× the steam mark, ask ~0.66×;
+  the gap moves with FX) and CASE-ONLY, inheriting the book lane's rule
+  rather than re-learning it (buy orders on uniques target specific floats).
+  `vbookMinOrders` 3 — one buy order is a person, not a book.
+- THRESHOLDS ARE PROVISIONAL (`vbookProvisional: true`, published in every
+  row and on the methodology page). The venue lane's ASK distribution is not
+  evidence about a BID distribution, and 6 mapped ids is far too thin to fit
+  one. Set wide (watch .35 / alert .6) so the lane corroborates now and
+  catches only gross divergence. Measure and tighten the way the volume lane
+  did — do NOT quietly copy the ask thresholds across.
+- WHAT BUFF CANNOT DO (probed live 2026-07-28, all returned "Login
+  Required"): `goods/bill_order` (realized transactions), `price_history/
+  buff`, and `market/goods` — both the search AND the bare listing. So BUFF
+  can never join the VENUE MIX floor (that needs realized sales), and there
+  is no credential-free way to ENUMERATE ids. Public and working:
+  `goods/info`, `goods/sell_order`, `goods/buy_order` (depth, 10/page;
+  `frozen_amount` is exactly price×num, a derived field — do NOT cite it as
+  escrow evidence).
+- COVERAGE IS THE BINDING CONSTRAINT: 6 of 64 ids mapped. Widen by hand
+  (the id is in the public URL `buff.163.com/goods/<id>`; every read
+  re-verifies BUFF's own market_hash_name, so a wrong id costs coverage and
+  can never corroborate the wrong item) or set BUFF_COOKIE and let the
+  collector discover them.
+
 VENUE MIX (`analytics.venueMix`, 2026-07-27) — how much trade is OFF Steam:
 - Steam sold-per-day (deep committed pricehistory) vs an off-Steam venue's
   REALIZED-sale counts over the same trailing 30 days, per item + folded to
