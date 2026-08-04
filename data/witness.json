@@ -1,5 +1,5 @@
 {
- "t": 1785788247261,
+ "t": 1785815629166,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,45 +18,45 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Operation Breakout Weapon Case",
-    "primary": 12.18,
-    "witnessed": 12.17,
-    "devLog": -0.001,
-    "ok": true
-   },
-   {
     "name": "Operation Vanguard Weapon Case",
-    "primary": 8.4,
-    "witnessed": 8.41,
-    "devLog": 0.001,
+    "primary": 8.35,
+    "witnessed": 8.45,
+    "devLog": 0.012,
     "ok": true
    },
    {
     "name": "Chroma Case",
-    "primary": 6.25,
-    "witnessed": 7.04,
-    "devLog": 0.119,
+    "primary": 7.21,
+    "witnessed": 7.24,
+    "devLog": 0.004,
     "ok": true
    },
    {
     "name": "Chroma 2 Case",
-    "primary": 4.96,
-    "witnessed": 5.44,
-    "devLog": 0.092,
+    "primary": 5.86,
+    "witnessed": 5.93,
+    "devLog": 0.012,
     "ok": true
    },
    {
     "name": "Chroma 3 Case",
-    "primary": 5.11,
-    "witnessed": 5.11,
-    "devLog": 0,
+    "primary": 5.09,
+    "witnessed": 5.15,
+    "devLog": 0.012,
     "ok": true
    },
    {
     "name": "Falchion Case",
-    "primary": 2.65,
-    "witnessed": 2.61,
-    "devLog": -0.015,
+    "primary": 2.63,
+    "witnessed": 2.64,
+    "devLog": 0.004,
+    "ok": true
+   },
+   {
+    "name": "Shadow Case",
+    "primary": 2.83,
+    "witnessed": 2.82,
+    "devLog": -0.004,
     "ok": true
    }
   ]
