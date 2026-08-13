@@ -1,5 +1,5 @@
 {
- "t": 1786630001284,
+ "t": 1786650196631,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,23 +18,16 @@
   "methodology": true,
   "observations": [
    {
-    "name": "AWP | Wildfire (Field-Tested)",
-    "primary": 59.8,
-    "witnessed": 59.8,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "M4A1-S | Hyper Beast (Field-Tested)",
-    "primary": 175.11,
-    "witnessed": 175.11,
+    "primary": 184.78,
+    "witnessed": 184.78,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "USP-S | Kill Confirmed (Field-Tested)",
-    "primary": 95.44,
-    "witnessed": 95.44,
+    "primary": 94.61,
+    "witnessed": 94.61,
     "devLog": 0,
     "ok": true
    },
@@ -46,15 +39,22 @@
    },
    {
     "name": "★ M9 Bayonet | Doppler (Factory New)",
-    "primary": 1302.74,
-    "witnessed": 1302.74,
+    "primary": 1483.92,
+    "witnessed": 1483.92,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "★ Bayonet | Tiger Tooth (Factory New)",
-    "primary": 409.98,
-    "witnessed": 409.98,
+    "primary": 409.33,
+    "witnessed": 409.33,
+    "devLog": 0,
+    "ok": true
+   },
+   {
+    "name": "Operation Bravo Case",
+    "primary": 82.68,
+    "witnessed": 82.68,
     "devLog": 0,
     "ok": true
    }
