@@ -1,5 +1,5 @@
 {
- "t": 1786590788610,
+ "t": 1786608238265,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,37 +18,30 @@
   "methodology": true,
   "observations": [
    {
-    "name": "AK-47 | Vulcan (Field-Tested)",
-    "primary": 354.95,
-    "witnessed": 354.95,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "AK-47 | Slate (Factory New)",
-    "primary": 22.37,
-    "witnessed": 22.37,
+    "primary": 22.01,
+    "witnessed": 22.01,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "AWP | Wildfire (Field-Tested)",
-    "primary": 60.06,
-    "witnessed": 60,
-    "devLog": -0.001,
+    "primary": 61.98,
+    "witnessed": 61.98,
+    "devLog": 0,
     "ok": true
    },
    {
     "name": "M4A1-S | Hyper Beast (Field-Tested)",
-    "primary": 159.85,
+    "primary": 172.07,
     "witnessed": 172.07,
-    "devLog": 0.074,
+    "devLog": 0,
     "ok": true
    },
    {
     "name": "USP-S | Kill Confirmed (Field-Tested)",
-    "primary": 97.88,
-    "witnessed": 97.88,
+    "primary": 93.52,
+    "witnessed": 93.52,
     "devLog": 0,
     "ok": true
    },
@@ -57,6 +50,13 @@
     "primary": 1800.01,
     "witnessed": null,
     "ok": null
+   },
+   {
+    "name": "★ M9 Bayonet | Doppler (Factory New)",
+    "primary": 1302.74,
+    "witnessed": 1302.74,
+    "devLog": 0,
+    "ok": true
    }
   ]
  },
