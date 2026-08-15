@@ -1,5 +1,5 @@
 {
- "t": 1786799798837,
+ "t": 1786820485702,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,45 +18,45 @@
   "methodology": true,
   "observations": [
    {
-    "name": "CS:GO Weapon Case 2",
-    "primary": 35.51,
-    "witnessed": 32.73,
-    "devLog": -0.082,
-    "ok": true
-   },
-   {
     "name": "CS:GO Weapon Case 3",
-    "primary": 21.91,
-    "witnessed": 21.97,
-    "devLog": 0.003,
+    "primary": 21.98,
+    "witnessed": 21.76,
+    "devLog": -0.01,
     "ok": true
    },
    {
     "name": "eSports 2013 Case",
     "primary": 73.11,
-    "witnessed": 73.11,
-    "devLog": 0,
+    "witnessed": 66.25,
+    "devLog": -0.099,
     "ok": true
    },
    {
     "name": "eSports 2013 Winter Case",
-    "primary": 21.17,
-    "witnessed": 20.91,
-    "devLog": -0.012,
+    "primary": 20.81,
+    "witnessed": 21.33,
+    "devLog": 0.025,
     "ok": true
    },
    {
     "name": "eSports 2014 Summer Case",
-    "primary": 19.14,
-    "witnessed": 19.65,
-    "devLog": 0.026,
+    "primary": 19.12,
+    "witnessed": 19.51,
+    "devLog": 0.02,
     "ok": true
    },
    {
     "name": "Winter Offensive Weapon Case",
-    "primary": 15.11,
-    "witnessed": 13.96,
-    "devLog": -0.079,
+    "primary": 14.81,
+    "witnessed": 15.11,
+    "devLog": 0.02,
+    "ok": true
+   },
+   {
+    "name": "Operation Phoenix Weapon Case",
+    "primary": 5.95,
+    "witnessed": 5.83,
+    "devLog": -0.02,
     "ok": true
    }
   ]
