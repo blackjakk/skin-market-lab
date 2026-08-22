@@ -1,5 +1,5 @@
 {
- "t": 1787364279853,
+ "t": 1787383079406,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,44 +18,44 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Prisma Case",
-    "primary": 1.99,
-    "witnessed": 1.99,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Prisma 2 Case",
-    "primary": 1.92,
-    "witnessed": 1.92,
+    "primary": 1.93,
+    "witnessed": 1.93,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "CS20 Case",
-    "primary": 1.52,
-    "witnessed": 1.52,
-    "devLog": 0,
+    "primary": 1.51,
+    "witnessed": 1.5,
+    "devLog": -0.007,
     "ok": true
    },
    {
     "name": "Shattered Web Case",
-    "primary": 6.96,
-    "witnessed": 6.96,
-    "devLog": 0,
+    "primary": 7.09,
+    "witnessed": 7.1,
+    "devLog": 0.001,
     "ok": true
    },
    {
     "name": "Fracture Case",
-    "primary": 0.77,
-    "witnessed": 0.77,
+    "primary": 0.76,
+    "witnessed": 0.76,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "Operation Broken Fang Case",
-    "primary": 9.19,
-    "witnessed": 9.19,
+    "primary": 9.23,
+    "witnessed": 9.22,
+    "devLog": -0.001,
+    "ok": true
+   },
+   {
+    "name": "Snakebite Case",
+    "primary": 0.68,
+    "witnessed": 0.68,
     "devLog": 0,
     "ok": true
    }
