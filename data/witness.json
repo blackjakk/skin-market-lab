@@ -1,11 +1,11 @@
 {
- "t": 1788727774979,
+ "t": 1788757998027,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
   "series": {
-   "publishedDays": 44,
-   "rederivedDays": 44,
+   "publishedDays": 45,
+   "rederivedDays": 45,
    "mismatchedDays": 0
   },
   "weightsMatch": true,
@@ -18,30 +18,23 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Dreams & Nightmares Case",
-    "primary": 1.65,
-    "witnessed": 1.65,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Recoil Case",
-    "primary": 0.41,
-    "witnessed": 0.41,
+    "primary": 0.43,
+    "witnessed": 0.43,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "Revolution Case",
-    "primary": 0.3,
+    "primary": 0.31,
     "witnessed": 0.3,
-    "devLog": 0,
+    "devLog": -0.033,
     "ok": true
    },
    {
     "name": "Anubis Collection Package",
-    "primary": 2.63,
-    "witnessed": 2.63,
+    "primary": 2.64,
+    "witnessed": 2.64,
     "devLog": 0,
     "ok": true
    },
@@ -54,8 +47,15 @@
    },
    {
     "name": "Gallery Case",
-    "primary": 1.08,
-    "witnessed": 1.08,
+    "primary": 1.11,
+    "witnessed": 1.11,
+    "devLog": 0,
+    "ok": true
+   },
+   {
+    "name": "AK-47 | Redline (Field-Tested)",
+    "primary": 32,
+    "witnessed": 32,
     "devLog": 0,
     "ok": true
    }
