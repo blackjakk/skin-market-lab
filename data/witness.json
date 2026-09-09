@@ -1,12 +1,12 @@
 {
- "t": 1788954658276,
+ "t": 1788972788315,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
   "series": {
    "publishedDays": 47,
    "rederivedDays": 47,
-   "mismatchedDays": 0
+   "mismatchedDays": 1
   },
   "weightsMatch": true,
   "fixings": {
@@ -18,31 +18,24 @@
   "methodology": true,
   "observations": [
    {
-    "name": "AK-47 | Asiimov (Field-Tested)",
-    "primary": 53.65,
-    "witnessed": 53.65,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "AK-47 | Vulcan (Field-Tested)",
     "primary": 227.26,
-    "witnessed": 227.26,
-    "devLog": 0,
+    "witnessed": 230.74,
+    "devLog": 0.015,
     "ok": true
    },
    {
     "name": "AK-47 | Slate (Factory New)",
     "primary": 28.78,
-    "witnessed": 28.78,
-    "devLog": 0,
+    "witnessed": 29.06,
+    "devLog": 0.01,
     "ok": true
    },
    {
     "name": "AWP | Wildfire (Field-Tested)",
     "primary": 60,
-    "witnessed": 60,
-    "devLog": 0,
+    "witnessed": 56.72,
+    "devLog": -0.056,
     "ok": true
    },
    {
@@ -55,12 +48,21 @@
    {
     "name": "USP-S | Kill Confirmed (Field-Tested)",
     "primary": 88.76,
-    "witnessed": 88.76,
+    "witnessed": 86.38,
+    "devLog": -0.027,
+    "ok": true
+   },
+   {
+    "name": "★ Karambit | Doppler (Factory New)",
+    "primary": 1649.63,
+    "witnessed": 1649.63,
     "devLog": 0,
     "ok": true
    }
   ]
  },
- "reasons": [],
- "verdict": "ATTESTED"
+ "reasons": [
+  "1 published day(s) do not re-derive from the committed history files"
+ ],
+ "verdict": "MISMATCH"
 }
