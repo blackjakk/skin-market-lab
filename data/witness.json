@@ -1,12 +1,12 @@
 {
- "t": 1788972788315,
+ "t": 1788988246966,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
   "series": {
    "publishedDays": 47,
    "rederivedDays": 47,
-   "mismatchedDays": 1
+   "mismatchedDays": 0
   },
   "weightsMatch": true,
   "fixings": {
@@ -18,39 +18,32 @@
   "methodology": true,
   "observations": [
    {
-    "name": "AK-47 | Vulcan (Field-Tested)",
-    "primary": 227.26,
-    "witnessed": 230.74,
-    "devLog": 0.015,
-    "ok": true
-   },
-   {
     "name": "AK-47 | Slate (Factory New)",
-    "primary": 28.78,
-    "witnessed": 29.06,
-    "devLog": 0.01,
-    "ok": true
+    "primary": 29.06,
+    "witnessed": 19.56,
+    "devLog": -0.396,
+    "ok": false
    },
    {
     "name": "AWP | Wildfire (Field-Tested)",
-    "primary": 60,
-    "witnessed": 56.72,
-    "devLog": -0.056,
+    "primary": 56.72,
+    "witnessed": 56.82,
+    "devLog": 0.002,
     "ok": true
    },
    {
     "name": "M4A1-S | Hyper Beast (Field-Tested)",
     "primary": 160,
-    "witnessed": 160,
-    "devLog": 0,
+    "witnessed": 162.7,
+    "devLog": 0.017,
     "ok": true
    },
    {
     "name": "USP-S | Kill Confirmed (Field-Tested)",
-    "primary": 88.76,
-    "witnessed": 86.38,
-    "devLog": -0.027,
-    "ok": true
+    "primary": 86.38,
+    "witnessed": 100.07,
+    "devLog": 0.147,
+    "ok": false
    },
    {
     "name": "★ Karambit | Doppler (Factory New)",
@@ -58,11 +51,18 @@
     "witnessed": 1649.63,
     "devLog": 0,
     "ok": true
+   },
+   {
+    "name": "★ M9 Bayonet | Doppler (Factory New)",
+    "primary": 2.89,
+    "witnessed": 2.89,
+    "devLog": 0,
+    "ok": true
    }
   ]
  },
  "reasons": [
-  "1 published day(s) do not re-derive from the committed history files"
+  "2 independently sampled prices diverge >12% from the primary's marks"
  ],
  "verdict": "MISMATCH"
 }
