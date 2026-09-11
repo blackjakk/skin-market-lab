@@ -1,11 +1,11 @@
 {
- "t": 1789074719493,
+ "t": 1789103731642,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
   "series": {
-   "publishedDays": 48,
-   "rederivedDays": 48,
+   "publishedDays": 49,
+   "rederivedDays": 49,
    "mismatchedDays": 0
   },
   "weightsMatch": true,
@@ -18,44 +18,45 @@
   "methodology": true,
   "observations": [
    {
-    "name": "★ Karambit | Doppler (Factory New)",
-    "primary": 1870.39,
-    "witnessed": null,
-    "ok": null
-   },
-   {
     "name": "★ M9 Bayonet | Doppler (Factory New)",
-    "primary": 1317.91,
-    "witnessed": 1317.91,
+    "primary": 1349,
+    "witnessed": 1349,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "★ Bayonet | Tiger Tooth (Factory New)",
-    "primary": 388.7,
-    "witnessed": 388.7,
+    "primary": 390.01,
+    "witnessed": 390.01,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "Operation Bravo Case",
-    "primary": 80.71,
-    "witnessed": 80.71,
+    "primary": 81.26,
+    "witnessed": 81.27,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "CS:GO Weapon Case",
-    "primary": 150.21,
-    "witnessed": 150.21,
-    "devLog": 0,
+    "primary": 153.35,
+    "witnessed": 152.45,
+    "devLog": -0.006,
     "ok": true
    },
    {
     "name": "CS:GO Weapon Case 2",
-    "primary": 32.16,
-    "witnessed": 32.16,
-    "devLog": 0,
+    "primary": 33.01,
+    "witnessed": 33.03,
+    "devLog": 0.001,
+    "ok": true
+   },
+   {
+    "name": "CS:GO Weapon Case 3",
+    "primary": 19.16,
+    "witnessed": 19.17,
+    "devLog": 0.001,
     "ok": true
    }
   ]
