@@ -1,12 +1,12 @@
 {
- "t": 1789145106165,
+ "t": 1789161450827,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
   "series": {
    "publishedDays": 49,
    "rederivedDays": 49,
-   "mismatchedDays": 1
+   "mismatchedDays": 0
   },
   "weightsMatch": true,
   "fixings": {
@@ -18,51 +18,49 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Operation Bravo Case",
-    "primary": 81.01,
-    "witnessed": 81.38,
-    "devLog": 0.005,
-    "ok": true
-   },
-   {
     "name": "CS:GO Weapon Case",
-    "primary": 142.64,
-    "witnessed": 148.98,
-    "devLog": 0.043,
+    "primary": 148.25,
+    "witnessed": 151.26,
+    "devLog": 0.02,
     "ok": true
    },
    {
     "name": "CS:GO Weapon Case 2",
-    "primary": 33.16,
-    "witnessed": 32.42,
-    "devLog": -0.023,
+    "primary": 31.76,
+    "witnessed": 31.76,
+    "devLog": 0,
     "ok": true
    },
    {
     "name": "CS:GO Weapon Case 3",
-    "primary": 19.1,
-    "witnessed": 19.03,
-    "devLog": -0.004,
+    "primary": 18.69,
+    "witnessed": 16.95,
+    "devLog": -0.098,
     "ok": true
    },
    {
     "name": "eSports 2013 Case",
-    "primary": 64.36,
+    "primary": 61.84,
     "witnessed": 61.84,
-    "devLog": -0.04,
+    "devLog": 0,
     "ok": true
    },
    {
     "name": "eSports 2013 Winter Case",
-    "primary": 20.03,
-    "witnessed": 19.39,
-    "devLog": -0.032,
+    "primary": 19.6,
+    "witnessed": 19.89,
+    "devLog": 0.015,
+    "ok": true
+   },
+   {
+    "name": "eSports 2014 Summer Case",
+    "primary": 18.27,
+    "witnessed": 16.28,
+    "devLog": -0.115,
     "ok": true
    }
   ]
  },
- "reasons": [
-  "1 published day(s) do not re-derive from the committed history files"
- ],
- "verdict": "MISMATCH"
+ "reasons": [],
+ "verdict": "ATTESTED"
 }
