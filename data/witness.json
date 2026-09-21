@@ -1,5 +1,5 @@
 {
- "t": 1789996869825,
+ "t": 1790028809876,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,45 +18,45 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Kilowatt Case",
-    "primary": 0.18,
-    "witnessed": 0.18,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Gallery Case",
-    "primary": 0.99,
-    "witnessed": 0.98,
+    "primary": 0.98,
+    "witnessed": 0.97,
     "devLog": -0.01,
     "ok": true
    },
    {
     "name": "AK-47 | Redline (Field-Tested)",
-    "primary": 35.64,
-    "witnessed": 38.09,
-    "devLog": 0.066,
+    "primary": 34.58,
+    "witnessed": 35.62,
+    "devLog": 0.03,
     "ok": true
    },
    {
     "name": "AWP | Asiimov (Field-Tested)",
-    "primary": 142.18,
-    "witnessed": 150.04,
-    "devLog": 0.054,
+    "primary": 148.01,
+    "witnessed": 148.01,
+    "devLog": 0,
     "ok": true
    },
    {
     "name": "M4A1-S | Printstream (Field-Tested)",
-    "primary": 237.26,
-    "witnessed": 222.14,
-    "devLog": -0.066,
+    "primary": 249.09,
+    "witnessed": 249.09,
+    "devLog": 0,
     "ok": true
    },
    {
     "name": "Desert Eagle | Printstream (Field-Tested)",
-    "primary": 45.85,
-    "witnessed": 42.32,
-    "devLog": -0.08,
+    "primary": 46.31,
+    "witnessed": 46.63,
+    "devLog": 0.007,
+    "ok": true
+   },
+   {
+    "name": "AK-47 | Asiimov (Field-Tested)",
+    "primary": 50.67,
+    "witnessed": 50.97,
+    "devLog": 0.006,
     "ok": true
    }
   ]
