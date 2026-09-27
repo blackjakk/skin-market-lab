@@ -1,11 +1,11 @@
 {
- "t": 1790458472510,
+ "t": 1790487956266,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
   "series": {
-   "publishedDays": 64,
-   "rederivedDays": 64,
+   "publishedDays": 65,
+   "rederivedDays": 65,
    "mismatchedDays": 0
   },
   "weightsMatch": true,
@@ -18,30 +18,23 @@
   "methodology": true,
   "observations": [
    {
-    "name": "eSports 2014 Summer Case",
-    "primary": 17.53,
-    "witnessed": 17.53,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Winter Offensive Weapon Case",
-    "primary": 13.5,
-    "witnessed": 13.5,
+    "primary": 13.54,
+    "witnessed": 13.54,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "Operation Phoenix Weapon Case",
-    "primary": 5.44,
-    "witnessed": 5.44,
+    "primary": 5.36,
+    "witnessed": 5.36,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "Huntsman Weapon Case",
-    "primary": 11.68,
-    "witnessed": 11.68,
+    "primary": 11.75,
+    "witnessed": 11.75,
     "devLog": 0,
     "ok": true
    },
@@ -54,8 +47,15 @@
    },
    {
     "name": "Operation Vanguard Weapon Case",
-    "primary": 6.5,
-    "witnessed": 6.5,
+    "primary": 7.01,
+    "witnessed": 7.01,
+    "devLog": 0,
+    "ok": true
+   },
+   {
+    "name": "Chroma Case",
+    "primary": 6.99,
+    "witnessed": 6.99,
     "devLog": 0,
     "ok": true
    }
