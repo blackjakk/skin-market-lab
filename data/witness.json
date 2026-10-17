@@ -1,5 +1,5 @@
 {
- "t": 1792213164103,
+ "t": 1792235431988,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,16 +18,9 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Fracture Case",
-    "primary": 0.55,
-    "witnessed": 0.55,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Operation Broken Fang Case",
-    "primary": 7.71,
-    "witnessed": 7.71,
+    "primary": 7.72,
+    "witnessed": 7.72,
     "devLog": 0,
     "ok": true
    },
@@ -40,22 +33,29 @@
    },
    {
     "name": "Operation Riptide Case",
-    "primary": 10.08,
-    "witnessed": 10.08,
+    "primary": 9.97,
+    "witnessed": 9.97,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "Dreams & Nightmares Case",
-    "primary": 1.33,
-    "witnessed": 1.33,
-    "devLog": 0,
+    "primary": 1.32,
+    "witnessed": 1.28,
+    "devLog": -0.031,
     "ok": true
    },
    {
     "name": "Recoil Case",
     "primary": 0.3,
     "witnessed": 0.3,
+    "devLog": 0,
+    "ok": true
+   },
+   {
+    "name": "Revolution Case",
+    "primary": 0.22,
+    "witnessed": 0.22,
     "devLog": 0,
     "ok": true
    }
