@@ -1,5 +1,5 @@
 {
- "t": 1792690666926,
+ "t": 1792706108532,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,37 +18,30 @@
   "methodology": true,
   "observations": [
    {
-    "name": "★ Bayonet | Tiger Tooth (Factory New)",
-    "primary": 359.23,
-    "witnessed": 359.23,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Operation Bravo Case",
-    "primary": 78.64,
-    "witnessed": 78.64,
+    "primary": 78.34,
+    "witnessed": 78.34,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "CS:GO Weapon Case",
-    "primary": 142.66,
-    "witnessed": 142.66,
+    "primary": 145.26,
+    "witnessed": 145.26,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "CS:GO Weapon Case 2",
-    "primary": 25.85,
-    "witnessed": 25.85,
+    "primary": 25.95,
+    "witnessed": 25.95,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "CS:GO Weapon Case 3",
-    "primary": 17.16,
-    "witnessed": 17.16,
+    "primary": 14.61,
+    "witnessed": 14.61,
     "devLog": 0,
     "ok": true
    },
@@ -56,6 +49,13 @@
     "name": "eSports 2013 Case",
     "primary": 58.99,
     "witnessed": 58.99,
+    "devLog": 0,
+    "ok": true
+   },
+   {
+    "name": "eSports 2013 Winter Case",
+    "primary": 14.69,
+    "witnessed": 14.69,
     "devLog": 0,
     "ok": true
    }
