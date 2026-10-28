@@ -1,11 +1,11 @@
 {
- "t": 1793140606469,
+ "t": 1793168241296,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
   "series": {
-   "publishedDays": 95,
-   "rederivedDays": 95,
+   "publishedDays": 96,
+   "rederivedDays": 96,
    "mismatchedDays": 0
   },
   "weightsMatch": true,
@@ -18,45 +18,45 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Gamma 2 Case",
-    "primary": 3.6,
-    "witnessed": 3.6,
-    "devLog": 0,
-    "ok": true
-   },
-   {
-    "name": "Glove Case",
-    "primary": 11.7,
-    "witnessed": 11.7,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Spectrum Case",
-    "primary": 4.88,
-    "witnessed": 4.88,
-    "devLog": 0,
+    "primary": 4.87,
+    "witnessed": 4.74,
+    "devLog": -0.027,
     "ok": true
    },
    {
     "name": "Spectrum 2 Case",
-    "primary": 3.88,
-    "witnessed": 3.88,
+    "primary": 3.95,
+    "witnessed": 3.95,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "Operation Hydra Case",
-    "primary": 31.46,
-    "witnessed": 31.46,
+    "primary": 30.83,
+    "witnessed": 30.83,
     "devLog": 0,
     "ok": true
    },
    {
     "name": "Clutch Case",
-    "primary": 0.55,
+    "primary": 0.54,
     "witnessed": 0.55,
-    "devLog": 0,
+    "devLog": 0.018,
+    "ok": true
+   },
+   {
+    "name": "Horizon Case",
+    "primary": 1.81,
+    "witnessed": 1.96,
+    "devLog": 0.08,
+    "ok": true
+   },
+   {
+    "name": "Danger Zone Case",
+    "primary": 1.31,
+    "witnessed": 1.32,
+    "devLog": 0.008,
     "ok": true
    }
   ]
