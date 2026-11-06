@@ -431,3 +431,5 @@
 {"t":1793900276733,"src":"steam","price":1240.92,"lowest":1851.27,"vol":2}
 {"t":1793922578542,"src":"steam","price":1476.01,"lowest":1715.23,"vol":2}
 {"t":1793948401881,"src":"steam","price":1715.25,"lowest":null,"vol":2}
+{"t":1793984299202,"src":"steam","price":1715.23,"lowest":null,"vol":5}
+{"t":1793984299786,"src":"skinport","price":6580.51,"vol":0,"sp30":6580.51}
