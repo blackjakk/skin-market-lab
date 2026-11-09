@@ -1,5 +1,5 @@
 {
- "t": 1794208286447,
+ "t": 1794264141414,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -18,45 +18,45 @@
   "methodology": true,
   "observations": [
    {
-    "name": "Falchion Case",
-    "primary": 1.9,
-    "witnessed": 1.9,
-    "devLog": 0,
-    "ok": true
-   },
-   {
-    "name": "Shadow Case",
-    "primary": 2.08,
-    "witnessed": 2.08,
-    "devLog": 0,
-    "ok": true
-   },
-   {
     "name": "Revolver Case",
-    "primary": 3.3,
-    "witnessed": 3.3,
-    "devLog": 0,
+    "primary": 3.28,
+    "witnessed": 3.29,
+    "devLog": 0.003,
     "ok": true
    },
    {
     "name": "Operation Wildfire Case",
-    "primary": 3.41,
-    "witnessed": 3.41,
-    "devLog": 0,
+    "primary": 3.25,
+    "witnessed": 3.26,
+    "devLog": 0.003,
     "ok": true
    },
    {
     "name": "Gamma Case",
-    "primary": 3.48,
-    "witnessed": 3.48,
-    "devLog": 0,
+    "primary": 3.63,
+    "witnessed": 3.65,
+    "devLog": 0.005,
     "ok": true
    },
    {
     "name": "Gamma 2 Case",
-    "primary": 3.82,
-    "witnessed": 3.82,
-    "devLog": 0,
+    "primary": 3.77,
+    "witnessed": 3.79,
+    "devLog": 0.005,
+    "ok": true
+   },
+   {
+    "name": "Glove Case",
+    "primary": 10.13,
+    "witnessed": 11.19,
+    "devLog": 0.1,
+    "ok": true
+   },
+   {
+    "name": "Spectrum Case",
+    "primary": 4.15,
+    "witnessed": 4.4,
+    "devLog": 0.058,
     "ok": true
    }
   ]
