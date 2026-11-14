@@ -1,12 +1,12 @@
 {
- "t": 1794680952424,
+ "t": 1794696291501,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
   "series": {
    "publishedDays": 113,
    "rederivedDays": 113,
-   "mismatchedDays": 0
+   "mismatchedDays": 1
   },
   "weightsMatch": true,
   "fixings": {
@@ -34,8 +34,8 @@
    {
     "name": "Anubis Collection Package",
     "primary": 2.3,
-    "witnessed": 2.3,
-    "devLog": 0,
+    "witnessed": 2.31,
+    "devLog": 0.004,
     "ok": true
    },
    {
@@ -48,19 +48,21 @@
    {
     "name": "Gallery Case",
     "primary": 0.69,
-    "witnessed": 0.69,
-    "devLog": 0,
+    "witnessed": 0.7,
+    "devLog": 0.014,
     "ok": true
    },
    {
     "name": "AK-47 | Redline (Field-Tested)",
     "primary": 30.69,
-    "witnessed": 30.69,
-    "devLog": 0,
-    "ok": true
+    "witnessed": 43.51,
+    "devLog": 0.349,
+    "ok": false
    }
   ]
  },
- "reasons": [],
- "verdict": "ATTESTED"
+ "reasons": [
+  "1 published day(s) do not re-derive from the committed history files"
+ ],
+ "verdict": "MISMATCH"
 }
