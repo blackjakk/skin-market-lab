@@ -1,5 +1,5 @@
 {
- "t": 1795854401998,
+ "t": 1795898060062,
  "primary": "https://blackjakk.github.io/skin-market-lab",
  "methodology": "SMLX-6",
  "checks": {
@@ -17,20 +17,6 @@
   },
   "methodology": true,
   "observations": [
-   {
-    "name": "Dreams & Nightmares Case",
-    "primary": 0.88,
-    "witnessed": 0.87,
-    "devLog": -0.011,
-    "ok": true
-   },
-   {
-    "name": "Recoil Case",
-    "primary": 0.22,
-    "witnessed": 0.22,
-    "devLog": 0,
-    "ok": true
-   },
    {
     "name": "Revolution Case",
     "primary": 0.13,
@@ -54,9 +40,23 @@
    },
    {
     "name": "Gallery Case",
-    "primary": 0.58,
-    "witnessed": 0.59,
-    "devLog": 0.017,
+    "primary": 0.59,
+    "witnessed": 0.61,
+    "devLog": 0.033,
+    "ok": true
+   },
+   {
+    "name": "AK-47 | Redline (Field-Tested)",
+    "primary": 26.49,
+    "witnessed": 29.2,
+    "devLog": 0.097,
+    "ok": true
+   },
+   {
+    "name": "AWP | Asiimov (Field-Tested)",
+    "primary": 99.18,
+    "witnessed": 106.84,
+    "devLog": 0.074,
     "ok": true
    }
   ]
